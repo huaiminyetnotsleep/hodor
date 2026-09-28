@@ -6,6 +6,8 @@
   "description": "Telegram Forum Topics 客服消息中继 Bot（Cloudflare Workers + D1）",
   "scripts": {
     "dev": "wrangler dev",
+    "postinstall": "node scripts/provision.mjs --best-effort",
+    "provision": "node scripts/provision.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

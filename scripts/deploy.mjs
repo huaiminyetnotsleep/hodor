@@ -1,64 +1,11 @@
 #!/usr/bin/env node
 /**
- * 零改动部署（Workers Builds 的部署命令保持默认 `npm run deploy` 即可）：
- *   1. 按名字复用账号下已有的 D1；不存在则创建；
- *   2. 把真实 database_id 写进【构建工作区】的 wrangler.jsonc——绝不回写仓库，
- *      仓库中的占位符 00000000-… 永久保留；
- *   3. 幂等执行迁移；4. 部署。
- * 若构建令牌无建库权限：在面板建好同名 D1 再重跑，脚本会按名字复用。
+ * 显式部署入口（npm run deploy）：置备（复用/创建 D1 + 注入 id + 幂等迁移）后执行 wrangler deploy。
+ * 与 postinstall 自动置备（scripts/provision.mjs --best-effort）共用同一套逻辑。
  */
-import { execSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { ensureDatabase, injectDatabaseId, runLive, runMigrations } from './provision.mjs';
 
-const DB_NAME = 'hodor';
-const PLACEHOLDER = '00000000-0000-0000-0000-000000000000';
-
-const runOut = (cmd) =>
-  execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim();
-const runLive = (cmd) => execSync(cmd, { stdio: 'inherit' });
-
-function findDatabase() {
-  try {
-    const list = JSON.parse(runOut('npx wrangler d1 list --json'));
-    return Array.isArray(list) ? list.find((d) => d.name === DB_NAME) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-let db;
-if (process.env.D1_DATABASE_ID?.trim()) {
-  // 逃生舱：在 Workers Builds 变量里设 D1_DATABASE_ID 可跳过探测/创建（构建令牌无建库权限时用）
-  db = { uuid: process.env.D1_DATABASE_ID.trim() };
-  console.log(`使用环境变量 D1_DATABASE_ID 指定的数据库 (${db.uuid})`);
-} else {
-  db = findDatabase();
-  if (!db) {
-    console.log(`D1 "${DB_NAME}" 不存在，创建中…`);
-    try {
-      runLive(`npx wrangler d1 create ${DB_NAME}`);
-    } catch {
-      throw new Error(
-        `创建 D1 "${DB_NAME}" 失败（构建令牌可能无建库权限）。` +
-          `请在面板 Storage & Databases 建好同名数据库后重试；` +
-          `或在 Workers Builds 变量中设置 D1_DATABASE_ID 为其 Database ID。`,
-      );
-    }
-    db = findDatabase();
-  }
-  if (!db?.uuid) throw new Error(`无法取得 D1 "${DB_NAME}" 的 database_id`);
-  console.log(`使用 D1: ${DB_NAME} (${db.uuid})`);
-}
-
-const configPath = 'wrangler.jsonc';
-const config = readFileSync(configPath, 'utf8');
-if (!config.includes(db.uuid)) {
-  if (!config.includes(PLACEHOLDER)) {
-    throw new Error(`${configPath} 中既无占位 database_id 也无当前 id，请检查仓库状态`);
-  }
-  writeFileSync(configPath, config.replace(PLACEHOLDER, db.uuid));
-  console.log(`已向构建工作区的 ${configPath} 注入 database_id（不回写仓库）`);
-}
-
-runLive(`npx wrangler d1 migrations apply ${DB_NAME} --remote`);
+const uuid = ensureDatabase();
+injectDatabaseId(uuid, { allowWrite: true });
+runMigrations();
 runLive('npx wrangler deploy');

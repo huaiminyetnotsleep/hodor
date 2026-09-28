@@ -62,13 +62,12 @@ make db-customers                                 # 只读巡检（另有 db-con
 2. Cloudflare 面板 → **Workers & Pages → Create → Workers → Import a repository** → 授权 Cloudflare GitHub App → 选中**你的 fork**，向导逐项配置：
    - 项目名称：`hodor`
    - 变量表单：向导按 `.dev.vars.example` 的**每个未注释条目**生成一个表单项——7 条逐项填真值，注释即填写说明
-   - 构建命令：**留空**（TypeScript 由 wrangler 打包，无构建步骤）
-   - 部署命令：**改为 `npm run deploy`**（⚠️ 向导默认是 `npx wrangler deploy`，不执行部署脚本）——脚本会自动：创建/复用同名 D1 → 把真实 database_id 注入构建工作区（**不改动你的仓库**）→ 执行幂等迁移 → 部署
+   - 构建命令：**留空**；部署命令：**保持向导默认 `npx wrangler deploy`，无需改动**——置备（创建/复用同名 D1 → 注入 database_id 到构建工作区，**不改动你的仓库** → 幂等迁移）由 `npm install` 的 postinstall 钩子自动完成，先于部署执行
    - 关闭「启用预览构建」（Phase 1 无 preview 分支部署需求）
 3. 部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"ok":true,"version":"0.1.0"}`（S9 起 `POST /admin/setup` 完成绑定与 setWebhook）
 4. 此后 **push 你的 fork 即自动构建部署**；上游更新 → fork 页点 **Sync fork** → 自动部署（docs/05）
 
-> 排错：报 `The database … could not be found (7404 / 10181)` = 部署命令还是向导默认的 `npx wrangler deploy`（直连占位 database_id、不跑脚本）——到 Worker 的 Settings → Build → Deploy command 改为 `npm run deploy` 再重建。
+> 排错：报 `The database … could not be found (7404 / 10181)` = 自动置备未生效——先查构建日志**安装阶段**的 `[provision]` 输出；兜底：把部署命令改为 `npm run deploy`（显式置备后部署）再重建。
 > 若构建令牌无建库权限：在面板建好同名 D1 再重跑，脚本会按名字复用，仍零仓库改动。
 >
 > 仓库所有者本人部署：无需 fork，Import a repository 直接选现有仓库，其余相同。
@@ -94,6 +93,18 @@ curl https://hodor.<你的子域>.workers.dev/health
 ```
 
 仅注入/更新变量时：`npx wrangler secret put <NAME>`（共 7 个，见 `.dev.vars.example`）。
+
+### 与业界做法的对照
+
+「零配置部署 + 数据库置备」在业界有三种成熟模式，本项目各取所长：
+
+| 模式 | 业界代表 | hodor 的对应 |
+|---|---|---|
+| **配置即资源**（IaC in repo）：平台按声明置备并回写 | Render `render.yaml`、CF 模板向导/按钮 | wrangler.jsonc 即声明式资源描述；路径二（按钮）由平台置备 D1 |
+| **置备/迁移是部署管线的独立阶段** | Heroku release phase、Render `preDeployCommand`、Fly `release_command` | `scripts/provision.mjs`：postinstall 自动执行（或 `npm run provision` 显式执行），先于 `wrangler deploy` |
+| **平台侧建库 + env 注入引用**（连接信息不进仓库） | Vercel Marketplace、Heroku Add-ons（`DATABASE_URL` 模式） | 7 个变量全部走表单/Secret；D1 是同平台 binding（需静态 database_id），不适用 env 引用，故用前两种模式 |
+
+业界同样没有的第四种——让用户手改配置文件里的资源 ID——正是本方案要消除的。
 
 ### 部署后的更新与回滚（三条路径通用）
 
