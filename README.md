@@ -52,33 +52,37 @@ make db-customers                                 # 只读巡检（另有 db-con
 
 ## 部署到 Cloudflare（自动部署 · Workers Builds）
 
-三条路径共用同一套声明式配置（`wrangler.jsonc` + `.dev.vars.example`），按场景选其一。
+三条路径共用同一套声明式配置（`wrangler.jsonc` + `.dev.vars.example`）。本项目面向自部署：**第三方使用者推荐「fork 后部署」**，每份部署独享自己的 D1 与变量。
 
-### 路径一（推荐 · 已有仓库）：面板导入
+### 路径一（推荐）：fork 后部署
 
-2026-09-28 已用本仓库实测走通：
+第三方使用者：
 
-1. Cloudflare 面板 → **Workers & Pages → Create → Workers → Import a repository**
-2. 授权 Cloudflare GitHub App，把 `huaiminyetnotsleep/hodor` 加入可访问范围并选中
+1. Fork `huaiminyetnotsleep/hodor` 到自己的 GitHub 账号
+2. Cloudflare 面板 → **Workers & Pages → Create → Workers → Import a repository** → 授权 Cloudflare GitHub App → 选中**你的 fork**
 3. 向导逐项配置：
    - 项目名称：`hodor`
-   - D1 数据库：**+ 新建**，命名 `hodor`（向导自动创建真实 D1 并把 database_id 写进部署配置，替代 wrangler.jsonc 占位符）
+   - D1 数据库：**+ 新建**，命名 `hodor`（向导自动创建并把 database_id 写进部署配置，替代 wrangler.jsonc 占位符）
    - 变量表单：向导按 `.dev.vars.example` 的**每个未注释条目**生成一个表单项——7 条逐项填真值，注释即填写说明
    - 构建命令：**留空**（TypeScript 由 wrangler 打包，无构建步骤）
    - 部署命令：`npx wrangler d1 migrations apply hodor --remote && npx wrangler deploy`
      （⚠️ 默认 `npm run deploy` 不执行迁移，必须改；迁移幂等，每次 push 重跑安全）
    - 关闭「启用预览构建」（Phase 1 无 preview 分支部署需求）
 4. 点部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"ok":true,"version":"0.1.0"}`（S9 起 `POST /admin/setup` 完成绑定与 setWebhook）
-5. 此后 **push main 即自动构建部署**，无需任何手工命令
+5. 此后 **push 你的 fork 即自动构建部署**；上游更新 → fork 页点 **Sync fork** → 自动部署（docs/05）
 
-### 路径二：Deploy 按钮（适合没有现成仓库的全新使用方）
+> 仓库所有者本人部署：无需 fork，Import a repository 直接选现有仓库（`huaiminyetnotsleep/hodor`），其余步骤相同。
+
+### 路径二：GitHub URL 一键部署（Deploy 按钮）
+
+适合没有任何现成仓库的全新使用方——点按钮，Cloudflare 会在你的 GitHub 账号下**自动创建仓库副本**（相当于自动 fork）并完成置备连接：
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/huaiminyetnotsleep/hodor)
 
 实测注意（2026-09-28）：
 
-- 该流程会**新建一个 GitHub 仓库副本**再连接，与已有同名仓库冲突（报「已存在具有该名称的存储库」）——已有仓库请走路径一
-- 报「无法获取存储库内容」多为瞬时失败：确认仓库为 Public、URL 为标准 HTTPS 地址（非 `git@…` SSH 形式），稍后重试或直接走路径一
+- 副本仓库名默认取项目名——你的账号下已有同名仓库会报「已存在具有该名称的存储库」（仓库所有者部署请走路径一直接导入现有仓库）
+- 报「无法获取存储库内容」多为瞬时失败：确认 URL 为标准 HTTPS 地址（非 `git@…` SSH 形式）、仓库 Public，稍后重试或改走路径一
 - 其余置备项（D1 / 7 变量 / 部署命令）与路径一相同；`.dev.vars.example` 一职两用（本地开发模板 + 表单清单）
 
 ### 路径三：手工 wrangler deploy（不依赖 GitHub，救急/本地验证用）
