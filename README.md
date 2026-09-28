@@ -50,28 +50,38 @@ make db-customers                                 # 只读巡检（另有 db-con
 
 当前实现进度（S1）：Worker 仅暴露 `GET /health`；webhook 路由 S3、管理命令 S6–S8、`/admin` 端点 S9 按任务树逐步挂载。任务树与各子任务验收标准见 `.trellis/tasks/`。
 
-## 一键部署（首次推荐，docs/05）
+## 部署到 Cloudflare（自动部署 · Workers Builds）
 
-仓库已就绪（`huaiminyetnotsleep/hodor`），直接点按钮开始：
+三条路径共用同一套声明式配置（`wrangler.jsonc` + `.dev.vars.example`），按场景选其一。
+
+### 路径一（推荐 · 已有仓库）：面板导入
+
+2026-09-28 已用本仓库实测走通：
+
+1. Cloudflare 面板 → **Workers & Pages → Create → Workers → Import a repository**
+2. 授权 Cloudflare GitHub App，把 `huaiminyetnotsleep/hodor` 加入可访问范围并选中
+3. 向导逐项配置：
+   - 项目名称：`hodor`
+   - D1 数据库：**+ 新建**，命名 `hodor`（向导自动创建真实 D1 并把 database_id 写进部署配置，替代 wrangler.jsonc 占位符）
+   - 变量表单：向导按 `.dev.vars.example` 的**每个未注释条目**生成一个表单项——7 条逐项填真值，注释即填写说明
+   - 构建命令：**留空**（TypeScript 由 wrangler 打包，无构建步骤）
+   - 部署命令：`npx wrangler d1 migrations apply hodor --remote && npx wrangler deploy`
+     （⚠️ 默认 `npm run deploy` 不执行迁移，必须改；迁移幂等，每次 push 重跑安全）
+   - 关闭「启用预览构建」（Phase 1 无 preview 分支部署需求）
+4. 点部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"ok":true,"version":"0.1.0"}`（S9 起 `POST /admin/setup` 完成绑定与 setWebhook）
+5. 此后 **push main 即自动构建部署**，无需任何手工命令
+
+### 路径二：Deploy 按钮（适合没有现成仓库的全新使用方）
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/huaiminyetnotsleep/hodor)
 
-点击后的置备链路：
+实测注意（2026-09-28）：
 
-```text
-fork 仓库 → 点按钮 → 选 Cloudflare 账号 → 自动创建 Worker + D1 并完成绑定
-        → 部署表单按 .dev.vars.example 逐项填入全部 7 个变量（每条注释即填写说明）
-        → 关联 Git（Workers Builds），把 Deploy command 配置为：
-          npx wrangler d1 migrations apply hodor --remote && npx wrangler deploy
-        → 打开 /health 验活 → （S9 起）POST /admin/setup 完成绑定与 setWebhook
-```
+- 该流程会**新建一个 GitHub 仓库副本**再连接，与已有同名仓库冲突（报「已存在具有该名称的存储库」）——已有仓库请走路径一
+- 报「无法获取存储库内容」多为瞬时失败：确认仓库为 Public、URL 为标准 HTTPS 地址（非 `git@…` SSH 形式），稍后重试或直接走路径一
+- 其余置备项（D1 / 7 变量 / 部署命令）与路径一相同；`.dev.vars.example` 一职两用（本地开发模板 + 表单清单）
 
-- **迁移缺口**：按钮只创建 D1 数据库、**不执行迁移**（官方已知缺口），所以 Deploy command 必须前置 `d1 migrations apply`；配置后每次 push 自动跑迁移（幂等）
-- `.dev.vars.example` 一职两用：本地开发模板 + 按钮表单清单。按钮会把其中**每个未注释条目都当作 Secret** 置备——本项目 7 个变量全部走环境注入（2026-09-28 决策），这正是期望行为
-- 首次部署后**不再点按钮**：源码更新走 push 自动部署（fork 者点 Sync fork）；回滚用 Dashboard 一键回退或 `npx wrangler rollback`（Worker 回滚不回滚 D1）
-- 手工路径（`wrangler deploy`）永远保留，见下节；两者共用同一套声明式配置
-
-## 部署流程（手工 wrangler 路径）
+### 路径三：手工 wrangler deploy（不依赖 GitHub，救急/本地验证用）
 
 ```bash
 # 一次性：登录 + 建库（database_id 回填 wrangler.jsonc）
@@ -86,13 +96,16 @@ for v in TELEGRAM_BOT_TOKEN TELEGRAM_WEBHOOK_SECRET ADMIN_SETUP_SECRET \
 done
 npx wrangler deploy
 
-# 验证（S1 阶段只有 /health 可验）
+# 验证
 curl https://hodor.<你的子域>.workers.dev/health   # 期望 {"ok":true,"version":"0.1.0"}
 ```
 
-- 回滚：Dashboard 一键回退或 `npx wrangler rollback`；**Worker 回滚不回滚 D1**，迁移始终 append-only（docs/08）
-- 发布更新：改代码 → `npx wrangler d1 migrations apply hodor --remote && npx wrangler deploy`
-- Bot 行为的人工验证从 S4 开始（首条真实消息建 Topic）；S1 阶段远端能验证的是部署链路与 `/health`
+### 部署后的更新与回滚（三条路径通用）
+
+- 源码更新走 push 自动部署（路径三则手工 deploy）；**不再点按钮 / 不再重复导入**
+- 回滚：Dashboard → Deployments 一键回退（秒级）或 `npx wrangler rollback`；**Worker 回滚不回滚 D1**，迁移始终 append-only（docs/08）
+- Webhook URL、Secrets、D1 资源跨更新原样保留（发布不重设 Webhook，docs/08）
+- Bot 行为的人工验证从 S4 开始（首条真实消息建 Topic）；S1 阶段远端验证的是部署链路与 `/health`
 
 ## 运维（docs/09 约定）
 
