@@ -26,14 +26,29 @@ function findDatabase() {
   }
 }
 
-let db = findDatabase();
-if (!db) {
-  console.log(`D1 "${DB_NAME}" 不存在，创建中…`);
-  runLive(`npx wrangler d1 create ${DB_NAME}`);
+let db;
+if (process.env.D1_DATABASE_ID?.trim()) {
+  // 逃生舱：在 Workers Builds 变量里设 D1_DATABASE_ID 可跳过探测/创建（构建令牌无建库权限时用）
+  db = { uuid: process.env.D1_DATABASE_ID.trim() };
+  console.log(`使用环境变量 D1_DATABASE_ID 指定的数据库 (${db.uuid})`);
+} else {
   db = findDatabase();
+  if (!db) {
+    console.log(`D1 "${DB_NAME}" 不存在，创建中…`);
+    try {
+      runLive(`npx wrangler d1 create ${DB_NAME}`);
+    } catch {
+      throw new Error(
+        `创建 D1 "${DB_NAME}" 失败（构建令牌可能无建库权限）。` +
+          `请在面板 Storage & Databases 建好同名数据库后重试；` +
+          `或在 Workers Builds 变量中设置 D1_DATABASE_ID 为其 Database ID。`,
+      );
+    }
+    db = findDatabase();
+  }
+  if (!db?.uuid) throw new Error(`无法取得 D1 "${DB_NAME}" 的 database_id`);
+  console.log(`使用 D1: ${DB_NAME} (${db.uuid})`);
 }
-if (!db?.uuid) throw new Error(`无法取得 D1 "${DB_NAME}" 的 database_id`);
-console.log(`使用 D1: ${DB_NAME} (${db.uuid})`);
 
 const configPath = 'wrangler.jsonc';
 const config = readFileSync(configPath, 'utf8');
