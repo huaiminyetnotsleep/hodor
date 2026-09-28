@@ -192,6 +192,15 @@ describe('错误分类（design.md 决策表）', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
+  it('HTTP 200 + 合法 JSON 但缺 ok 字段 → retryable（无法确认成功，保守可重试；S2 移交项）', async () => {
+    const { client, fetchImpl } = makeClient([{ status: 200, body: { result: { message_id: 7 } } }]);
+
+    const result = await client.copyMessage(copyMessageParams);
+
+    expect(result).toEqual({ ok: false, kind: 'retryable', errorMessage: 'unexpected response shape' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('其他 4xx（404）→ permanent（缺省保守：不可重试）', async () => {
     const { client, fetchImpl } = makeClient([
       { status: 404, body: { ok: false, error_code: 404, description: 'Not Found' } },

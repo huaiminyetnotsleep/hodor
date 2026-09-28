@@ -114,3 +114,36 @@ export interface SetWebhookParams {
 export interface DeleteWebhookParams {
   dropPendingUpdates?: boolean;
 }
+
+// ── Webhook Update 结构（docs/03「Update 结构速查」，S3 起消费）──────────────
+// 与上面的 Bot API 结果结构同属 Telegram 线上格式：只声明本仓库消费的字段，
+// 其余字段不解析（判空原则——内容字段全部可选，不得假定存在）。
+
+/** Bot API Chat（webhook 消息内；来源分类只消费 id/type，docs/03） */
+export interface TelegramChat {
+  id: number;
+  type: 'private' | 'group' | 'supergroup' | 'channel';
+}
+
+/** Bot API Message（webhook message 内容；Phase 1 实际读取字段的清单见 docs/03） */
+export interface TelegramMessage {
+  message_id: number;
+  /** 匿名群身份等场景可能缺失（判空，docs/03） */
+  from?: TelegramUser;
+  chat: TelegramChat;
+  date: number;
+  /** Topic ID；缺失或 1（General）语义见 docs/02/03 */
+  message_thread_id?: number;
+  text?: string;
+  caption?: string;
+}
+
+/**
+ * Webhook 顶层信封：update_id 必有（幂等键 telegram_update_id 取自此值）；
+ * 其余内容字段互斥且可选，一条 Update 只出现其一——非 `message` 的内容字段
+ * 一律不解析、按忽略策略处理（docs/03），故此处不逐一声明。
+ */
+export interface TelegramUpdate {
+  update_id: number;
+  message?: TelegramMessage;
+}
