@@ -52,9 +52,9 @@ make db-customers                                 # 只读巡检（另有 db-con
 
 ## 一键部署（首次推荐，docs/05）
 
-先把本仓库推到 GitHub，并把下述链接中的 `<org>` 替换为实际仓库路径，然后点按钮：
+仓库已就绪（`huaiminyetnotsleep/hodor`），直接点按钮开始：
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/&lt;org&gt;/hodor)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/huaiminyetnotsleep/hodor)
 
 点击后的置备链路：
 
