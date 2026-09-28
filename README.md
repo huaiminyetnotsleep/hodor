@@ -111,16 +111,39 @@ curl https://hodor.<你的子域>.workers.dev/health
 
 业界同样没有的第四种——让用户手改配置文件里的资源 ID——正是本方案要消除的。
 
-### 部署成功的验证（三条路径通用）
+## 验证指南（按子任务编号）
 
-1. **Worker 存活**：`curl https://hodor.<你的子域>.workers.dev/health` → 期望 `{"ok":true,"version":"0.1.0"}`
-   - workers.dev 地址：面板 → Workers & Pages → `hodor` → 右上角「访问」，或 Settings → Domains & Routes；首次部署后 DNS 需等几十秒
-2. **数据库连通**（二选一）：
-   - 本机已 `npx wrangler login`：`make db-customers REMOTE=1` → 返回 `success: true` 即迁移已在远端生效
-   - 面板：Storage & Databases → `hodor` → Tables 里能看到 8 张表
-3. **自动部署闭环**：任意 push 一个提交 → Workers Builds 自动构建部署，全程无手工命令
+> 每个 S\* 任务的交付验证。自动化验证（`npm test` / typecheck / lint）随构建跑；带 ★ 的人工回归**按序执行、待人工完成**，结果记入对应任务工件。操作细节（seed SQL、setWebhook、排错表）见 [scripts/dev/bootstrap.md](scripts/dev/bootstrap.md)。
 
-阶段验证边界：S1 只验证 /health + 数据库连通；S3 起 webhook 生效（错误 Secret 返回 401）；**S4 起真机回归（首条消息落 Topic 等 5 步清单）见 [scripts/dev/bootstrap.md](scripts/dev/bootstrap.md)**。
+### V1 · S1 部署冒烟（✅ 2026-09-28 已通过）
+
+1. `curl https://hodor.<你的子域>.workers.dev/health` → `{"ok":true,"version":"0.1.0"}`（workers.dev 地址：面板 → Workers & Pages → `hodor`）
+2. 数据库连通（二选一）：`make db-customers REMOTE=1` 返回 `success:true`；或面板 D1 `hodor` 看到 8 张表
+3. 自动部署闭环：任意 push → Workers Builds 自动构建部署
+
+### V2 · S2 Telegram 客户端（✅ 自动化已覆盖）
+
+1. `npm test` 全绿——`telegram-client` 21 例：错误分类矩阵、429 原地重试两路径、参数拼装、缓存命中/过期
+
+### V3 · S3 Webhook 与幂等（✅ 自动化已覆盖）
+
+1. `npm test` 全绿——`webhook-auth` 7 例（缺失/错误 Secret → 401 且零副作用、key 不匹配 → 404）、`inbox-machine` 15 例（docs/10 幂等七条）、`classify` 14 例（忽略矩阵）
+2. 手工抽查（可选）：错误 Secret curl → 401；重放同 `update_id` → 200 跳过
+
+### V4 · S4 入站中继 0→1（★ 人工回归，**待执行**）
+
+前提与详细命令：[scripts/dev/bootstrap.md](scripts/dev/bootstrap.md)「快径」（D1 Console seed → setWebhook → /health）。
+
+1. ★ 前置：面板 7 变量已配 + seed bots 行 + setWebhook 成功（getWebhookInfo 无 last_error）
+2. ★ 用户 A 首条文本 → 自动建 Topic（标题 `👤 昵称 完整ID · #序号`）+ 消息入 Topic + A 收到 WELCOME
+3. ★ A 发图片 → 同 Topic 收到 + `db-messages` 可见 media_file_id
+4. ★ 用户 B 发消息 → B 自己的 Topic，与 A 不串线
+5. ★ A 改昵称再发 → 标题刷新
+6. ★ 重放已登记 `update_id` → 200，不重复建题/发 WELCOME
+
+### V5+ · S5 起随任务交付追加本节
+
+出站中继（管理员回复送达/403 提示/恢复提示）、管理命令、管理端点、S10 终验（docs/10 全部 21 条）。
 
 ### 部署后的更新与回滚（三条路径通用）
 
