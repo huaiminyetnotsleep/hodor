@@ -101,6 +101,17 @@ export async function setBotBlockedByUser(db: D1Database, customerId: number, bl
     .run();
 }
 
+/**
+ * blocked 标志写入（S6 /ban /unban，docs/04「状态唯一来源」）：封禁语义的唯一写入点——
+ * conversations.status 不承载封禁（CHECK 已约束），入站/出站拒绝路径只读本标志。
+ */
+export async function setBlocked(db: D1Database, customerId: number, blocked: boolean): Promise<void> {
+  await db
+    .prepare('UPDATE customers SET blocked = ?, updated_at = ? WHERE id = ?')
+    .bind(blocked ? 1 : 0, nowIso(), customerId)
+    .run();
+}
+
 // ── deleted_users 墓碑（docs/04 /deluser 语义；S4 消费 find/delete，S6 消费 create）──
 
 export interface DeletedUserTombstone {

@@ -23,6 +23,7 @@ import type {
   CopyMessageParams,
   CreateForumTopicParams,
   DeleteForumTopicParams,
+  DeleteMessageParams,
   DeleteWebhookParams,
   EditForumTopicParams,
   GetChatMemberParams,
@@ -52,6 +53,7 @@ export interface TelegramClient {
   closeForumTopic(params: CloseForumTopicParams): Promise<TelegramResult<true>>;
   reopenForumTopic(params: ReopenForumTopicParams): Promise<TelegramResult<true>>;
   deleteForumTopic(params: DeleteForumTopicParams): Promise<TelegramResult<true>>;
+  deleteMessage(params: DeleteMessageParams): Promise<TelegramResult<true>>;
   setMyCommands(params: SetMyCommandsParams): Promise<TelegramResult<true>>;
   getChatMember(params: GetChatMemberParams): Promise<TelegramResult<TelegramChatMember>>;
   getMe(): Promise<TelegramResult<TelegramUser>>;
@@ -242,6 +244,12 @@ export function createTelegramClient(options: { botToken: string; fetchImpl?: ty
       request<true>('deleteForumTopic', {
         chat_id: params.chatId,
         message_thread_id: params.messageThreadId,
+      }),
+
+    deleteMessage: (params) =>
+      request<true>('deleteMessage', {
+        chat_id: params.chatId,
+        message_id: params.messageId,
       }),
 
     setMyCommands: (params) => request<true>('setMyCommands', { commands: params.commands }),

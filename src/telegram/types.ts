@@ -120,6 +120,12 @@ export interface DeleteForumTopicParams {
   messageThreadId: number;
 }
 
+/** deleteMessage：命令消息删除（docs/04 步骤 7；Bot 需 Delete Messages 权限，docs/02） */
+export interface DeleteMessageParams {
+  chatId: number | string;
+  messageId: number;
+}
+
 export interface SetMyCommandsParams {
   commands: readonly TelegramBotCommand[];
 }

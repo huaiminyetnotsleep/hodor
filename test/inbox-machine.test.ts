@@ -252,7 +252,7 @@ describe('幂等状态机（docs/10 七条，docs/03 状态图）', () => {
     expect(executed).toEqual([6001]);
   });
 
-  it('⑦ 群 Topic /命令 → command 路径：命令处理器执行（本任务占位）→ 200 processed', async () => {
+  it('⑦ 群 Topic /命令 → command 路径：命令处理器执行（注入桩验证槽位接线）→ 200 processed', async () => {
     const commandExecuted: number[] = [];
     setUpdateHandler('command', async (ctx) => {
       commandExecuted.push(ctx.update.update_id);

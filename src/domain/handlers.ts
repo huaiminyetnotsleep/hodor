@@ -8,7 +8,7 @@
  *   「拒绝服务/永久错误不是故障」的分支（blocked、400 毒丸）由处理器自行标记
  *   processed 后正常返回，不得抛错（docs/03 错误分类）。
  *
- * 本任务（S5）起 inbound/outbound 槽位挂载真实中继；S6 注入 command。
+ * S4/S5/S6 起 inbound/outbound/command 槽位均挂载真实实现。
  */
 import type { TelegramClient, TelegramUpdate } from '../telegram';
 import type { Env } from '../types';
@@ -16,6 +16,7 @@ import type { Bot } from '../store';
 import type { UpdateSource } from './classify';
 import { handleInbound } from '../pipeline/inbound/handler';
 import { handleOutbound } from '../pipeline/outbound/handler';
+import { handleCommand } from '../pipeline/commands/handler';
 
 export interface UpdateContext {
   env: Env;
@@ -35,8 +36,9 @@ const registry: Record<DispatchableSource, UpdateHandler> = {
   inbound: handleInbound,
   // S5：出站中继（Topic 回复 → 用户私聊 + 403 处理，docs/03；同样经子路径引入）
   outbound: handleOutbound,
-  // 占位：S6 注入管理命令分发（/ban /unban /risk /unrisk /purge /deluser，docs/04）
-  command: async () => {},
+  // S6：管理命令（/ban /unban；白名单前置 → parse → dispatch → 删命令消息，docs/04；
+  // 命令先于中继、绝不进 copyMessage——classify 分流保证）
+  command: handleCommand,
 };
 
 export function getUpdateHandler(source: DispatchableSource): UpdateHandler {
@@ -44,7 +46,7 @@ export function getUpdateHandler(source: DispatchableSource): UpdateHandler {
 }
 
 /**
- * 处理器注入点：测试打桩替换（docs/10），以及 S6 命令注册表接入时替换 command。
+ * 处理器注入点：测试打桩替换（docs/10）。
  * 仅应在本模块与测试中使用，业务代码不得在请求路径上调用。
  */
 export function setUpdateHandler(source: DispatchableSource, handler: UpdateHandler): void {

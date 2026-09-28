@@ -18,7 +18,7 @@ const GENERAL_TOPIC_THREAD_ID = 1;
  * 3. 私聊（chat.type === 'private'）→ inbound（任意类型消息均中继，docs/03 入站链路）
  * 4. 群内 message_thread_id === 1（General Topic）→ ignore
  * 5. 群消息无 text 且无 caption（服务消息：入群/置顶/Topic 创建等）→ ignore
- * 6. 群 Topic 文本以 `/` 开头 → command（命令注册表 S6 前为空 → no-op 不中继；S6 注入实现）
+ * 6. 群 Topic 文本以 `/` 开头 → command（S6 起命令注册表含 /ban /unban，docs/04；命令绝不进 copyMessage）
  * 7. 其余群 Topic 消息 → outbound（S5 出站中继：support_chat_id / thread 反查 / 白名单 /
  *    Bot 管理员身份属业务级校验，由 outbound 处理器执行，分类层不看 chat.id 与 thread）
  *

@@ -90,7 +90,7 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
   const telegram = createTelegramClient({ botToken: env.TELEGRAM_BOT_TOKEN });
   const ctx: UpdateContext = { env, db: env.DB, telegram, bot, update };
 
-  // ①② 幂等登记 → ③ 来源分类 → 状态机推进（处理器占位 no-op，S4/S6 替换）
+  // ①② 幂等登记 → ③ 来源分类 → 状态机推进（inbound/outbound/command 槽位均挂真实实现）
   const registration = await registerUpdate(env.DB, bot.id, update);
   const source = classifyUpdate(update, bot.telegram_bot_id);
   const handler = source === 'ignore' ? null : getUpdateHandler(source);

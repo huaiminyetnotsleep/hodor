@@ -388,18 +388,22 @@ describe('handleOutbound 出站链路（design.md 测试设计）', () => {
     expect(await messagesOfConversation(conversationId)).toHaveLength(1);
   });
 
-  it('⑨ 命令文本不中继：/ 前缀 → command，注册表 S6 前为空 no-op（零外呼零落库）', async () => {
+  it('⑨ 命令文本不中继：/ 前缀 → command 分流，绝不进 copyMessage 零落库（docs/03；S6 起命令真实执行）', async () => {
     const conversationId = await seedValidTopic(9905, 815);
     const update = topicTextUpdate(3041, 3041, ADMIN_ID, '/ban 5', 815);
     expect(classifyUpdate(update, BOT.telegram_bot_id)).toBe('command');
     expect(getUpdateHandler('command')).not.toBe(handleOutbound);
 
-    const { telegram, calls } = makeTelegram(outboundOkStubs(9011));
+    const { telegram, calls } = makeTelegram({
+      ...outboundOkStubs(9011),
+      editForumTopic: () => true, // S6 /ban 的标题重渲染（不关心细节，admin-commands 套件专测）
+      deleteMessage: () => true, // S6 命令消息删除
+    });
     const commandHandler = getUpdateHandler('command');
     await expect(commandHandler(ctxFor(update, telegram))).resolves.toBeUndefined();
 
-    expect(calls).toHaveLength(0); // 命令绝不进入 copyMessage（docs/03）
-    expect(await messagesOfConversation(conversationId)).toHaveLength(0);
+    expect(callsOf(calls, 'copyMessage')).toHaveLength(0); // 命令绝不进入 copyMessage（docs/03）
+    expect(await messagesOfConversation(conversationId)).toHaveLength(0); // 命令不落 messages
   });
 
   it('⑩ 429（retry_after > 3s）→ retryable 抛出 → 状态机 5xx pending（Telegram 重投）', async () => {

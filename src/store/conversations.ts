@@ -54,12 +54,17 @@ export async function findOpenByCustomer(
  * 出站反查行（S5，docs/02「反向映射：管理员回复路由」）：open 会话 + 客户投递所需字段一次取回。
  * 投递目标 telegram_user_id 以 D1 事实源为准（不得用消息上下文推断用户）；
  * bot_blocked_by_user 随行取回，供 403 处理判定 0→1 跳变（一次性提示，docs/03）。
+ * S6 扩展 display_name / watchlisted：命令管线标题重渲染所需（docs/02 标题 = 档案 + 标志纯派生）。
  */
 export interface OpenConversationWithCustomer extends OpenConversation {
   /** JOIN customers.telegram_user_id —— copyMessage 的 to 坐标唯一事实源 */
   customer_telegram_user_id: number;
   /** JOIN customers.bot_blocked_by_user —— 403 置位是否为首次（0→1 才提示） */
   customer_bot_blocked_by_user: number;
+  /** JOIN customers.display_name —— 标题渲染（可空，调用方回退 telegram_user_id，docs/03 判空） */
+  customer_display_name: string | null;
+  /** JOIN customers.watchlisted —— 标题图标第二优先级（docs/02） */
+  customer_watchlisted: number;
 }
 
 /** 按 (bot_id, support_chat_id, message_thread_id) 反查 open 会话（含客户信息）；查无返回 undefined */
@@ -74,7 +79,9 @@ export async function findOpenWithCustomerByThread(
       `SELECT c.id, c.bot_id, c.customer_id, c.support_chat_id, c.message_thread_id, c.status,
               c.canonical_title, c.last_message_at, c.created_at, c.updated_at,
               cu.telegram_user_id AS customer_telegram_user_id,
-              cu.bot_blocked_by_user AS customer_bot_blocked_by_user
+              cu.bot_blocked_by_user AS customer_bot_blocked_by_user,
+              cu.display_name AS customer_display_name,
+              cu.watchlisted AS customer_watchlisted
        FROM conversations c
        JOIN customers cu ON cu.id = c.customer_id
        WHERE c.bot_id = ? AND c.support_chat_id = ? AND c.message_thread_id = ? AND c.status = 'open'
@@ -82,6 +89,41 @@ export async function findOpenWithCustomerByThread(
     )
     .bind(botId, supportChatId, messageThreadId)
     .first<OpenConversationWithCustomer>();
+  return row ?? undefined;
+}
+
+/**
+ * 命令管线目标反查行（S6 /unban，docs/04「/unban 步骤 4」需命中曾 close 的 Topic）：
+ * open 或 closed 会话 + 标题渲染所需客户字段；creating 行 thread 为 NULL 不会命中，
+ * archived 无对应流程不参与（docs/02：如未来提供归档能力，另行决策）。
+ */
+export interface CommandTargetWithCustomer extends Conversation {
+  customer_telegram_user_id: number;
+  customer_display_name: string | null;
+  customer_watchlisted: number;
+}
+
+/** 按 thread 反查 open|closed 会话（含客户信息）；查无返回 undefined（命令静默，docs/04） */
+export async function findCommandTargetByThread(
+  db: D1Database,
+  botId: number,
+  supportChatId: number,
+  messageThreadId: number,
+): Promise<CommandTargetWithCustomer | undefined> {
+  const row = await db
+    .prepare(
+      `SELECT c.id, c.bot_id, c.customer_id, c.support_chat_id, c.message_thread_id, c.status,
+              c.canonical_title, c.last_message_at, c.created_at, c.updated_at,
+              cu.telegram_user_id AS customer_telegram_user_id,
+              cu.display_name AS customer_display_name,
+              cu.watchlisted AS customer_watchlisted
+       FROM conversations c
+       JOIN customers cu ON cu.id = c.customer_id
+       WHERE c.bot_id = ? AND c.support_chat_id = ? AND c.message_thread_id = ? AND c.status IN ('open', 'closed')
+       ORDER BY c.id DESC LIMIT 1`,
+    )
+    .bind(botId, supportChatId, messageThreadId)
+    .first<CommandTargetWithCustomer>();
   return row ?? undefined;
 }
 
@@ -146,4 +188,13 @@ export async function updateTitle(db: D1Database, conversationId: number, canoni
     .prepare('UPDATE conversations SET canonical_title = ?, updated_at = ? WHERE id = ?')
     .bind(canonicalTitle, nowIso(), conversationId)
     .run();
+}
+
+/**
+ * 会话重开（S6 /unban，docs/04「/unban 步骤 4」）：reopenForumTopic 成功后置回 'open'。
+ * 仅在 Telegram 侧重开成功后调用——D1 状态不得领先于 Topic 实际状态（否则出站中继
+ * 会向 closed Topic 投递）。永久失败时会话保持 closed，由调用方留日志对账。
+ */
+export async function reopenConversation(db: D1Database, conversationId: number): Promise<void> {
+  await db.prepare("UPDATE conversations SET status = 'open', updated_at = ? WHERE id = ?").bind(nowIso(), conversationId).run();
 }
