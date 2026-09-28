@@ -106,6 +106,17 @@ curl https://hodor.<你的子域>.workers.dev/health
 
 业界同样没有的第四种——让用户手改配置文件里的资源 ID——正是本方案要消除的。
 
+### 部署成功的验证（三条路径通用）
+
+1. **Worker 存活**：`curl https://hodor.<你的子域>.workers.dev/health` → 期望 `{"ok":true,"version":"0.1.0"}`
+   - workers.dev 地址：面板 → Workers & Pages → `hodor` → 右上角「访问」，或 Settings → Domains & Routes；首次部署后 DNS 需等几十秒
+2. **数据库连通**（二选一）：
+   - 本机已 `npx wrangler login`：`make db-customers REMOTE=1` → 返回 `success: true` 即迁移已在远端生效
+   - 面板：Storage & Databases → `hodor` → Tables 里能看到 8 张表
+3. **自动部署闭环**：任意 push 一个提交 → Workers Builds 自动构建部署，全程无手工命令
+
+阶段验证边界：S1 只验证 /health + 数据库连通；S3 起 webhook 生效（错误 Secret 返回 401）；S4 起做首条真实消息落 Topic 的人工回归（docs/10 场景 1–2）。
+
 ### 部署后的更新与回滚（三条路径通用）
 
 - 源码更新走 push 自动部署（路径三则手工 deploy）；**不再点按钮 / 不再重复导入**

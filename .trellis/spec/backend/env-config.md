@@ -88,3 +88,16 @@ SUPPORT_CHAT_ID=-1000000000000
 
 **Why**: one config point per environment; no values in committed files; `Cloudflare.Env` stays
 the single typed contract (`env.d.ts` merge adds what the generator cannot know).
+
+### Convention: D1 database_id stays a placeholder in the repo
+
+**What**: `wrangler.jsonc` keeps `database_id: "00000000-0000-0000-0000-000000000000"` permanently.
+Real ids are resolved at deploy time by `scripts/provision.mjs` (auto-run via the `postinstall`
+hook in Workers Builds): reuse/create the D1 named `hodor`, inject the uuid into the build
+workspace copy only, run migrations, then deploy. `D1_DATABASE_ID` env var is the escape hatch
+when the build token cannot create/list databases.
+
+**Why**: fork-based deployments must never carry the owner's database id; hand-editing resource
+ids in config is not an industry pattern (see README "与业界做法的对照").
+
+**Related**: `npm run provision` (strict), `npm run deploy` (provision + deploy).
