@@ -1,0 +1,27 @@
+{
+  "name": "hodor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Telegram Forum Topics 客服消息中继 Bot（Cloudflare Workers + D1）",
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260928.1",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.3",
+    "eslint": "^10.11.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.142.0"
+  }
+}
