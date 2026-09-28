@@ -120,7 +120,7 @@ curl https://hodor.<你的子域>.workers.dev/health
    - 面板：Storage & Databases → `hodor` → Tables 里能看到 8 张表
 3. **自动部署闭环**：任意 push 一个提交 → Workers Builds 自动构建部署，全程无手工命令
 
-阶段验证边界：S1 只验证 /health + 数据库连通；S3 起 webhook 生效（错误 Secret 返回 401）；S4 起做首条真实消息落 Topic 的人工回归（docs/10 场景 1–2）。
+阶段验证边界：S1 只验证 /health + 数据库连通；S3 起 webhook 生效（错误 Secret 返回 401）；**S4 起真机回归（首条消息落 Topic 等 5 步清单）见 [scripts/dev/bootstrap.md](scripts/dev/bootstrap.md)**。
 
 ### 部署后的更新与回滚（三条路径通用）
 
