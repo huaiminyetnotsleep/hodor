@@ -4,7 +4,7 @@
  */
 import type { TelegramUpdate } from '../telegram';
 
-export type UpdateSource = 'inbound' | 'command' | 'ignore';
+export type UpdateSource = 'inbound' | 'outbound' | 'command' | 'ignore';
 
 /** General Topic 的固定 thread id（docs/02：公告区，不绑用户） */
 const GENERAL_TOPIC_THREAD_ID = 1;
@@ -18,8 +18,9 @@ const GENERAL_TOPIC_THREAD_ID = 1;
  * 3. 私聊（chat.type === 'private'）→ inbound（任意类型消息均中继，docs/03 入站链路）
  * 4. 群内 message_thread_id === 1（General Topic）→ ignore
  * 5. 群消息无 text 且无 caption（服务消息：入群/置顶/Topic 创建等）→ ignore
- * 6. 群 Topic 文本以 `/` 开头 → command（命令注册表本任务为空 → no-op 占位；S6 注入实现）
- * 7. 其余群 Topic 消息 → ignore（S5 出站占位同 ignore 处理；媒体 caption 不构成命令）
+ * 6. 群 Topic 文本以 `/` 开头 → command（命令注册表 S6 前为空 → no-op 不中继；S6 注入实现）
+ * 7. 其余群 Topic 消息 → outbound（S5 出站中继：support_chat_id / thread 反查 / 白名单 /
+ *    Bot 管理员身份属业务级校验，由 outbound 处理器执行，分类层不看 chat.id 与 thread）
  *
  * 业务级忽略（墓碑、未知 thread、非白名单）本层不可判定，在 S4/S5（docs/03）。
  */
@@ -49,5 +50,5 @@ export function classifyUpdate(update: TelegramUpdate, botTelegramId?: number): 
     return 'command'; // 群 Topic 命令文本（caption 不算命令）
   }
 
-  return 'ignore'; // 其余群 Topic 消息：S5 出站占位
+  return 'outbound'; // 其余群 Topic 消息：出站中继（S5，业务级校验在处理器）
 }

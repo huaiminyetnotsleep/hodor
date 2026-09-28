@@ -8,8 +8,9 @@
 
 **What**: `src/telegram/types.ts` defines `TelegramResult<T> = TelegramOk<T> | TelegramError`,
 where `TelegramError.kind` is `'retryable' | 'permanent'` (optional `retryAfterSeconds`,
-`errorMessage`). HTTP/JSON details are classified **inside** `src/telegram/client.ts` (`request()`);
-pipeline modules (S3+) never see status codes — they branch on `kind` only.
+`errorMessage`; `permanent` also carries `errorCode?: number`). HTTP/JSON details are classified
+**inside** `src/telegram/client.ts` (`request()`); pipeline modules (S3+) never see status codes —
+they branch on `kind` only.
 
 **Why**: keeps docs/03's rule that S5 branches 403 into `bot_blocked_by_user` without string
 sniffing HTTP layers; one classification point, testable in isolation.
@@ -19,13 +20,13 @@ sniffing HTTP layers; one classification point, testable in isolation.
 | Telegram response | Kind | Extra semantics |
 |---|---|---|
 | 200 + `ok:true` | Ok | passthrough result |
-| 200 + `ok:false` | permanent | errorMessage = description |
+| 200 + `ok:false` | permanent | errorMessage = description; `errorCode` = envelope `error_code` when present |
 | 429, `retry_after ≤ 3s` | **in-place retry exactly once** (setTimeout) | still 429 → retryable with new value; never retry twice |
 | 429, `retry_after > 3s` / missing | retryable | upstream re-throw → inbox 5xx → Telegram redelivery |
-| 403 | permanent | caller (S5) drives `bot_blocked_by_user` |
-| 400 | permanent (poison pill) | never retried |
+| 403 | permanent | `errorCode === 403` drives `bot_blocked_by_user` (S5) — branch on the code, never string sniffing |
+| 400 | permanent (poison pill) | never retried; `errorCode` passthrough |
 | 5xx / network error / non-JSON | retryable | |
-| other 4xx | permanent | conservative default |
+| other 4xx | permanent | conservative default; `errorCode` passthrough |
 
 ### Consumer rules (S3+)
 
@@ -41,5 +42,8 @@ sniffing HTTP layers; one classification point, testable in isolation.
 
 ## Known follow-ups (recorded in task PRDs)
 
-- S5 decision: whether `permanent` gains `errorCode?: number` (replace future string sniffing for 403).
-- S3: add the missing case "200 + valid JSON without `ok` field → retryable".
+- ~~S5 decision: whether `permanent` gains `errorCode?: number`~~ — Resolved in S5 (2026-09-28):
+  `permanent` carries `errorCode?: number` (envelope `error_code` passthrough; also on the
+  200 + `ok:false` path). Consumers branch on the numeric code, never on `errorMessage` text.
+- ~~S3: add the missing case "200 + valid JSON without `ok` field → retryable"~~ — Done
+  (test/telegram-client.test.ts).

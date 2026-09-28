@@ -8,13 +8,14 @@
  *   「拒绝服务/永久错误不是故障」的分支（blocked、400 毒丸）由处理器自行标记
  *   processed 后正常返回，不得抛错（docs/03 错误分类）。
  *
- * 本任务（S4）起 inbound 槽位挂载真实入站中继；S6 注入 command。
+ * 本任务（S5）起 inbound/outbound 槽位挂载真实中继；S6 注入 command。
  */
 import type { TelegramClient, TelegramUpdate } from '../telegram';
 import type { Env } from '../types';
 import type { Bot } from '../store';
 import type { UpdateSource } from './classify';
 import { handleInbound } from '../pipeline/inbound/handler';
+import { handleOutbound } from '../pipeline/outbound/handler';
 
 export interface UpdateContext {
   env: Env;
@@ -26,12 +27,14 @@ export interface UpdateContext {
 
 export type UpdateHandler = (ctx: UpdateContext) => Promise<void>;
 
-/** classify 的 'ignore' 不进任何业务管线（router 直接标记 processed），故注册表只有两个键 */
+/** classify 的 'ignore' 不进任何业务管线（router 直接标记 processed），故注册表只有三个键 */
 type DispatchableSource = Exclude<UpdateSource, 'ignore'>;
 
 const registry: Record<DispatchableSource, UpdateHandler> = {
   // S4：入站中继（用户私聊 → Topic，docs/02/03；handleInbound 经子路径引入，无运行时环）
   inbound: handleInbound,
+  // S5：出站中继（Topic 回复 → 用户私聊 + 403 处理，docs/03；同样经子路径引入）
+  outbound: handleOutbound,
   // 占位：S6 注入管理命令分发（/ban /unban /risk /unrisk /purge /deluser，docs/04）
   command: async () => {},
 };

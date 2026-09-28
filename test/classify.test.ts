@@ -101,20 +101,20 @@ describe('来源分类 · 忽略矩阵（design.md 判定矩阵，docs/03）', (
     );
   });
 
-  it('群 Topic 普通文本 → ignore（S5 出站占位同 ignore 处理，design.md）', () => {
+  it('群 Topic 普通文本 → outbound（S5 出站中继，原 ignore 占位改判，design.md）', () => {
     const update = updateOf({
       message: msg({ from: { id: ADMIN_ID, is_bot: false, first_name: 'Admin' }, text: 'please help' }),
     });
-    expect(classifyUpdate(update, BOT_TELEGRAM_ID)).toBe('ignore');
+    expect(classifyUpdate(update, BOT_TELEGRAM_ID)).toBe('outbound');
   });
 
-  it('群 Topic 媒体（caption）→ ignore；caption 以 / 开头也不构成命令（命令只认 text）', () => {
+  it('群 Topic 媒体（caption）→ outbound；caption 以 / 开头也不构成命令（命令只认 text）', () => {
     expect(classifyUpdate(updateOf({ message: msg({ text: undefined, caption: 'photo' }) }), BOT_TELEGRAM_ID)).toBe(
-      'ignore',
+      'outbound',
     );
     expect(
       classifyUpdate(updateOf({ message: msg({ text: undefined, caption: '/not-a-command' }) }), BOT_TELEGRAM_ID),
-    ).toBe('ignore');
+    ).toBe('outbound');
   });
 
   it('普通群（chat.type = group）同矩阵：/ 前缀 → command、无内容 → ignore', () => {
@@ -127,12 +127,42 @@ describe('来源分类 · 忽略矩阵（design.md 判定矩阵，docs/03）', (
     );
   });
 
-  it('无 message_thread_id 的群消息按矩阵余项处理（thread 校验属 S5/S6 业务层）', () => {
+  it('无 message_thread_id 的群消息：普通文本 → outbound（thread 反查在出站处理器）、/ 前缀 → command', () => {
     expect(
       classifyUpdate(updateOf({ message: msg({ message_thread_id: undefined, text: 'hi' }) }), BOT_TELEGRAM_ID),
-    ).toBe('ignore');
+    ).toBe('outbound');
     expect(
       classifyUpdate(updateOf({ message: msg({ message_thread_id: undefined, text: '/cmd' }) }), BOT_TELEGRAM_ID),
     ).toBe('command');
+  });
+});
+
+describe('来源分类 · 出站分类（S5 改判，design.md）', () => {
+  it('群 Topic 普通文本 → outbound：分类层不看 chat.id（support_chat_id 校验属出站处理器）', () => {
+    const otherGroup = updateOf({ message: msg({ chat: { id: -100123, type: 'supergroup' }, text: 'any group' }) });
+    expect(classifyUpdate(otherGroup, BOT_TELEGRAM_ID)).toBe('outbound');
+  });
+
+  it('from 缺失（匿名身份）的群 Topic 文本 → outbound（白名单校验属出站处理器，分类不依赖 from）', () => {
+    expect(classifyUpdate(updateOf({ message: msg({ from: undefined, text: 'anon reply' }) }), BOT_TELEGRAM_ID)).toBe(
+      'outbound',
+    );
+  });
+
+  it('第三方 Bot（is_bot=true 但非本 Bot）→ outbound（只排除 Bot 自身，docs/03）', () => {
+    const thirdPartyBot = updateOf({
+      message: msg({ from: { id: 777, is_bot: true, first_name: 'OtherBot' }, text: 'bot reply' }),
+    });
+    expect(classifyUpdate(thirdPartyBot, BOT_TELEGRAM_ID)).toBe('outbound');
+  });
+
+  it('无 text 且无 caption 的媒体（sticker）→ ignore：服务消息规则先于出站判定（docs/03 规则 5）', () => {
+    const sticker = updateOf({
+      message: msg({
+        text: undefined,
+        sticker: { file_id: 'sticker-1' },
+      }),
+    });
+    expect(classifyUpdate(sticker, BOT_TELEGRAM_ID)).toBe('ignore');
   });
 });

@@ -11,7 +11,9 @@ export type TelegramOk<T> = { ok: true; result: T };
 
 export type TelegramError =
   | { ok: false; kind: 'retryable'; retryAfterSeconds?: number; errorMessage?: string } // 5xx/网络/非 JSON；429 超预算
-  | { ok: false; kind: 'permanent'; errorMessage?: string }; // 400 毒丸 / 403 拉黑 / 其他 4xx
+  // errorCode = Telegram envelope 的 error_code 透传（S5 契约决策）：403 拉黑分支按状态码判定，
+  // 不做字符串嗅探（cross-layer 指南反模式）；信封缺失/非法时缺省
+  | { ok: false; kind: 'permanent'; errorCode?: number; errorMessage?: string }; // 400 毒丸 / 403 拉黑 / 其他 4xx
 
 export type TelegramResult<T> = TelegramOk<T> | TelegramError;
 

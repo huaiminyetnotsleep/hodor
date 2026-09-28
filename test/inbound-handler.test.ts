@@ -4,14 +4,14 @@ import { allowUnknownUsers, handleInbound } from '../src/pipeline/inbound';
 import { TITLE_MAX_LENGTH, renderDisplayName, renderTitle } from '../src/domain';
 import type { UpdateContext } from '../src/domain';
 import { processUpdate, registerUpdate, resolveMaxAttempts } from '../src/inbox';
-import { createTelegramClient } from '../src/telegram';
 import type { TelegramClient, TelegramUpdate } from '../src/telegram';
 import type { Bot } from '../src/store';
+import { callsOf, makeTelegram, type MethodStub } from './telegram-stub';
 
 // design.md 测试设计 12 用例（①–⑫）+ 2 条补充（⑬ 毒丸 processed、⑭ A/B 不串线）。
 // 真 D1（cloudflare-pool + 本文件隔离存储）+ 桩 telegram client：
-// createTelegramClient({ botToken, fetchImpl: 桩 })——桩按 method + 入参返回编排结果并记录调用，
-// 未编排的 method 直接抛错（等价于「不得发生」断言）。入站链路状态机语义另见 inbox-machine.test.ts。
+// createTelegramClient({ botToken, fetchImpl: 桩 })——桩见 ./telegram-stub.ts（与出站套件共用）。
+// 入站链路状态机语义另见 inbox-machine.test.ts。
 
 const db = env.DB;
 const BOT_ID = 1;
@@ -30,47 +30,7 @@ const BOT: Bot = {
   updated_at: '2026-01-01T00:00:00Z',
 };
 
-// ── telegram 桩（docs/10：fetch 层打桩，不发起真实网络）───────────────────────
-
-/** 桩返回值：普通结果（包成 200 + ok:true）或 { status, body } 原始响应规格（模拟 4xx/5xx） */
-type StubResult = unknown | { status: number; body: unknown };
-type MethodStub = (payload: Record<string, unknown>) => StubResult;
-
-interface TelegramCall {
-  method: string;
-  payload: Record<string, unknown>;
-}
-
-function isRawResponse(value: StubResult): value is { status: number; body: unknown } {
-  return typeof value === 'object' && value !== null && 'status' in value && 'body' in value;
-}
-
-function makeTelegram(handlers: Record<string, MethodStub>): { telegram: TelegramClient; calls: TelegramCall[] } {
-  const calls: TelegramCall[] = [];
-  const fetchImpl: typeof fetch = async (input, init) => {
-    const method = /\/bot[^/]+\/([A-Za-z]+)/.exec(String(input))?.[1] ?? '';
-    const payload = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as Record<string, unknown>;
-    calls.push({ method, payload });
-    const respond = handlers[method];
-    if (respond === undefined) {
-      throw new Error(`telegram stub: unexpected method ${method}`); // 等价「不得发生」断言
-    }
-    const out = respond(payload);
-    if (isRawResponse(out)) {
-      return new Response(JSON.stringify(out.body), {
-        status: out.status,
-        headers: { 'content-type': 'application/json' },
-      });
-    }
-    return new Response(JSON.stringify({ ok: true, result: out }), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    });
-  };
-  return { telegram: createTelegramClient({ botToken: 'test-token', fetchImpl }), calls };
-}
-
-const callsOf = (calls: TelegramCall[], method: string): TelegramCall[] => calls.filter((c) => c.method === method);
+// ── telegram 桩（docs/10：fetch 层打桩；makeTelegram/callsOf 共用于 ./telegram-stub.ts）──
 
 /** 全链路编排桩：thread/message id 由调用方固定，便于与落库行断言 */
 const fullChainStubs = (threadId: number, copiedId: number): Record<string, MethodStub> => ({

@@ -25,3 +25,9 @@ export const CRASH_MARKER_TEMPLATE =
 export function renderCrashMarker(customerId: number, timestampIso: string): string {
   return CRASH_MARKER_TEMPLATE.replaceAll('{customer_no}', `#${customerId}`).replaceAll('{timestamp}', timestampIso);
 }
+
+/** 403 一次性提示（docs/03「用户拉黑 Bot 的 403 处理」）：bot_blocked_by_user 0→1 跳变时发进 Topic */
+export const BOT_BLOCKED_NOTICE = '⚠️ 用户已停止与 Bot 的对话，回复暂时无法送达';
+
+/** 恢复提示（docs/03）：用户回归、入站链路复位 bot_blocked_by_user 时发进 Topic（S5 联调） */
+export const BOT_UNBLOCKED_NOTICE = '✅ 用户已恢复对话';

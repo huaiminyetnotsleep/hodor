@@ -9,10 +9,11 @@
  * 分类决策表（design.md，与 docs/03 一致）：
  *   200 + ok:true            → Ok（透传 result）
  *   200 + ok:false           → permanent（Telegram 业务错，errorMessage = description）
+ *   permanent 分支统一透传 envelope 的 error_code 为 errorCode（S5 按 403 判拉黑，不做字符串嗅探）
  *   429, retry_after ≤ 3s    → 等待后原地重试一次；成功→Ok，仍 429→retryable(带 retryAfterSeconds)
  *   429, retry_after > 3s    → retryable(带 retryAfterSeconds)，上抛由重投闭环
  *   429, retry_after 缺失    → 按 >3s 处理（不原地等）
- *   403                      → permanent（调用方据此走 bot_blocked_by_user）
+ *   403                      → permanent（errorCode=403，调用方据此走 bot_blocked_by_user）
  *   400                      → permanent（毒丸，不重试；errorMessage 保留供 last_error）
  *   5xx / 网络异常 / 非 JSON → retryable
  *   其他 4xx                 → permanent（缺省保守：不可重试）
@@ -30,6 +31,7 @@ import type {
   SetMyCommandsParams,
   SetWebhookParams,
   TelegramChatMember,
+  TelegramError,
   TelegramForumTopic,
   TelegramMessageId,
   TelegramResult,
@@ -64,6 +66,7 @@ interface ApiEnvelope {
   result?: unknown;
   description?: unknown;
   parameters?: unknown;
+  error_code?: unknown;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -74,6 +77,23 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 function readDescription(envelope: ApiEnvelope | undefined): string | undefined {
   const description = envelope?.description;
   return typeof description === 'string' && description.length > 0 ? description : undefined;
+}
+
+/** permanent 分支的 error_code 透传（S5 契约决策）；缺失或非法 → undefined（字段不出现在结果里） */
+function readErrorCode(envelope: ApiEnvelope | undefined): number | undefined {
+  const errorCode = envelope?.error_code;
+  return typeof errorCode === 'number' && Number.isFinite(errorCode) ? errorCode : undefined;
+}
+
+/** permanent 错误构造单点：description + error_code 透传（errorCode 缺省时不出现在对象里） */
+function permanentError(envelope: ApiEnvelope | undefined, fallbackMessage: string): TelegramError {
+  const errorCode = readErrorCode(envelope);
+  return {
+    ok: false,
+    kind: 'permanent',
+    ...(errorCode !== undefined && { errorCode }),
+    errorMessage: readDescription(envelope) ?? fallbackMessage,
+  };
 }
 
 /** 429 的 parameters.retry_after；缺失或非法 → undefined（调用方按 >3s 处理，design.md） */
@@ -132,8 +152,8 @@ export function createTelegramClient(options: { botToken: string; fetchImpl?: ty
         return { ok: true, result: envelope.result as T };
       }
       if (envelope.ok === false) {
-        // Telegram 业务错（chat not found 等）→ permanent，errorMessage = description
-        return { ok: false, kind: 'permanent', errorMessage: readDescription(envelope) };
+        // Telegram 业务错（chat not found 等）→ permanent（200 信封的 error_code 同样透传）
+        return permanentError(envelope, 'unknown Telegram error');
       }
       // ok 字段缺失/非法：无法确认成功，保守按可重试
       return { ok: false, kind: 'retryable', errorMessage: 'unexpected response shape' };
@@ -149,7 +169,7 @@ export function createTelegramClient(options: { botToken: string; fetchImpl?: ty
     }
 
     // 400（毒丸）/ 403（用户拉黑）/ 其他 4xx → permanent（缺省保守不可重试）
-    return { ok: false, kind: 'permanent', errorMessage: readDescription(envelope) ?? `HTTP ${status}` };
+    return permanentError(envelope, `HTTP ${status}`);
   }
 
   /** 请求入口：429 原地重试策略唯一落点（retry_after ≤ 3s 等待后重试一次，只一次） */

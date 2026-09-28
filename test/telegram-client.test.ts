@@ -81,14 +81,19 @@ describe('错误分类（design.md 决策表）', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it('HTTP 200 且 ok:false（Telegram 业务错）→ permanent，errorMessage = description', async () => {
+  it('HTTP 200 且 ok:false（Telegram 业务错）→ permanent，errorMessage = description，errorCode = error_code', async () => {
     const { client, fetchImpl } = makeClient([
       { status: 200, body: { ok: false, error_code: 400, description: 'Bad Request: chat not found' } },
     ]);
 
     const result = await client.copyMessage(copyMessageParams);
 
-    expect(result).toEqual({ ok: false, kind: 'permanent', errorMessage: 'Bad Request: chat not found' });
+    expect(result).toEqual({
+      ok: false,
+      kind: 'permanent',
+      errorCode: 400,
+      errorMessage: 'Bad Request: chat not found',
+    });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
@@ -150,7 +155,12 @@ describe('错误分类（design.md 决策表）', () => {
 
     const result = await client.copyMessage(copyMessageParams);
 
-    expect(result).toEqual({ ok: false, kind: 'permanent', errorMessage: 'Forbidden: bot was blocked by the user' });
+    expect(result).toEqual({
+      ok: false,
+      kind: 'permanent',
+      errorCode: 403,
+      errorMessage: 'Forbidden: bot was blocked by the user',
+    });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
@@ -161,7 +171,12 @@ describe('错误分类（design.md 决策表）', () => {
 
     const result = await client.copyMessage(copyMessageParams);
 
-    expect(result).toEqual({ ok: false, kind: 'permanent', errorMessage: 'Bad Request: message to copy not found' });
+    expect(result).toEqual({
+      ok: false,
+      kind: 'permanent',
+      errorCode: 400,
+      errorMessage: 'Bad Request: message to copy not found',
+    });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
@@ -201,15 +216,49 @@ describe('错误分类（design.md 决策表）', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it('其他 4xx（404）→ permanent（缺省保守：不可重试）', async () => {
+  it('其他 4xx（404）→ permanent（缺省保守：不可重试），errorCode = error_code', async () => {
     const { client, fetchImpl } = makeClient([
       { status: 404, body: { ok: false, error_code: 404, description: 'Not Found' } },
     ]);
 
     const result = await client.copyMessage(copyMessageParams);
 
-    expect(result).toEqual({ ok: false, kind: 'permanent', errorMessage: 'Not Found' });
+    expect(result).toEqual({ ok: false, kind: 'permanent', errorCode: 404, errorMessage: 'Not Found' });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('errorCode 透传（S5 契约）：403 → permanent + errorCode 403（按状态码判拉黑，不做字符串嗅探）', async () => {
+    const { client } = makeClient([
+      { status: 403, body: { ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' } },
+    ]);
+
+    const result = await client.sendMessage({ chatId: USER_CHAT, text: 'reply' });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok && result.kind === 'permanent') {
+      expect(result.errorCode).toBe(403);
+    }
+  });
+
+  it('errorCode 透传（S5 契约）：400 → permanent + errorCode 400；信封缺 error_code 时字段缺省', async () => {
+    const { client } = makeClient([
+      { status: 400, body: { ok: false, error_code: 400, description: 'Bad Request: message to copy not found' } },
+    ]);
+    const withCode = await client.copyMessage(copyMessageParams);
+    expect(withCode.ok).toBe(false);
+    if (!withCode.ok && withCode.kind === 'permanent') {
+      expect(withCode.errorCode).toBe(400);
+    }
+
+    const { client: clientWithoutCode } = makeClient([
+      { status: 400, body: { ok: false, description: 'Bad Request: message to copy not found' } },
+    ]);
+    const withoutCode = await clientWithoutCode.copyMessage(copyMessageParams);
+    expect(withoutCode).toEqual({
+      ok: false,
+      kind: 'permanent',
+      errorMessage: 'Bad Request: message to copy not found',
+    });
   });
 });
 

@@ -68,9 +68,10 @@ export interface RecordMessageInput {
   /** 复制源坐标（入站 = 用户私聊；出站 = 群 Topic） */
   sourceChatId: number;
   sourceMessageId: number;
-  /** 复制目标坐标（copyMessage 返回的新 message_id） */
+  /** 复制目标坐标（入站 = 支持群；出站 = 客户 telegram_user_id，docs/06） */
   targetChatId: number;
-  targetMessageId: number;
+  /** copyMessage 返回的新 message_id；出站 403 未送达时缺省 → 落 NULL（S5，docs/03 拉黑处理） */
+  targetMessageId?: number;
   /** 冗余 Topic ID（docs/06） */
   messageThreadId: number;
   /** 内容提取源：content_type / text_content / media_file_id 按上面三个纯函数推断 */
@@ -89,7 +90,7 @@ export async function recordMessage(db: D1Database, input: RecordMessageInput): 
       input.sourceChatId,
       input.sourceMessageId,
       input.targetChatId,
-      input.targetMessageId,
+      input.targetMessageId ?? null,
       input.messageThreadId,
       inferContentType(input.message),
       extractTextContent(input.message),

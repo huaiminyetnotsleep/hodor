@@ -6,17 +6,18 @@
  *   → ALLOW_UNKNOWN_USERS 门禁（docs/09：仅显式 "false" 关闭；拒绝 = 审计 + 静默 processed）
  *   → 查/建户 → blocked 静默 processed → bot_blocked_by_user 复位
  *   → 改名检测/档案刷新 → 会话 + Topic 创建编排（creating 残留 = 崩溃窗口预案）
+ *   → 恢复提示（bot_blocked_by_user 复位时，「✅ 用户已恢复对话」发进 Topic，S5 联调）
  *   → copyMessage → messages 落库 → WELCOME（仅本次新建客户）
  *
  * 失败语义（docs/03 错误分类 + design.md 语义 9）：
  * - 主链路（查/建户、建题、copy、落库）失败 → 抛出 → inbox 5xx → Telegram 重投（至少一次）；
  *   createForumTopic 连 permanent 也抛出——creating 残留由重试路径处置（design.md 语义 4）；
  * - copyMessage permanent（400 毒丸等）→ 记 last_error + 标记 processed，不抛（重试无意义）；
- * - 副调用（WELCOME / 崩溃标记 / 审计 / 改名 editForumTopic）一律 best-effort：
+ * - 副调用（WELCOME / 恢复提示 / 崩溃标记 / 审计 / 改名 editForumTopic）一律 best-effort：
  *   失败只留日志不抛出——否则整体重投会重复 copyMessage（docs/03 已知接受限制），
  *   用一条消息的送达换幂等，取舍得当（见 S4 design.md「失败语义」与本文件头注）。
  */
-import { renderCrashMarker, renderWelcome } from '../../domain/copy';
+import { BOT_UNBLOCKED_NOTICE, renderCrashMarker, renderWelcome } from '../../domain/copy';
 import { renderDisplayName, renderTitle } from '../../domain/title';
 import { markProcessed } from '../../inbox';
 import {
@@ -101,8 +102,9 @@ export const handleInbound: UpdateHandler = async (ctx) => {
     return;
   }
 
-  // ── ⑥ 用户回归：bot_blocked_by_user 复位（恢复提示文案 S5 联调）─────────────
-  if (customer.bot_blocked_by_user === 1) {
+  // ── ⑥ 用户回归：bot_blocked_by_user 复位（S5：复位后 Topic 发恢复提示，见下方）──
+  const recoveredFromBlock = customer.bot_blocked_by_user === 1;
+  if (recoveredFromBlock) {
     await setBotBlockedByUser(db, customer.id, false);
   }
 
@@ -177,6 +179,20 @@ export const handleInbound: UpdateHandler = async (ctx) => {
         }),
       );
     }
+  }
+
+  // ── 恢复提示（S5 联调，docs/03「403 处理」：置回 false 后在 Topic 发「✅ 用户已恢复对话」）──
+  // 置于 thread 解析后：新客/复位场景 thread 都已确定；重投时标志已复位 → recoveredFromBlock
+  // 为 false，提示天然只发一次（docs/03 一次性语义）。
+  if (recoveredFromBlock) {
+    await bestEffort('recovery notice', async () => {
+      const notice = await telegram.sendMessage({
+        chatId: bot.support_chat_id,
+        messageThreadId: threadId,
+        text: BOT_UNBLOCKED_NOTICE,
+      });
+      if (!notice.ok) throw new Error(notice.errorMessage ?? 'sendMessage failed');
+    });
   }
 
   // ── ⑨ copyMessage：from = 用户私聊 → to = (支持群, Topic)（docs/03 步骤 9，docs/02）─

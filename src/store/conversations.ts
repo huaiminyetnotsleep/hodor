@@ -51,6 +51,41 @@ export async function findOpenByCustomer(
 }
 
 /**
+ * 出站反查行（S5，docs/02「反向映射：管理员回复路由」）：open 会话 + 客户投递所需字段一次取回。
+ * 投递目标 telegram_user_id 以 D1 事实源为准（不得用消息上下文推断用户）；
+ * bot_blocked_by_user 随行取回，供 403 处理判定 0→1 跳变（一次性提示，docs/03）。
+ */
+export interface OpenConversationWithCustomer extends OpenConversation {
+  /** JOIN customers.telegram_user_id —— copyMessage 的 to 坐标唯一事实源 */
+  customer_telegram_user_id: number;
+  /** JOIN customers.bot_blocked_by_user —— 403 置位是否为首次（0→1 才提示） */
+  customer_bot_blocked_by_user: number;
+}
+
+/** 按 (bot_id, support_chat_id, message_thread_id) 反查 open 会话（含客户信息）；查无返回 undefined */
+export async function findOpenWithCustomerByThread(
+  db: D1Database,
+  botId: number,
+  supportChatId: number,
+  messageThreadId: number,
+): Promise<OpenConversationWithCustomer | undefined> {
+  const row = await db
+    .prepare(
+      `SELECT c.id, c.bot_id, c.customer_id, c.support_chat_id, c.message_thread_id, c.status,
+              c.canonical_title, c.last_message_at, c.created_at, c.updated_at,
+              cu.telegram_user_id AS customer_telegram_user_id,
+              cu.bot_blocked_by_user AS customer_bot_blocked_by_user
+       FROM conversations c
+       JOIN customers cu ON cu.id = c.customer_id
+       WHERE c.bot_id = ? AND c.support_chat_id = ? AND c.message_thread_id = ? AND c.status = 'open'
+       ORDER BY c.id DESC LIMIT 1`,
+    )
+    .bind(botId, supportChatId, messageThreadId)
+    .first<OpenConversationWithCustomer>();
+  return row ?? undefined;
+}
+
+/**
  * creating 残留检测（docs/02 崩溃窗口预案入口）：上次 createForumTopic 成功但写回前崩溃时，
  * 该行停留在 status='creating' 且 thread 为 NULL；重试路径据此发标记消息 + 审计。
  */
