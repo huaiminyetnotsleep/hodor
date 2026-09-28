@@ -54,24 +54,28 @@ make db-customers                                 # 只读巡检（另有 db-con
 
 三条路径共用同一套声明式配置（`wrangler.jsonc` + `.dev.vars.example`）。本项目面向自部署：**第三方使用者推荐「fork 后部署」**，每份部署独享自己的 D1 与变量。
 
-### 路径一（推荐）：fork 后部署
+### 路径一（推荐）：fork 后部署（全程浏览器操作，无需本地 CLI）
 
 第三方使用者：
 
 1. Fork `huaiminyetnotsleep/hodor` 到自己的 GitHub 账号
-2. Cloudflare 面板 → **Workers & Pages → Create → Workers → Import a repository** → 授权 Cloudflare GitHub App → 选中**你的 fork**
-3. 向导逐项配置：
+2. **建 D1 并回填 ID**（一次性，也是唯一需要改仓库的地方）：
+   - Cloudflare 面板 → **Storage & Databases → D1 SQL Database → Create**，名字 `hodor`，位置 Automatic
+   - 复制详情页的 **Database ID**
+   - 回 GitHub fork 仓库网页 → 打开 `wrangler.jsonc` → 点铅笔编辑 → 把 `"database_id": "00000000-0000-0000-0000-000000000000"` 替换为真实 ID → **Commit changes**
+3. Cloudflare 面板 → **Workers & Pages → Create → Workers → Import a repository** → 授权 Cloudflare GitHub App → 选中**你的 fork**，向导逐项配置：
    - 项目名称：`hodor`
-   - D1 数据库：**+ 新建**，命名 `hodor`（向导自动创建并把 database_id 写进部署配置，替代 wrangler.jsonc 占位符）
    - 变量表单：向导按 `.dev.vars.example` 的**每个未注释条目**生成一个表单项——7 条逐项填真值，注释即填写说明
    - 构建命令：**留空**（TypeScript 由 wrangler 打包，无构建步骤）
    - 部署命令：`npx wrangler d1 migrations apply hodor --remote && npx wrangler deploy`
      （⚠️ 默认 `npm run deploy` 不执行迁移，必须改；迁移幂等，每次 push 重跑安全）
    - 关闭「启用预览构建」（Phase 1 无 preview 分支部署需求）
-4. 点部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"ok":true,"version":"0.1.0"}`（S9 起 `POST /admin/setup` 完成绑定与 setWebhook）
+4. 部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"ok":true,"version":"0.1.0"}`（S9 起 `POST /admin/setup` 完成绑定与 setWebhook）
 5. 此后 **push 你的 fork 即自动构建部署**；上游更新 → fork 页点 **Sync fork** → 自动部署（docs/05）
 
-> 仓库所有者本人部署：无需 fork，Import a repository 直接选现有仓库（`huaiminyetnotsleep/hodor`），其余步骤相同。
+> 排错：构建报 `The database 00000000-… could not be found (7404)` = `database_id` 还是占位符，完成第 2 步后提交一次即可（任意新提交都会触发重建）。
+>
+> 仓库所有者本人部署：无需 fork，Import a repository 直接选现有仓库，其余相同。
 
 ### 路径二：GitHub URL 一键部署（Deploy 按钮）
 
