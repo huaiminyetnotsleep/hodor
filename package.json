@@ -10,7 +10,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "deploy": "wrangler deploy",
+    "deploy": "node scripts/deploy.mjs",
     "cf-typegen": "wrangler types"
   },
   "devDependencies": {
