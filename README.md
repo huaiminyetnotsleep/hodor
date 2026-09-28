@@ -178,6 +178,14 @@ curl https://hodor.<你的子域>.workers.dev/health
 5. ★ 该用户再发消息无响应；发 `/start` → 新序号恢复对话，高危标记按墓碑继承
 6. 自动化：`admin-danger` 10 例（审计先行顺序断言/墓碑先行/幂等/白名单）
 
+### V9 · S9 管理端点与绑定（★ 人工回归，**待执行**；完成后 S4 手工 seed 可退役）
+
+1. ★ `curl -X POST https://hodor.<子域>.workers.dev/admin/setup -H "Authorization: Bearer <ADMIN_SETUP_SECRET>" -H 'content-type: application/json' -d '{}'` → 成功响应（空体回退 env）；此后 getWebhookInfo 与 `/admin/webhook/status` 一致
+2. ★ 绑定后用户消息照常入站（链路不回归；手工 bootstrap 的 seed 行被 upsert 接管）
+3. ★ `/admin/admins` 增删管理员 → 生效且审计可查（db 或审计查询）
+4. ★ （可选）`/admin/webhook/unbind` → 重绑恢复；错误 Bearer → 401；1 分钟内 >10 次 → 429
+5. 自动化：`admin-endpoints` 11 例（setup 全链路/幂等/回退/限速/审计无敏感值）
+
 ### V5+ · S5 起随任务交付追加本节
 
 出站中继（管理员回复送达/403 提示/恢复提示）、管理命令、管理端点、S10 终验（docs/10 全部 21 条）。
