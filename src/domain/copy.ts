@@ -31,3 +31,13 @@ export const BOT_BLOCKED_NOTICE = '⚠️ 用户已停止与 Bot 的对话，回
 
 /** 恢复提示（docs/03）：用户回归、入站链路复位 bot_blocked_by_user 时发进 Topic（S5 联调） */
 export const BOT_UNBLOCKED_NOTICE = '✅ 用户已恢复对话';
+
+/**
+ * 高危入站提示（S7，docs/03 文案模板 / docs/04「24h 限频」）：watchlisted 用户入站
+ * 中继后发进 Topic——告知管理员该账号处于重点关注名单、其消息仍正常中继处理；
+ * 24h 限频由入站链路控制，此处只管文案。
+ */
+export const WATCH_NOTICE = '⚠️ 该用户在高危名单，消息仍正常中继处理，请多加注意';
+
+/** /risk 置位提示（S7，docs/04 /risk 步骤 3：置位时向本 Topic 发一次性提示） */
+export const RISK_SET_NOTICE = '⚠️ 已将该用户列入高危名单：其消息仍正常中继处理，请持续关注';

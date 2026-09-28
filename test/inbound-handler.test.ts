@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { applyD1Migrations, env } from 'cloudflare:test';
 import { allowUnknownUsers, handleInbound } from '../src/pipeline/inbound';
 import { TITLE_MAX_LENGTH, renderDisplayName, renderTitle } from '../src/domain';
+import { WATCH_NOTICE, renderWelcome } from '../src/domain/copy';
 import type { UpdateContext } from '../src/domain';
 import { processUpdate, registerUpdate, resolveMaxAttempts } from '../src/inbox';
 import type { TelegramClient, TelegramUpdate } from '../src/telegram';
@@ -300,7 +301,12 @@ describe('handleInbound 全链路（design.md 测试设计 ①–⑫）', () => 
     const convs = await conversationsOfCustomer(customer!.id);
     expect(convs).toHaveLength(1);
     expect(convs[0]?.canonical_title).toBe(`⚠️ Nick 8804 · #${customer!.id}`);
-    expect(callsOf(calls, 'sendMessage')).toHaveLength(1); // 复活按全新用户发 WELCOME
+    // 两条 sendMessage：WELCOME（复活按全新用户，发用户私聊）+ WATCH_NOTICE（继承高危 →
+    // last_watch_notice_at 为 NULL 首次入站即提示，docs/03 步骤 11，S7）
+    const sendCalls = callsOf(calls, 'sendMessage');
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[0]?.payload).toMatchObject({ chat_id: 8804, text: renderWelcome(customer!.id) });
+    expect(sendCalls[1]?.payload).toMatchObject({ chat_id: SUPPORT_CHAT_ID, message_thread_id: 504, text: WATCH_NOTICE });
   });
 
   it('⑤ blocked → 静默（拒绝服务不是故障，零外呼零建题）', async () => {

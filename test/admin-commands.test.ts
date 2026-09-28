@@ -213,11 +213,13 @@ describe('parseCommand 纯函数', () => {
     expect(parseCommand('')).toBeNull();
   });
 
-  it('注册表：S6 只注册 ban / unban', () => {
+  it('注册表：S6 ban / unban + S7 risk / unrisk（S8 尚未注册）', () => {
     expect(getCommandHandler('ban')).toBeDefined();
     expect(getCommandHandler('unban')).toBeDefined();
-    expect(getCommandHandler('risk')).toBeUndefined(); // S7
+    expect(getCommandHandler('risk')).toBeDefined(); // S7
+    expect(getCommandHandler('unrisk')).toBeDefined(); // S7
     expect(getCommandHandler('purge')).toBeUndefined(); // S8
+    expect(getCommandHandler('deluser')).toBeUndefined(); // S8
   });
 });
 
@@ -356,6 +358,46 @@ describe('handleCommand 管理命令（design.md 测试设计）', () => {
     expect(reopens[0]?.payload).toEqual({ chat_id: SUPPORT_CHAT_ID, message_thread_id: 906 });
     expect((await conversationRow(conversationId))?.status).toBe('open'); // D1 置回 open
     expect((await customerRow(BOT_ID, 7706))?.blocked).toBe(0);
+  });
+
+  it('⑤b /unban reopen retryable（502）→ 抛出重投：blocked 已清、会话保持 closed、不删消息不审计', async () => {
+    const customerId = await seedCustomer(BOT_ID, 7710);
+    const conversationId = await seedConversation(BOT_ID, customerId, SUPPORT_CHAT_ID, 910, 'closed');
+    const auditBefore = (await auditRows('unban')).length;
+    const { telegram, calls } = makeTelegram({
+      ...commandOkStubs(),
+      reopenForumTopic: () => ({ status: 502, body: { ok: false, description: 'Bad Gateway' } }),
+    });
+
+    // 临时故障 → 抛出 → inbox 5xx → Telegram 重投（整条 /unban 幂等重放，docs/03 错误分类）
+    await expect(handleCommand(ctxFor(commandUpdate(4030, 4030, ADMIN_ID, '/unban', 910), telegram))).rejects.toThrow(
+      /reopenForumTopic failed \(retryable\)/,
+    );
+
+    expect((await customerRow(BOT_ID, 7710))?.blocked).toBe(0); // 主链路已写（重放安全）
+    expect((await conversationRow(conversationId))?.status).toBe('closed'); // D1 不领先于 Topic 实际状态
+    expect(callsOf(calls, 'deleteMessage')).toHaveLength(0); // 失败的命令不留「消息消失但什么都没发生」假象
+    expect((await auditRows('unban')).length).toBe(auditBefore); // 审计未达
+  });
+
+  it('⑤c /unban reopen permanent（403）→ 不阻断：解封生效、会话保持 closed、audit 仍写', async () => {
+    const customerId = await seedCustomer(BOT_ID, 7711);
+    const conversationId = await seedConversation(BOT_ID, customerId, SUPPORT_CHAT_ID, 911, 'closed');
+    const { telegram, calls } = makeTelegram({
+      ...commandOkStubs(),
+      reopenForumTopic: () => ({ status: 403, body: { ok: false, description: 'Forbidden: topic not found' } }),
+    });
+
+    // permanent（Topic 已被手动删除等）：解封本身已生效，不阻断审计与删消息（design.md 失败语义）
+    await expect(handleCommand(ctxFor(commandUpdate(4031, 4031, ADMIN_ID, '/unban', 911), telegram))).resolves
+      .toBeUndefined();
+
+    expect((await customerRow(BOT_ID, 7711))?.blocked).toBe(0);
+    expect((await conversationRow(conversationId))?.status).toBe('closed'); // 保持 closed——用户下次入站自然建新题
+    expect(callsOf(calls, 'deleteMessage')).toHaveLength(1); // 命令消息照删
+    const unbanAudits = auditsForCustomer(await auditRows('unban'), customerId);
+    expect(unbanAudits).toHaveLength(1);
+    expect(unbanAudits[0]).toMatchObject({ actor_type: 'admin', actor_id: ADMIN_ID, action: 'unban' });
   });
 
   it('⑥ 未知命令 → 静默（不删消息不审计，docs/04）', async () => {

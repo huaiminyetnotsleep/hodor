@@ -112,6 +112,30 @@ export async function setBlocked(db: D1Database, customerId: number, blocked: bo
     .run();
 }
 
+/**
+ * watchlisted 标志写入（S7 /risk /unrisk，docs/04「状态唯一来源」）：高危名单的唯一写入点——
+ * 与 blocked 正交独立（docs/04「正交独立」：/risk 不改 blocked、/ban /unban 不改本标志，
+ * 可叠加；标题 🔇/⚠️ 是两标志的纯派生展示，docs/02）。
+ */
+export async function setWatchlisted(db: D1Database, customerId: number, watchlisted: boolean): Promise<void> {
+  await db
+    .prepare('UPDATE customers SET watchlisted = ?, updated_at = ? WHERE id = ?')
+    .bind(watchlisted ? 1 : 0, nowIso(), customerId)
+    .run();
+}
+
+/**
+ * last_watch_notice_at 刷新（S7 入站 WATCH_NOTICE 24h 限频，docs/03 入站步骤 11 / docs/04）：
+ * 仅在 WATCH_NOTICE 发送成功后调用——时间戳即「上次提示」的唯一事实源，
+ * 发送失败不刷新，让下一次入站自然重试（避免 24h 静默吞掉失败的提示）。
+ */
+export async function setLastWatchNoticeAt(db: D1Database, customerId: number, noticedAtIso: string): Promise<void> {
+  await db
+    .prepare('UPDATE customers SET last_watch_notice_at = ?, updated_at = ? WHERE id = ?')
+    .bind(noticedAtIso, nowIso(), customerId)
+    .run();
+}
+
 // ── deleted_users 墓碑（docs/04 /deluser 语义；S4 消费 find/delete，S6 消费 create）──
 
 export interface DeletedUserTombstone {

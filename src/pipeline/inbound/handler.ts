@@ -8,16 +8,17 @@
  *   → 改名检测/档案刷新 → 会话 + Topic 创建编排（creating 残留 = 崩溃窗口预案）
  *   → 恢复提示（bot_blocked_by_user 复位时，「✅ 用户已恢复对话」发进 Topic，S5 联调）
  *   → copyMessage → messages 落库 → WELCOME（仅本次新建客户）
+ *   → WATCH_NOTICE（watchlisted 用户，24h 限频，S7）
  *
  * 失败语义（docs/03 错误分类 + design.md 语义 9）：
  * - 主链路（查/建户、建题、copy、落库）失败 → 抛出 → inbox 5xx → Telegram 重投（至少一次）；
  *   createForumTopic 连 permanent 也抛出——creating 残留由重试路径处置（design.md 语义 4）；
  * - copyMessage permanent（400 毒丸等）→ 记 last_error + 标记 processed，不抛（重试无意义）；
- * - 副调用（WELCOME / 恢复提示 / 崩溃标记 / 审计 / 改名 editForumTopic）一律 best-effort：
- *   失败只留日志不抛出——否则整体重投会重复 copyMessage（docs/03 已知接受限制），
+ * - 副调用（WELCOME / 恢复提示 / 崩溃标记 / 审计 / 改名 editForumTopic / WATCH_NOTICE）
+ *   一律 best-effort：失败只留日志不抛出——否则整体重投会重复 copyMessage（docs/03 已知接受限制），
  *   用一条消息的送达换幂等，取舍得当（见 S4 design.md「失败语义」与本文件头注）。
  */
-import { BOT_UNBLOCKED_NOTICE, renderCrashMarker, renderWelcome } from '../../domain/copy';
+import { BOT_UNBLOCKED_NOTICE, WATCH_NOTICE, renderCrashMarker, renderWelcome } from '../../domain/copy';
 import { renderDisplayName, renderTitle } from '../../domain/title';
 import { markProcessed } from '../../inbox';
 import {
@@ -31,12 +32,19 @@ import {
   findCreatingByCustomer,
   recordMessage,
   setBotBlockedByUser,
+  setLastWatchNoticeAt,
   updateCustomerProfile,
   updateTitle,
   upsertCustomer,
   writeAudit,
 } from '../../store';
 import type { UpdateHandler } from '../../domain';
+
+/**
+ * WATCH_NOTICE 限频窗口（docs/03 入站步骤 11 / docs/04：距上次提示超过 24h 才再次发送）。
+ * 时间比较用 Date.parse（ISO UTC），now 取真实时钟——测试用种子行控制边界（design.md）。
+ */
+const WATCH_NOTICE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * ALLOW_UNKNOWN_USERS 解析（docs/09，spec/backend/env-config）：
@@ -228,5 +236,25 @@ export const handleInbound: UpdateHandler = async (ctx) => {
     await bestEffort('welcome message', async () => {
       await telegram.sendMessage({ chatId: message.chat.id, text: renderWelcome(customer.id) });
     });
+  }
+
+  // ── 高危提示（S7，docs/03 步骤 11 / docs/04：24h 限频，不刷屏）─────────────────
+  // 消息本身已正常中继（高危不影响中继，docs/04）；仅当从未提示或距上次提示超 24h 才发
+  // WATCH_NOTICE 并刷新 last_watch_notice_at。时间戳只在发送成功后写（同一 best-effort 内）——
+  // 发送失败留给下一次入站自然重试；24h 内重投/重入站绝不重复发送。
+  if (customer.watchlisted === 1) {
+    const now = new Date();
+    const lastNotifiedAt = customer.last_watch_notice_at;
+    if (lastNotifiedAt === null || now.getTime() - Date.parse(lastNotifiedAt) > WATCH_NOTICE_INTERVAL_MS) {
+      await bestEffort('watch notice', async () => {
+        const notice = await telegram.sendMessage({
+          chatId: bot.support_chat_id,
+          messageThreadId: threadId,
+          text: WATCH_NOTICE,
+        });
+        if (!notice.ok) throw new Error(notice.errorMessage ?? 'sendMessage failed');
+        await setLastWatchNoticeAt(db, customer.id, now.toISOString());
+      });
+    }
   }
 };

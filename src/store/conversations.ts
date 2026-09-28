@@ -99,6 +99,8 @@ export async function findOpenWithCustomerByThread(
  */
 export interface CommandTargetWithCustomer extends Conversation {
   customer_telegram_user_id: number;
+  /** JOIN customers.blocked —— S7 /risk /unrisk 重渲染标题需当前封禁态（🔇 优先级，docs/02） */
+  customer_blocked: number;
   customer_display_name: string | null;
   customer_watchlisted: number;
 }
@@ -115,6 +117,7 @@ export async function findCommandTargetByThread(
       `SELECT c.id, c.bot_id, c.customer_id, c.support_chat_id, c.message_thread_id, c.status,
               c.canonical_title, c.last_message_at, c.created_at, c.updated_at,
               cu.telegram_user_id AS customer_telegram_user_id,
+              cu.blocked AS customer_blocked,
               cu.display_name AS customer_display_name,
               cu.watchlisted AS customer_watchlisted
        FROM conversations c

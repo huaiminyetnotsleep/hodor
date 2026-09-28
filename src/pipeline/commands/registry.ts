@@ -3,12 +3,13 @@
  *
  * - parseCommand 纯函数：`/cmd`、`/cmd@BotName`、`/cmd args...`；命令名大小写不敏感
  *   （规范化为小写）；`@BotName` 后缀从首词剥离（Telegram 群内命令惯例，docs/04）；
- * - 注册表：name → CommandHandler（本任务注册 ban/unban；S7/S8 追加 risk/unrisk/purge/deluser，
- *   docs/04「命令注册」：解析与执行不依赖 setMyCommands 菜单）；
+ * - 注册表：name → CommandHandler（S6 注册 ban/unban，S7 追加 risk/unrisk；S8 再追加
+ *   purge/deluser，docs/04「命令注册」：解析与执行不依赖 setMyCommands 菜单）；
  * - 命令绝不进入 copyMessage（classify 分流 + S5 注册表保证）；本模块不做 IO。
  */
 import type { UpdateContext } from '../../domain';
 import { banCustomer, unbanCustomer } from './ban';
+import { riskCustomer, unriskCustomer } from './risk';
 
 export interface ParsedCommand {
   /** 小写规范名（大小写不敏感；`@BotName` 后缀已剥离） */
@@ -40,10 +41,12 @@ export function parseCommand(text: string): ParsedCommand | null {
 /** 命令处理器签名：与 UpdateHandler 同形（ctx 携带全部输入，docs/01 触发方式解耦） */
 export type CommandHandler = (ctx: UpdateContext) => Promise<void>;
 
-/** 命令注册表（键 = parseCommand 产物 name；只读，S7/S8 以新增键扩展） */
+/** 命令注册表（键 = parseCommand 产物 name；只读，S8 以新增键扩展） */
 const commandRegistry: ReadonlyMap<string, CommandHandler> = new Map([
   ['ban', banCustomer],
   ['unban', unbanCustomer],
+  ['risk', riskCustomer],
+  ['unrisk', unriskCustomer],
 ]);
 
 /** 查命令处理器；未知命令返回 undefined（调用方静默，docs/04：不删消息不中继） */
