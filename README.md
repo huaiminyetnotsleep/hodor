@@ -63,12 +63,12 @@ make db-customers                                 # 只读巡检（另有 db-con
    - 项目名称：`hodor`
    - 变量表单：向导按 `.dev.vars.example` 的**每个未注释条目**生成一个表单项——7 条逐项填真值，注释即填写说明
    - 构建命令：**留空**（TypeScript 由 wrangler 打包，无构建步骤）
-   - 部署命令：**保持默认 `npm run deploy`**——部署脚本会自动：创建/复用同名 D1 → 把真实 database_id 注入构建工作区（**不改动你的仓库**）→ 执行幂等迁移 → 部署
+   - 部署命令：**改为 `npm run deploy`**（⚠️ 向导默认是 `npx wrangler deploy`，不执行部署脚本）——脚本会自动：创建/复用同名 D1 → 把真实 database_id 注入构建工作区（**不改动你的仓库**）→ 执行幂等迁移 → 部署
    - 关闭「启用预览构建」（Phase 1 无 preview 分支部署需求）
 3. 部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"ok":true,"version":"0.1.0"}`（S9 起 `POST /admin/setup` 完成绑定与 setWebhook）
 4. 此后 **push 你的 fork 即自动构建部署**；上游更新 → fork 页点 **Sync fork** → 自动部署（docs/05）
 
-> 排错：报 `The database … could not be found (7404)` = 部署命令不是默认的 `npm run deploy`（旧配置直连了占位 database_id）——到 Worker 的 Settings → Build → Deploy command 改回 `npm run deploy` 再重建。
+> 排错：报 `The database … could not be found (7404 / 10181)` = 部署命令还是向导默认的 `npx wrangler deploy`（直连占位 database_id、不跑脚本）——到 Worker 的 Settings → Build → Deploy command 改为 `npm run deploy` 再重建。
 > 若构建令牌无建库权限：在面板建好同名 D1 再重跑，脚本会按名字复用，仍零仓库改动。
 >
 > 仓库所有者本人部署：无需 fork，Import a repository 直接选现有仓库，其余相同。
