@@ -1,4 +1,4 @@
-# 04 · 管理命令与封禁
+# 04 · 管理命令与用户管理
 
 > **hodor 设计文档 · 04/12**
 > 上一篇:[03-message-pipeline](03-message-pipeline.md) · 下一篇:[05-webhook-management](05-webhook-management.md) · [返回总览](README.md)
@@ -7,23 +7,7 @@
 
 ## 命令优先级
 
-命令在普通中继逻辑之前解析(见 [03](03-message-pipeline.md) 处理顺序):
-
-```text
-收到管理员 Topic 消息
-        │
-        ▼
-是否为 /ban 或 /unban?
-   ┌────┴────┐
-   │         │
-  是        否
-   │         │
-   ▼         ▼
-执行管理   普通消息
-操作并结束  copyMessage 给用户
-```
-
-`/ban`、`/unban` **绝不进入 `copyMessage`**,用户侧完全不可见(命令消息本身随后删除)。
+命令在普通中继逻辑之前解析(见 [03](03-message-pipeline.md) 处理顺序总览):收到管理员 Topic 消息,先判是否管理命令(`/ban` / `/unban` / `/purge` / `/risk` / `/unrisk` / `/deluser`)——是则执行管理操作并结束,否则走普通出站中继。以上命令**绝不进入 `copyMessage`**,用户侧完全不可见(命令消息本身随后删除)。
 
 ## `/ban` 流程
 
@@ -31,7 +15,7 @@
 2. 校验消息来自 `support_chat_id` 且 `message_thread_id` 有 conversation 映射(General/未知 thread → 忽略);
 3. 按 thread 找到 conversation 与 customer;
 4. **`customers.blocked = true`(唯一事实源写入,见「状态唯一来源」)**;
-5. `editForumTopic`:重渲染标题为 `🔇 {name} · #{序号}`(规则见 [02](02-forum-routing.md));
+5. `editForumTopic`:按 [02](02-forum-routing.md) 标题规则从数据库当前状态重渲染(标题格式单一来源在 02,此处不重复);
 6. **可选**(`CLOSE_TOPIC_ON_BAN`,默认 **关**):`closeForumTopic`。注意:Bot 能否向 closed Topic 继续发送需实测验证——若验证不通过则永久移除该选项;默认关闭的另一原因是封禁期间管理员可能仍需在 Topic 内留言存档;
 7. `deleteMessage` 删除 `/ban` 命令消息;
 8. 可选:向用户发送一次 `BANNED_NOTICE`(默认关,见 [03](03-message-pipeline.md) 文案模板);
@@ -42,10 +26,92 @@
 
 1. 前三步校验同 `/ban`;
 2. `customers.blocked = false`;
-3. `editForumTopic` 重渲染标题为 `👤 {name} · #{序号}`(从数据库状态渲染,与旧标题无关);
+3. `editForumTopic` 按数据库当前状态重渲染标题(格式与截断规则见 [02](02-forum-routing.md),绝不在旧标题上增删字符串);
 4. 若该 Topic 曾被 close(查 `conversations.status = 'closed'`),`reopenForumTopic`;
 5. `deleteMessage` 删除 `/unban` 命令消息;
 6. 写 `audit_logs`(action = `unban`);标记 processed。
+
+## `/purge` 流程(清除用户全部会话数据)
+
+清除当前 Topic 绑定用户在本系统内的全部会话痕迹——消息、媒体引用、会话与 Topic 本体。**高危且不可逆,仅 `support_admins` 白名单内的管理员可执行**,并设计为两步确认:
+
+1. 校验发送者在白名单 + 消息来自 `support_chat_id` 且 thread 有映射(同 `/ban` 前置校验;General/未知 thread → 忽略);
+2. 收到 `/purge`(未带 confirm)→ Bot 在本 Topic 发确认提示:`⚠️ 将清除 #<id> 的全部会话数据(含图片/视频/文件引用),不可逆。10 分钟内发送 /purge confirm <id> 执行。`;
+3. **10 分钟内、在同一 Topic 内**发送 `/purge confirm <id>`,且 `<id>` 与该 Topic 绑定的 customer 序号**一致**才执行;序号不匹配(发错 Topic/写错号)或超时一律拒绝并提示作废;
+4. 执行顺序(**审计先行**,与 Topic 创建「意图先落库」同一原则):
+   ① 写 `audit_logs`(action = `purge`,detail 含 customer_id 与 actor_id,不含消息内容);
+   ② 删除该 conversation 的全部 `messages` 行(含 `media_file_id` / `r2_object_key` 引用;Phase 3 起同时删除对应 R2 对象);
+   ③ 删除 `conversations` 行;
+   ④ `deleteForumTopic`(整话题删除——Topic 内的用户消息、管理员回复与媒体副本随之清除);
+   ⑤ 在 **General Topic** 发一条结果公告(含 `#序号`)——Topic 本体已删除,公告与审计是仅存的痕迹;
+5. 重复 `/purge confirm` 幂等:conversation 已不存在即视为已清除,回复提示。
+
+设计取舍与边界:
+
+- **customer 行保留**:身份、`#序号`、封禁状态不动——用户下次发消息会新建 conversation 与新 Topic(同号新会话);「删除用户身份」不提供,审计链完整性优先;
+- **为什么整题删除而不是逐条删消息**:Bot API 的 `deleteMessage` 只能删除 **48 小时内**的消息,逐条清除覆盖不了历史;`deleteForumTopic` 无此限制,是唯一完整的清除手段;
+- **确认是无状态的**:`/purge confirm <id>` 携带序号并在同一 Topic 内校验,错发到其他 Topic 会因序号不匹配被拒——不为确认引入任何存储;
+- **崩溃窗口**:审计(①)先于一切删除,若中途崩溃会留下「有 purge 审计但 Topic/数据仍在」的残留——残留 Topic 因无 conversation 映射已被忽略策略覆盖,由管理员在客户端手动删除,或按审计对账后重试;
+- **清除范围**:系统持有的全部副本与引用(D1 行、群内 Topic 及其媒体副本、Phase 3 的 R2 对象)。不覆盖:用户私聊中用户收到的回复副本(属用户自己的聊天记录,Bot 无权删除)、Telegram 平台底层的媒体原件(`file_id` 所指)、`inbox_updates` 的原始 payload(投递台账,按 [07](07-storage.md) 老化策略统一处理);
+- **不可恢复边界**:D1 侧可经 Time Travel(30 天)救援误删(见 [09](09-security-ops.md));Telegram 侧 Topic 删除不可逆。
+
+## `/risk` / `/unrisk` 流程(高危名单)
+
+高危名单与封禁**相互独立**:列入高危的用户**仍可正常对话**(入站照常中继、回复照常送达),系统只是持续提醒管理员多加注意——这是它与 `/ban` 的本质区别;两个标志可叠加,高危用户照常可 `/ban` / `/unban`。
+
+`/risk` 流程(前置校验同 `/ban`):
+
+1. `customers.watchlisted = 1`(唯一事实源,见「状态唯一来源」);
+2. `editForumTopic` 重渲染标题(出现 `⚠️`,规则见 [02](02-forum-routing.md));
+3. 立即在本 Topic 发一条置位提示(一次性);
+4. `deleteMessage` 删除命令消息;写 `audit_logs`(action = `risk`);标记 processed。
+
+`/unrisk` 对称:`watchlisted = 0`、标题移除 `⚠️`、审计 action = `unrisk`。
+
+入站提示限频:高危用户的每条消息都会正常中继,但提示**不刷屏**——仅当距 `customers.last_watch_notice_at` 超过 24h(或从未提示)时,中继后向 Topic 发一条 `WATCH_NOTICE` 并更新时间戳(见 [03](03-message-pipeline.md) 入站链路第 11 步);`⚠️` 标题常驻,是持续可见的提醒。
+
+**与封禁的正交性**:`watchlisted` 与 `blocked` 各自独立读写。高危用户被 `/ban` 时标题显示 `🔇`(封禁优先),`/unban` 后若仍在高危名单则恢复 `⚠️`——解封不等于移出名单。
+
+## `/deluser` 流程(删除用户)
+
+删除用户的**全部数据与身份**——customer 行、全部会话与消息、媒体引用、Topic 本体。与 `/purge` 的区别:`/purge` 清数据但保留 customer 身份(同号新会话);`/deluser` 连身份一起删除,该用户必须重新 `/start` 才能开启全新对话(全新 `#序号`)。典型场景:响应用户「删除我的全部数据」类请求、彻底清除骚扰账号。高危且不可逆,仅白名单管理员可执行,两步确认与 `/purge` 相同(`/deluser` → 10 分钟内、同一 Topic 发送 `/deluser confirm <序号>`,序号匹配才执行)。
+
+执行顺序(**关门先于删除**——先写墓碑,防止「自动重建新用户」的竞态):
+
+1. 写 `audit_logs`(action = `deluser`,detail 含 customer_id 与 actor_id,不含消息内容);
+2. `INSERT INTO deleted_users`(墓碑:bot_id、telegram_user_id、`was_watchlisted`、deleted_at、deleted_by)——此后该用户除 `/start` 外的一切消息被静默忽略(见 [03](03-message-pipeline.md) 忽略策略);
+3. 删除该 customer 名下全部 `messages` 行(含媒体引用;Phase 3 起连带 R2 对象);
+4. 删除其全部 `conversations` 行;
+5. 删除 `customers` 行(封禁、高危标志随行消亡);
+6. `deleteForumTopic`;
+7. 在 **General Topic** 发结果公告(含 `#序号`)。
+
+**重新开启**:被删用户发送 `/start` → 删除墓碑 → 按全新用户创建 customer(新 `#序号`,发送 `WELCOME`)。墓碑中的 `was_watchlisted` 继承到新 customer(`watchlisted = 1`)——防止「删除再回来」绕过高危标记;如需解除,管理员 `/unrisk` 即可。
+
+设计取舍:
+
+- 重复 `/deluser confirm` 幂等:customer 已不存在即视为已删除;
+- 墓碑只存 id、时间与操作者,**不含任何内容**——它本身满足「删除数据」类请求的隐私要求;
+- 崩溃窗口:①② 先落库,后续步骤可按审计对账重试;
+- Telegram 侧 Topic 删除不可逆;用户私聊副本与平台底层媒体不受控(边界同 `/purge`)。
+
+## 命令注册(setMyCommands,输入辅助)
+
+`/ban`、`/unban`、`/purge`、`/risk`、`/unrisk`、`/deluser` 的解析与执行**不依赖**命令菜单——即使不注册,管理员手动输入命令也照常工作。注册 `setMyCommands` 只为输入体验:管理员在群内输入 `/` 即出现自动补全与说明:
+
+| command | 菜单描述 |
+|---------|----------|
+| `ban` | 封禁当前 Topic 绑定的用户 |
+| `unban` | 解除当前 Topic 用户的封禁 |
+| `purge` | 清除当前 Topic 用户的全部会话数据(不可逆,需二次确认) |
+| `risk` | 将当前 Topic 用户列入高危名单(仍可正常对话,持续提示) |
+| `unrisk` | 将当前 Topic 用户移出高危名单 |
+| `deluser` | 删除当前 Topic 用户及其全部数据(不可逆,需二次确认) |
+
+- **注册时机**:绑定流程内(`setWebhook` 之后,见 [05](05-webhook-management.md)),调用一次;
+- **作用域**:`BotCommandScopeChat`(`chat_id = support_chat_id`),命令菜单对支持群内成员可见;Phase 1 **不用** per-Topic scope(`message_thread_id` 参数)——群级已够用,命令在 General/未知 Topic 被触发也无妨,解析层按忽略策略静默丢弃(见 [03](03-message-pipeline.md));
+- **失败非致命**:调用失败(限流/网络)只记 `audit_logs` 与 `last_error`,**不阻断绑定**——管理员仍可手动输入命令,重跑 `/admin/setup` 即可补注册;
+- 到达 Worker 的仍是一条 `/ban` 文本消息,幂等、白名单校验、审计流程全部照旧,命令菜单不引入新的处理路径。
 
 ## 封禁语义:应用层封禁
 
@@ -67,18 +133,19 @@ false     true
 - 封禁只影响「用户 → Topic」方向;管理员在 Topic 内的留言不受影响(存档价值);
 - 解封后用户下一条消息恢复正常中继,无需任何额外操作。
 
-## 状态唯一来源(M 级修订:消除双源漂移)
+## 状态唯一来源(消除双源漂移)
 
 | 状态 | 唯一来源 | 语义 | 派生表现 |
 |------|----------|------|----------|
 | 封禁 | `customers.blocked` | 应用层封禁 | Topic 标题 `🔇`,入站静默丢弃 |
+| 高危 | `customers.watchlisted` | 提示管理员多加注意,**不影响中继** | Topic 标题 `⚠️`、入站 24h 限频提示 |
 | Topic 生命周期 | `conversations.status` | `creating / open / closed / archived` | 是否允许中继、是否需 reopen |
 
-**禁止**在 `conversations.status` 里再存一个 `blocked` 值——两处同时写必然漂移。标题图标是 `customers.blocked` 的纯派生展示,渲染规则见 [02](02-forum-routing.md)。
+**禁止**在 `conversations.status` 里再存一个 `blocked` 值——两处同时写必然漂移。标题图标是 `customers.blocked` 与 `customers.watchlisted` 的纯派生展示(封禁优先),渲染规则见 [02](02-forum-routing.md)。
 
 ## 相关验收
 
-命令的测试与验收条目见 [10](10-testing.md)(命令不进 copyMessage、白名单外不可执行、标题与 D1 状态一致等)。
+命令的测试与验收条目见 [10](10-testing.md)(命令不进 copyMessage、白名单外不可执行、标题与 D1 状态一致、`/purge` 的确认与删除链路等)。
 
 ---
 

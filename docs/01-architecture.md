@@ -98,9 +98,20 @@ src/
 
 ## 平台选型结论
 
-- Workers Free 适合开发与极低流量;**生产建议 Paid Workers**(Free CPU 约 10ms,Webhook 校验 + D1 + 外部调用叠加后余量小;Phase 1 同步处理对 CPU 更敏感);
-- D1 写入串行,Phase 1 每个 Update 约 2–4 次写入,低流量下不构成瓶颈;
-- 各组件官方限制汇总见 [07](07-storage.md)。
+- Workers + D1 足以支撑 Phase 1;Workers Free 适合开发与极低流量,**生产建议 Paid Workers**;
+- 各组件官方限制、Free/Paid 取舍与 D1 写入开销的细节以 [07](07-storage.md) 为单一来源,上线前复核。
+
+## 一键部署设计约束(写代码时就要守住)
+
+本项目要求支持 Cloudflare「Deploy to Cloudflare」按钮:使用者 fork 仓库 → 点击按钮 → 填一份表单(3 个 Secret + 2 项非敏感配置)→ 调一次无参 `/admin/setup` 完成绑定。为此,代码与仓库从第一天起遵守:
+
+- **一切声明式**:Worker、D1 绑定、迁移文件全部定义在 `wrangler.jsonc` 与 `migrations/`,不依赖控制台手工建表或点选;
+- **迁移幂等且进部署命令**:D1 迁移有台账、天然可重复执行;Deploy Button 会自动建库但**不会**跑迁移(官方已知缺口),部署命令必须前置 `npx wrangler d1 migrations apply DB --remote`;
+- **无构建期 Secret**:所有 Secret 运行时从 `env` 读,构建产物不含敏感值,仓库保持可公开;
+- **配置按敏感度分两类入栈**:敏感值(Bot Token、两个 Secret)进 Secret;支持群 ID 与初始白名单属非敏感引导配置,进普通环境变量(`SUPPORT_CHAT_ID` / `ADMIN_IDS`)。`/admin/setup` 请求体为空时全部取自环境变量;**env 是引导通道,D1 才是事实源**——修改环境变量后需重跑 setup 才生效;
+- **自描述端点**:`/health` 部署完即可验活;`/admin/setup` 是唯一的首次引导入口。
+
+按钮机制、`.dev.vars.example` 的 Secret 清单角色与部署命令配置的落地细节见 [05](05-webhook-management.md)。
 
 ---
 

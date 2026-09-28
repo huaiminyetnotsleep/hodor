@@ -34,7 +34,8 @@
 - 首次联系创建 Topic;`creating` 状态的崩溃窗口路径(重试后标记消息 + 审计);
 - 未知 `message_thread_id`、General Topic、非白名单成员 → 忽略;
 - `allowed_updates` 之外的类型不投递(mock setWebhook 参数断言);
-- `edited_message` 忽略。
+- `edited_message` 忽略;
+- Update 字段全集与 Phase 1 实际解析范围以 [03](03-message-pipeline.md)「Update 结构速查」为准,判空与内容字段用例从其推导。
 
 **中继(03)**
 
@@ -50,7 +51,10 @@
 - 命令绝不进入 `copyMessage`;命令消息被删除;
 - 标题图标与 `customers.blocked` 一致;`conversations.status` 不含 blocked;
 - `CLOSE_TOPIC_ON_BAN` 关闭时 ban 后 Topic 仍可发消息(服务提示可达);
-- 命令写审计日志。
+- 命令写审计日志;
+- `/purge`:非白名单拒绝;confirm 序号不匹配 / 超时拒绝;执行顺序审计先行;conversation 与 messages 删除而 customer 保留;重复 confirm 幂等;
+- `/risk` `/unrisk`:白名单内外;标题 `⚠️` 与 `customers.watchlisted` 一致;与封禁独立(可并存,unban 后 `⚠️` 恢复);置位提示一次;入站 WATCH_NOTICE 24h 限频(时间戳内不重复);
+- `/deluser`:confirm 序号不匹配 / 超时拒绝;墓碑先于 customer 删除;messages/conversations/customer 全删而审计保留;非 `/start` 静默忽略;`/start` 重建新序号并继承 `was_watchlisted`;重复 confirm 幂等。
 
 **数据层(06)**
 
@@ -72,10 +76,15 @@
 10. 重复发送同一 Update(重放 inbox payload)
 11. 确认没有重复创建 Topic 或重复发送
 12. 解绑/重绑和灰度更新期间确认不丢 Update
-13. 用户 A 拉黑 Bot → 管理员回复 → Topic 出现「无法送达」提示   (H3)
+13. 用户 A 拉黑 Bot → 管理员回复 → Topic 出现「无法送达」提示(403 处理)
 14. 用户 A 解除拉黑并再发消息 → 标志清除、回复恢复
 15. 非白名单成员在支持群 Topic 发言 → 无任何中继
 16. 制造 429(短时间大量发送)→ 消息退避后仍全部送达
+17. 换绑演练:归档台账并绑定新 Bot 后,老用户发消息 → 进入原 Topic,历史连续
+18. 换绑演练:新 Bot 的低位 update_id 正常处理,不被旧台账幂等命中
+19. /purge 演练:确认执行后 Topic 整体删除、D1 无会话残留、General 出现公告、审计含 purge;该用户再发消息 → 新建 Topic 且序号不变
+20. /risk 演练:标记后标题出现 ⚠️ 且收到置位提示;用户与管理员继续正常收发;再入站出现 WATCH_NOTICE(24h 内不重复);期间 /ban 后标题 🔇、/unban 后恢复 ⚠️;/unrisk 后 ⚠️ 消失
+21. /deluser 演练:确认后 customer/conversations/messages 全删、Topic 删除、General 公告、审计含 deluser;该用户再发消息无响应;/start 后新序号恢复对话,高危标记按墓碑继承
 ```
 
 ## 第一版验收标准
@@ -88,7 +97,7 @@
 - 用户拉黑 Bot 后管理员得到明确提示,用户回归后自动恢复;
 - 429 限流下消息退避送达,不丢失;
 - 滚动更新不破坏数据库 Schema(灰度期间新旧版本共存);
-- 文本和附件按 D1/R2 策略长期可追溯(附件归档为 Phase 3,验收时核对 D1 记录完整);
+- 文本与媒体长期可追溯:文本/索引在 D1,媒体 `media_file_id` 落库且可重发(R2 独立归档为 Phase 3 可选项);
 - 审计日志覆盖绑定/解绑/白名单变更/封禁操作,不含敏感值。
 
 ---

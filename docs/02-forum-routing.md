@@ -20,21 +20,11 @@ Telegram API 中表现为:
 { "type": "supergroup", "is_forum": true }
 ```
 
-运维要求(详见 [09](09-security-ops.md)):支持群不设置公开用户名;**不得开启「限制保存内容」(protected content)**,否则 `copyMessage` 链路可能中断;定期核对群成员与管理员名单。
+支持群的运维红线(公开用户名、成员核对等)统一见 [09](09-security-ops.md) 安全清单;与本篇机制直接相关的一条:**不得开启「限制保存内容」(protected content)**,否则 `copyMessage` 链路可能中断。建群步骤、管理员提升与取 `chat_id` 的点击路径见 [05](05-webhook-management.md) 前置准备清单。
 
 ## 核心映射
 
-```text
-Telegram user_id
-       │
-       ▼
-conversation_id
-       │
-       ▼
-message_thread_id / Topic ID
-```
-
-数据库唯一关系(表结构见 [06](06-data-model.md)):
+路由链(`user_id → conversation_id → Topic ID`)见总览「原理一」;落到数据库上是由唯一索引保证的双向关系(表结构见 [06](06-data-model.md)):
 
 ```text
 (bot_id, telegram_user_id)
@@ -53,14 +43,16 @@ message_thread_id / Topic ID
 标题**始终由数据库当前状态重新渲染**,绝不在旧标题上做字符串追加/删除,避免图标重复或残留:
 
 ```text
-正常:  👤 Alice · #1001
-封禁:  🔇 Alice · #1001
+正常:  👤 Alice (987654321) · #1001
+高危:  ⚠️ Alice (987654321) · #1001
+封禁:  🔇 Alice (987654321) · #1001
 ```
 
 - `#1001` 为 `customers.id` 序号,是人类在群内快速定位用户的辅助标识;
-- 图标只有两种:`👤`(正常)与 `🔇`(封禁,事实源 `customers.blocked`,见 [04](04-admin-commands.md))。Phase 1 **不定义**其他状态图标(如暂停/归档),避免无对应流程的视觉噪音;
-- **长度限制**:Telegram Topic 名称上限 128 字符,渲染时按 `🔇/👤 + display_name + · #序号` 总长截断 `display_name`;
-- **刷新时机**:① `/ban`、`/unban` 时立即重渲染;② 每次用户入站消息时,若 `display_name` 已变化则顺带 `editForumTopic` 刷新(用户改名后标题不陈旧)。
+- `(987654321)` 为用户的 Telegram 用户 ID(事实源 `customers.telegram_user_id`,来自消息的 `from.id`),用于 `/ban` 定位与审计排查;ID **永远完整显示**,截断只落在 `display_name` 上;
+- 图标三种:`👤`(正常)、`⚠️`(高危名单,事实源 `customers.watchlisted`,见 [04](04-admin-commands.md))、`🔇`(封禁,事实源 `customers.blocked`,见 [04](04-admin-commands.md));两标志同时置位时封禁优先显示 `🔇`,解封后恢复 `⚠️`(解封不等于移出高危名单)。**不定义**其他状态图标(如暂停/归档),避免无对应流程的视觉噪音;
+- **长度限制**:Telegram Topic 名称上限 128 字符,渲染时按 `🔇/👤 + display_name + (ID) + · #序号` 总长先扣掉图标、ID 与序号的固定长度,再对 `display_name` 截断;消息缺失 `from`(理论情况)时回退为不带 ID 的 `🔇/👤 + display_name + · #序号`;
+- **刷新时机**:① `/ban`、`/unban`、`/risk`、`/unrisk` 时立即重渲染;② 每次用户入站消息时,若 `display_name` 已变化则顺带 `editForumTopic` 刷新(用户改名后标题不陈旧)。
 
 ## Bot 在支持群的权限
 
@@ -99,7 +91,7 @@ Worker 侧的 Bot 管理员身份校验(`getChatMember`)结果做**内存缓存*
 
 ## 删除 Topic
 
-`deleteForumTopic` 接口保留但**流程中不使用**——历史永久保留是设计目标(见 [07](07-storage.md)、[08](08-reliability.md))。如未来提供「关闭并归档」能力,通过 `conversations.status = 'archived'` 表达,不做物理删除。
+`deleteForumTopic` 日常流程**不使用**——历史永久保留是默认语义(见 [07](07-storage.md)、[08](08-reliability.md));唯一例外是管理命令 `/purge`(清除用户全部会话数据,见 [04](04-admin-commands.md)),属管理员显式发起的不可逆操作。如未来提供「关闭并归档」能力,通过 `conversations.status = 'archived'` 表达,不做物理删除。
 
 ---
 

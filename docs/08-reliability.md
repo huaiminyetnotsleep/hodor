@@ -35,24 +35,13 @@
 
 注意毒丸规则:**重试只用于可重试错误**;400 类永久错误与 blocked 拒绝都直接 processed(见 [03](03-message-pipeline.md) 错误分类),不进重试。
 
-## Topic 创建崩溃窗口(与 02 呼应的运维侧)
+## Topic 创建崩溃窗口(运维侧)
 
-```text
-写 creating ──> createForumTopic ──✕ 崩溃 ──> 重试 ──> 再次 createForumTopic
-                                              │         (可能产生重复 Topic)
-                                              ▼
-                                    新 Topic 发标记消息(customer #序号)
-                                    + audit_logs(topic_creation_retry)
-                                              │
-                                              ▼
-                                    运维发现重复 → 人工合并(步骤见 02)
-```
-
-Bot API 无列举 Topic 的接口,无法自动对账——监控 `topic_creation_retry` 审计事件是唯一发现途径(告警项见 [09](09-security-ops.md))。
+崩溃窗口的成因与处置预案单一来源见 [02](02-forum-routing.md)。运维侧要点:Bot API 无列举 Topic 的接口,无法自动对账,**监控 `topic_creation_retry` 审计事件是唯一发现途径**(告警项见 [09](09-security-ops.md));发现重复 Topic 后按 02 的人工合并步骤处理。
 
 ## 乱序(已知限制,Phase 4 消除)
 
-同一用户并发 Webhook 可能使 Topic 内消息乱序。客服场景可接受;引入 per-Topic DO(分片键见 [07](07-storage.md))后按 Topic 串行消除。
+同一用户并发 Webhook 可能使 Topic 内消息乱序(详细说明见 [03](03-message-pipeline.md)),客服场景可接受;Phase 4 引入 per-Topic DO(分片键见 [07](07-storage.md))后消除。
 
 ## 滚动发布
 
@@ -71,6 +60,8 @@ Webhook URL 保持稳定,发布新版本**不重设 Webhook**:
 ```
 
 灰度期间新旧版本可能同时处理 Update,必须共用**兼容 Schema 和状态值**(状态字典见 [06](06-data-model.md))。
+
+一键部署路径的日常更新由 Workers Builds 在 push 时自动执行(部署命令含幂等的 D1 迁移,见 [05](05-webhook-management.md)),默认全量生效;需要灰度时改用 Versions 的 gradual deployments 手动控制。回滚语义不变:回滚 Worker、不回滚数据库。
 
 ## D1 迁移:Expand / Contract
 

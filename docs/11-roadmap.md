@@ -11,8 +11,8 @@
 |------|------|----------|----------|
 | **Phase 1** | MVP | Worker + D1 同步处理:Webhook、私有 Forum 路由、管理员回复、`/ban`/`/unban`、标题图标、绑定/解绑、幂等状态机 | 01–06 |
 | **Phase 2** | 可靠性 | Queue、outbox、DLQ、Cloudflare Access、Topic 创建失败恢复、灰度发布 | 07、08 |
-| **Phase 3** | 永久归档 | R2 附件、原始 Update 归档、D1 历史迁移、容量监控、导出与恢复 | 07、09 |
-| **Phase 4** | 扩展 | per-Topic Durable Objects、多管理员分配、多 Bot、Web 管理台、用户标签与统计 | 07、08 |
+| **Phase 3** | 独立归档(可选) | 可选 R2 归档(附件原件/老化 Update)、D1 历史迁移、容量监控、导出与恢复 | 07、09 |
+| **Phase 4** | 扩展 | per-Topic Durable Objects、多管理员分配、多 Bot、Web 管理台、用户标签与统计、/start 用户验证(见 09) | 07、08 |
 
 ## Phase 1 功能 ↔ 文档映射(立任务时按行领取)
 
@@ -27,7 +27,12 @@
 | 入站中继 | [03](03-message-pipeline.md) | |
 | 出站中继 + 403 处理 | [03](03-message-pipeline.md) | |
 | `/ban` `/unban` | [04](04-admin-commands.md) | |
-| 初始化/绑定/白名单管理端点 | [05](05-webhook-management.md) | |
+| `/purge` 清除会话数据 | [04](04-admin-commands.md) | 含无状态二次确认、审计先行与崩溃预案 |
+| `/risk` `/unrisk` 高危名单 | [04](04-admin-commands.md) | 标题 ⚠️ 与 24h 限频提示;可与封禁叠加 |
+| `/deluser` 删除用户 | [04](04-admin-commands.md) | 墓碑门禁;/start 重新开启,继承高危标记 |
+| 初始化/绑定/白名单管理端点 | [05](05-webhook-management.md) | 不做管理 UI,配套运维脚本,见 05 运维方式决策 |
+| 只读运维脚本(db-customers / db-conversations / db-messages / db-inbox-failed) | [09](09-security-ops.md) | 随脚手架落地,Secret 走环境变量;管理端操作不封装脚本,直接调管理端点(见 05) |
+| 一键部署(Deploy Button:wrangler.jsonc 声明式资源、`.dev.vars.example`、部署命令含 D1 迁移) | [01](01-architecture.md)、[05](05-webhook-management.md) | 随脚手架落地;首次引导流程见 05 |
 | 审计日志 | [06](06-data-model.md)、[09](09-security-ops.md) | |
 | 单元/集成测试 | [10](10-testing.md) | 随功能同步写 |
 | 部署演练与验收 | [09](09-security-ops.md)、[10](10-testing.md) | 真机测试用测试 Bot |
@@ -50,6 +55,8 @@
 ```
 
 每一步都是一个天然的 Trellis 任务粒度:输入 = 对应文档,输出 = 代码 + 测试。
+
+未立项的功能意向(如 `/start` 用户验证)记录在 [TODO](TODO.md),进入对应 Phase 时再展开为任务。
 
 ## 阶段间承诺
 

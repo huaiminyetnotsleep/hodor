@@ -51,8 +51,23 @@ bots 1─────* support_admins
 | telegram_user_id | INTEGER | |
 | display_name / username | TEXT | 标题渲染与刷新用(见 02) |
 | **blocked** | INTEGER | **封禁唯一事实源**(见 04) |
-| **bot_blocked_by_user** | INTEGER | **H3:用户已拉黑/删除 Bot**,出站 403 时置位(见 03) |
+| **bot_blocked_by_user** | INTEGER | **用户已拉黑/删除 Bot**,出站 403 时置位(见 03) |
+| **watchlisted** | INTEGER | **高危名单唯一事实源**(见 04):不影响中继,仅提示 |
+| last_watch_notice_at | TEXT NULL | 最近高危入站提示时间,24h 限频(见 03/04) |
 | created_at / updated_at | TEXT | |
+
+`UNIQUE(bot_id, telegram_user_id)`
+
+### deleted_users(删除用户墓碑,见 04 `/deluser`)
+
+| 列 | 类型 | 说明 |
+|----|------|------|
+| id | INTEGER PK | |
+| bot_id | INTEGER FK → bots | |
+| telegram_user_id | INTEGER | |
+| was_watchlisted | INTEGER | 删除时的高危标记;`/start` 重建时继承(见 04) |
+| deleted_at | TEXT | |
+| deleted_by | INTEGER NULL | 执行删除的管理员 user_id |
 
 `UNIQUE(bot_id, telegram_user_id)`
 
@@ -71,7 +86,7 @@ bots 1─────* support_admins
 
 `UNIQUE(bot_id, support_chat_id, message_thread_id)` ← 反向映射(管理员回复路由)
 
-### support_admins(H 级修订:新增,管理员白名单)
+### support_admins(管理员白名单)
 
 | 列 | 类型 | 说明 |
 |----|------|------|
@@ -98,6 +113,8 @@ bots 1─────* support_admins
 
 `UNIQUE(bot_id, telegram_update_id)`
 
+> `update_id` 按 Bot 独立递增:跨 Bot 换绑必须先归档本表(见 [05](05-webhook-management.md) 换绑 Runbook),否则新 Bot 的低位 update_id 会被旧行幂等命中而静默丢弃。
+
 ### messages(中继记录)
 
 | 列 | 类型 | 说明 |
@@ -110,11 +127,11 @@ bots 1─────* support_admins
 | message_thread_id | INTEGER | 冗余 Topic ID |
 | content_type | TEXT | text / photo / voice / document / … |
 | text_content | TEXT | 文本或 caption,检索用 |
-| media_file_id | TEXT | Telegram file_id |
+| media_file_id | TEXT | Telegram file_id——媒体主存引用,可重发(见 07) |
 | r2_object_key | TEXT NULLABLE | Phase 3 起附件归档键(见 07) |
 | created_at | TEXT | |
 
-### audit_logs(H 级修订:新增,支撑 05/04/09 的审计要求)
+### audit_logs(操作审计,支撑 05/04/09 的审计要求)
 
 | 列 | 类型 | 说明 |
 |----|------|------|
@@ -122,7 +139,7 @@ bots 1─────* support_admins
 | bot_id | INTEGER FK | |
 | actor_type | TEXT | `admin` / `system` |
 | actor_id | INTEGER | admin 的 telegram_user_id;system 为 NULL |
-| action | TEXT | `ban` / `unban` / `webhook_bind` / `webhook_unbind` / `admin_add` / `admin_remove` / `topic_creation_retry` … |
+| action | TEXT | `ban` / `unban` / `purge` / `risk` / `unrisk` / `deluser` / `webhook_bind` / `webhook_unbind` / `admin_add` / `admin_remove` / `topic_creation_retry` … |
 | detail_json | TEXT | 上下文(customer_id、thread_id 等;**不含 Token/Secret/消息正文**) |
 | created_at | TEXT | |
 
@@ -138,7 +155,7 @@ bots 1─────* support_admins
 | status | TEXT | `pending / sent / failed` |
 | attempts / sent_at / last_error / created_at | | |
 
-## 索引清单(M 级修订:唯一索引之外的主查询索引)
+## 索引清单(唯一索引之外的主查询索引)
 
 ```sql
 -- 唯一索引(建表约束)
@@ -167,7 +184,8 @@ CREATE INDEX idx_audit_bot_time           ON audit_logs(bot_id, created_at);
 | `bots.status` | `active / disabled` | |
 | `messages.direction` | `inbound / outbound` | |
 | `customers.blocked` | 0 / 1 | 封禁唯一事实源,见 04 |
-| `customers.bot_blocked_by_user` | 0 / 1 | H3 标志,见 03 |
+| `customers.watchlisted` | 0 / 1 | 高危名单唯一事实源,见 04 |
+| `customers.bot_blocked_by_user` | 0 / 1 | 用户拉黑 Bot 标志,见 03 |
 
 迁移文件组织与兼容规则(Expand/Contract)见 [08](08-reliability.md)。
 
