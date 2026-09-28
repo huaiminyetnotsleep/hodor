@@ -1,9 +1,9 @@
-# hodor 环境变量总表（唯一配置点）
+# hodor 环境变量总表（本地开发模板）
 # 复制为 .dev.vars 并填真值（.dev.vars 已被 git 忽略，绝不提交）。
-# 远端生产：所有变量一律 `npx wrangler secret put <NAME>` 逐个注入，无 [vars]。
-# 一职两用：Deploy to Cloudflare 时这 7 个值就是部署表单要填的全部 Secret（docs/01/05）。
+# 远端：部署后在 Cloudflare 面板 → Worker → 设置 → 变量和机密 配置同样 7 条（一次即可）；
+# wrangler.jsonc 已设 keep_vars: true，面板变量（Text/机密）跨部署持久，fork 使用者零代码改动。
 
-# Bot Token（BotFather /newbot 获取，docs/05 前置清单）
+# Bot Token（BotFather /newbot 获取）
 TELEGRAM_BOT_TOKEN=123456:ABC-your-bot-token
 
 # Webhook 鉴权 Secret（Telegram 回调头 X-Telegram-Bot-Api-Secret-Token，三值互异，docs/05/09）
@@ -18,8 +18,8 @@ SUPPORT_CHAT_ID=-1000000000000
 # 管理员白名单 user_id，逗号分隔（与 support_admins 表同源，S9 /admin/admins 维护）
 ADMIN_IDS=123456789
 
-# 未知用户首条消息是否允许建户建档（docs/09）；代码缺省视为 true，仅显式 "false" 关闭
+# 未知用户首条消息是否允许建户建档（docs/09）；代码缺省 true，仅显式 "false" 关闭
 ALLOW_UNKNOWN_USERS=true
 
-# inbox 处理尝试上限（docs/03 重试闭环，建议 8）；代码缺省视为 8
+# inbox 处理尝试上限（docs/03 重试闭环，建议 8）；代码缺省 8
 MAX_ATTEMPTS=8

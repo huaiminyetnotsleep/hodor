@@ -20,7 +20,7 @@ Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题�
 
 **环境变量**
 
-7. `cp .dev.vars.example .dev.vars`，按逐条注释填全部 7 个值
+7. `cp .dev.vars.example .dev.vars`（本地开发用）；部署后在面板 Worker → 设置 → 变量和机密 配置同样 7 条（一次即可，`keep_vars: true` 已保证跨部署持久）
 
 ## 环境变量说明（模板与注释见 `.dev.vars.example`）
 
@@ -34,13 +34,17 @@ Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题�
 | `ALLOW_UNKNOWN_USERS` | 未知用户首条消息是否建户建档（docs/09） | 否 | `true`（仅显式 `"false"` 关闭） |
 | `MAX_ATTEMPTS` | inbox 处理尝试上限（docs/03 重试闭环） | 否 | `8` |
 
-注入方式：本地写 `.dev.vars`（已被 git 忽略）；远端一律 `npx wrangler secret put <NAME>`；值不进任何被提交的文件。
+注入方式（⚠️ 2026-09-28 实测与官方文档核实）：`wrangler deploy` 默认按配置重置绑定，但本仓库已设 **`keep_vars: true`**——面板「变量和机密」配置的变量（Text 或机密均可）**跨部署持久**；官方文档另明确 **Secrets 永不因部署删除**。
+
+- **全部 7 个**：部署后在面板 Worker → 设置 → 变量和机密 配置一次即可（fork 使用者零代码改动）；3 个 Secret 建议用「机密」类型，4 个配置 Text/机密均可
+- **本地开发**：写 `.dev.vars`（已被 git 忽略），与面板互不影响
+- 也可用 `npx wrangler secret put <NAME>`（Secret 类型，等价持久）
 
 ## 开发流程
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars                    # 填 7 个值
+cp .dev.vars.example .dev.vars                    # 本地开发用；远端在面板「变量和机密」配一次
 npx wrangler d1 migrations apply hodor --local    # 本地建表（幂等，可重复执行）
 npm run dev                                       # http://localhost:8787/health
 npm test                                          # Vitest：本地 D1 + 打桩 Telegram
@@ -61,13 +65,14 @@ make db-customers                                 # 只读巡检（另有 db-con
 1. Fork `huaiminyetnotsleep/hodor` 到自己的 GitHub 账号
 2. Cloudflare 面板 → **Workers & Pages → Create → Workers → Import a repository** → 授权 Cloudflare GitHub App → 选中**你的 fork**，向导逐项配置：
    - 项目名称：`hodor`
-   - 变量表单：向导按 `.dev.vars.example` 的**每个未注释条目**生成一个表单项——7 条逐项填真值，注释即填写说明
+   - 变量表单：7 个值在此一次填齐（向导按 `.dev.vars.example` 生成表单项）；`keep_vars: true` 已在仓库配置，这些值**跨部署持久，fork 使用者零代码改动**（3 个 Secret 建议机密类型）
    - 构建命令：**留空**；部署命令：**保持向导默认 `npx wrangler deploy`，无需改动**——置备（创建/复用同名 D1 → 注入 database_id 到构建工作区，**不改动你的仓库** → 幂等迁移）由 `npm install` 的 postinstall 钩子自动完成，先于部署执行
    - 关闭「启用预览构建」（Phase 1 无 preview 分支部署需求）
 3. 部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"ok":true,"version":"0.1.0"}`（S9 起 `POST /admin/setup` 完成绑定与 setWebhook）
 4. 此后 **push 你的 fork 即自动构建部署**；上游更新 → fork 页点 **Sync fork** → 自动部署（docs/05）
 
 > 排错：报 `The database … could not be found (7404 / 10181)` = 自动置备未生效——先查构建日志**安装阶段**的 `[provision]` 输出；兜底：把部署命令改为 `npm run deploy`（显式置备后部署）再重建。
+> 部署后变量丢失：确认部署所用代码包含 `keep_vars: true`（本仓库已配置，wrangler.jsonc）；仍丢失时检查变量是否加在了别的 Worker 上。
 > 若构建令牌无建库权限：在面板建好同名 D1 再重跑，脚本会按名字复用，仍零仓库改动。
 >
 > 仓库所有者本人部署：无需 fork，Import a repository 直接选现有仓库，其余相同。

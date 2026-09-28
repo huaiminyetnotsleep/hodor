@@ -41,16 +41,20 @@ declare global {
 | Key | Type | Local source | Remote source | Default semantics (code-side) |
 |-----|------|--------------|---------------|-------------------------------|
 | `DB` | D1Database | wrangler.jsonc | wrangler.jsonc | — |
-| `TELEGRAM_BOT_TOKEN` | string | `.dev.vars` | `wrangler secret put` | required |
-| `TELEGRAM_WEBHOOK_SECRET` | string | `.dev.vars` | `wrangler secret put` | required |
-| `ADMIN_SETUP_SECRET` | string | `.dev.vars` | `wrangler secret put` | required |
-| `SUPPORT_CHAT_ID` | string | `.dev.vars` | `wrangler secret put` | required |
-| `ADMIN_IDS` | string (comma-separated) | `.dev.vars` | `wrangler secret put` | empty = none |
-| `ALLOW_UNKNOWN_USERS` | string | `.dev.vars` | `wrangler secret put` | anything but literal `"false"` = true |
-| `MAX_ATTEMPTS` | string | `.dev.vars` | `wrangler secret put` | missing/invalid → `8` |
+| `TELEGRAM_BOT_TOKEN` | string | `.dev.vars` | dashboard 变量和机密 / `wrangler secret put` | required |
+| `TELEGRAM_WEBHOOK_SECRET` | string | `.dev.vars` | dashboard 变量和机密 / `wrangler secret put` | required |
+| `ADMIN_SETUP_SECRET` | string | `.dev.vars` | dashboard 变量和机密 / `wrangler secret put` | required |
+| `SUPPORT_CHAT_ID` | string | `.dev.vars` | dashboard 变量和机密 | required |
+| `ADMIN_IDS` | string (comma-separated) | `.dev.vars` | dashboard 变量和机密 | empty = none |
+| `ALLOW_UNKNOWN_USERS` | string | `.dev.vars` | dashboard 变量和机密 | anything but literal `"false"` = true |
+| `MAX_ATTEMPTS` | string | `.dev.vars` | dashboard 变量和机密 | missing/invalid → `8` |
 
-`.dev.vars.example` is the annotated template (one comment + one assignment + blank line per var)
-and doubles as the Deploy-to-Cloudflare form checklist.
+`.dev.vars.example` is the annotated local template (one comment + one assignment + blank line per
+var). Remote values are configured ONCE in the dashboard (Worker → Settings → 变量和机密) — never
+in the repo. Split rule (verified against official docs + production 2026-09-28): `wrangler
+deploy` resets dashboard bindings to match config, BUT `keep_vars: true` in wrangler.jsonc
+preserves dashboard Text variables, and secrets are never deleted by a deployment regardless.
+Repo carries zero variable values → fork users edit nothing.
 
 ### 4. Validation & Error Matrix
 
@@ -74,19 +78,24 @@ and doubles as the Deploy-to-Cloudflare form checklist.
 
 #### Wrong
 
-```jsonc
-// wrangler.jsonc
-"vars": { "SUPPORT_CHAT_ID": "-1000000000000" }   // config split across two files; literal-typed
-```
+// Dashboard Text variables WITHOUT keep_vars in the committed config
+→ wiped on every `wrangler deploy` (default --keep-vars=false resets bindings to match config;
+observed in production 2026-09-28)
 
 #### Correct
 
-```
-# .dev.vars (git-ignored) — SUPPORT_CHAT_ID only lives here (local) / in secret put (remote)
-SUPPORT_CHAT_ID=-1000000000000
+```jsonc
+// wrangler.jsonc — committed once by maintainers; deployers never touch the repo
+"keep_vars": true,
 ```
 
-**Why**: one config point per environment; no values in committed files; `Cloudflare.Env` stays
+```
+# Remote: dashboard Worker → Settings → 变量和机密 — all 7 values, configured once, persist
+# Local:  .dev.vars (git-ignored) — same 7 keys for wrangler dev
+```
+
+**Why**: with `keep_vars: true` dashboard variables (Text or Secret) survive every deploy, and
+secrets are never deleted by a deployment in any case (official docs). `Cloudflare.Env` remains
 the single typed contract (`env.d.ts` merge adds what the generator cannot know).
 
 ### Convention: D1 database_id stays a placeholder in the repo
