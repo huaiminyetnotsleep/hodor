@@ -166,6 +166,18 @@ curl https://hodor.<你的子域>.workers.dev/health
 4. ★ `/unrisk` → ⚠️ 消失、WATCH_NOTICE 不再出现
 5. 自动化：`admin-risk` 9 例（正交锁定/限频边界/audit）
 
+### V8 · S8 危险命令 /purge /deluser（★ 人工回归，**待执行**，依赖 V6 完成；不可逆操作，建议最后做）
+
+/purge（场景 19）：
+1. ★ Topic A 发 `/purge` → 收到确认提示（含 #序号）；`/purge confirm <错误序号>` → 拒绝
+2. ★ `/purge confirm <正确序号>` → Topic 整体删除 + D1 无会话残留（db-conversations/db-messages）+ General 公告 + 审计含 purge
+3. ★ 该用户再发消息 → 新建 Topic 且 #序号不变
+
+/deluser（场景 21）：
+4. ★ 两步确认后 → customer/conversations/messages 全删 + Topic 删除 + General 公告 + 审计含 deluser
+5. ★ 该用户再发消息无响应；发 `/start` → 新序号恢复对话，高危标记按墓碑继承
+6. 自动化：`admin-danger` 10 例（审计先行顺序断言/墓碑先行/幂等/白名单）
+
 ### V5+ · S5 起随任务交付追加本节
 
 出站中继（管理员回复送达/403 提示/恢复提示）、管理命令、管理端点、S10 终验（docs/10 全部 21 条）。

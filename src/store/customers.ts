@@ -136,6 +136,16 @@ export async function setLastWatchNoticeAt(db: D1Database, customerId: number, n
     .run();
 }
 
+/**
+ * 删除客户行（S8 /deluser，docs/04 执行步骤 ⑤；返回删除行数）。
+ * 封禁/高危标志随行消亡（docs/04）；必须晚于墓碑写入（关门先于删除）与该客户
+ * messages/conversations 删除（conversations.customer_id 外键引用，docs/06）。
+ */
+export async function deleteById(db: D1Database, customerId: number): Promise<number> {
+  const res = await db.prepare('DELETE FROM customers WHERE id = ?').bind(customerId).run();
+  return res.meta.changes ?? 0;
+}
+
 // ── deleted_users 墓碑（docs/04 /deluser 语义；S4 消费 find/delete，S6 消费 create）──
 
 export interface DeletedUserTombstone {

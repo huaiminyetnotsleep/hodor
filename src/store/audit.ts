@@ -52,3 +52,40 @@ export async function writeAudit(db: D1Database, entry: AuditEntry): Promise<voi
     )
     .run();
 }
+
+/** findLatestAction 命中行投影（S8 两步确认窗口判定消费：created_at 判窗口、actorId 供对账） */
+export interface LatestActionRecord {
+  createdAt: string;
+  /** admin 的 telegram_user_id；system 行为 null（docs/06） */
+  actorId: number | null;
+}
+
+/**
+ * 最新一条 action 匹配且 detail.customer_id 等于给定客户的审计行（S8 /purge /deluser
+ * 两步确认的 10 分钟窗口判定，docs/04「确认是无状态的」——不新增确认表，复用发起审计）。
+ * SQL 端只按 bot+action 取最近若干条（管理命令量级极低，50 条余量充足），
+ * customer_id 匹配在 JS 端解析 detail_json 精确判等——避免 LIKE 子串误命中
+ * （如 `"customer_id":12` 命中 `"customer_id":123`）。查无返回 undefined。
+ */
+export async function findLatestAction(
+  db: D1Database,
+  botId: number,
+  action: AuditAction,
+  detailCustomerId: number,
+): Promise<LatestActionRecord | undefined> {
+  const res = await db
+    .prepare('SELECT actor_id, detail_json, created_at FROM audit_logs WHERE bot_id = ? AND action = ? ORDER BY id DESC LIMIT 50')
+    .bind(botId, action)
+    .all<{ actor_id: number | null; detail_json: string | null; created_at: string }>();
+  for (const row of res.results) {
+    try {
+      const detail = JSON.parse(row.detail_json ?? '{}') as { customer_id?: unknown };
+      if (detail.customer_id === detailCustomerId) {
+        return { createdAt: row.created_at, actorId: row.actor_id };
+      }
+    } catch {
+      // detail_json 损坏的行跳过（防御，docs/03 判空原则）
+    }
+  }
+  return undefined;
+}

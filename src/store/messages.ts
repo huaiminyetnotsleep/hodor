@@ -78,6 +78,16 @@ export interface RecordMessageInput {
   message: TelegramMessage;
 }
 
+/**
+ * 按 conversation 删除全部 messages 行（S8 /purge /deluser，docs/04 执行步骤 ②/③：
+ * 含 media_file_id / r2_object_key 引用；Phase 3 起连带 R2 对象）。返回删除行数。
+ * 必须先于 conversations 行删除调用（messages.conversation_id 外键引用 conversations，docs/06）。
+ */
+export async function deleteByConversation(db: D1Database, conversationId: number): Promise<number> {
+  const res = await db.prepare('DELETE FROM messages WHERE conversation_id = ?').bind(conversationId).run();
+  return res.meta.changes ?? 0;
+}
+
 /** 中继记录落库（docs/03 步骤 10；入站 S4 消费，出站 S5 复用） */
 export async function recordMessage(db: D1Database, input: RecordMessageInput): Promise<void> {
   await db

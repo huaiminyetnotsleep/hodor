@@ -194,6 +194,16 @@ export async function updateTitle(db: D1Database, conversationId: number, canoni
 }
 
 /**
+ * 按客户删除其全部 conversations 行（S8 /purge /deluser，docs/04 执行步骤 ③/④；返回删除行数）。
+ * 必须在该客户全部 messages 行删除之后调用（messages.conversation_id 外键引用，docs/06）；
+ * Phase 1 每客户至多一个会话行（docs/02「每用户至多一个 open」，closed/archived 尚无写入路径）。
+ */
+export async function deleteByCustomer(db: D1Database, customerId: number): Promise<number> {
+  const res = await db.prepare('DELETE FROM conversations WHERE customer_id = ?').bind(customerId).run();
+  return res.meta.changes ?? 0;
+}
+
+/**
  * 会话重开（S6 /unban，docs/04「/unban 步骤 4」）：reopenForumTopic 成功后置回 'open'。
  * 仅在 Telegram 侧重开成功后调用——D1 状态不得领先于 Topic 实际状态（否则出站中继
  * 会向 closed Topic 投递）。永久失败时会话保持 closed，由调用方留日志对账。

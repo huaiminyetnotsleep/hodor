@@ -76,25 +76,34 @@ export async function rerenderTitle(
   await updateTitle(db, conversationId, title);
 }
 
-/** 命令族审计 action 白名单（ban/unban S6、risk/unrisk S7；purge/deluser S8 按各自 detail 形状另行扩展） */
+/** 命令族审计 action 白名单（ban/unban S6、risk/unrisk S7、purge/deluser S8——docs/06 action 全集的命令子集） */
 export type AdminCommandAction = Extract<
   AuditAction,
-  typeof AUDIT_ACTIONS.ban | typeof AUDIT_ACTIONS.unban | typeof AUDIT_ACTIONS.risk | typeof AUDIT_ACTIONS.unrisk
+  | typeof AUDIT_ACTIONS.ban
+  | typeof AUDIT_ACTIONS.unban
+  | typeof AUDIT_ACTIONS.risk
+  | typeof AUDIT_ACTIONS.unrisk
+  | typeof AUDIT_ACTIONS.purge
+  | typeof AUDIT_ACTIONS.deluser
 >;
 
-/** 命令审计单点（docs/04：actor = 发送者、target = customer；detail 不含敏感值与消息内容） */
+/**
+ * 命令审计单点（docs/04：actor = 发送者、target = customer；detail 不含敏感值与消息内容）。
+ * extra 供 S8 危险命令的执行事件携带 confirmed=true（发起/执行两次审计共用本单点，docs/04 审计先行）。
+ */
 export async function writeCommandAudit(
   db: D1Database,
   botId: number,
   actorTelegramUserId: number,
   action: AdminCommandAction,
   customer: TitleCustomer,
+  extra?: Record<string, unknown>,
 ): Promise<void> {
   await writeAudit(db, {
     botId,
     actorType: 'admin',
     actorId: actorTelegramUserId,
     action,
-    detail: { customer_id: customer.id, telegram_user_id: customer.telegramUserId },
+    detail: { customer_id: customer.id, telegram_user_id: customer.telegramUserId, ...extra },
   });
 }

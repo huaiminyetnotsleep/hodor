@@ -10,6 +10,7 @@
 import type { UpdateContext } from '../../domain';
 import { banCustomer, unbanCustomer } from './ban';
 import { riskCustomer, unriskCustomer } from './risk';
+import { purgeCustomer, delUser } from './danger';
 
 export interface ParsedCommand {
   /** 小写规范名（大小写不敏感；`@BotName` 后缀已剥离） */
@@ -41,12 +42,14 @@ export function parseCommand(text: string): ParsedCommand | null {
 /** 命令处理器签名：与 UpdateHandler 同形（ctx 携带全部输入，docs/01 触发方式解耦） */
 export type CommandHandler = (ctx: UpdateContext) => Promise<void>;
 
-/** 命令注册表（键 = parseCommand 产物 name；只读，S8 以新增键扩展） */
+/** 命令注册表（键 = parseCommand 产物 name；只读，docs/04 命令全集至此收齐） */
 const commandRegistry: ReadonlyMap<string, CommandHandler> = new Map([
   ['ban', banCustomer],
   ['unban', unbanCustomer],
   ['risk', riskCustomer],
   ['unrisk', unriskCustomer],
+  ['purge', purgeCustomer],
+  ['deluser', delUser],
 ]);
 
 /** 查命令处理器；未知命令返回 undefined（调用方静默，docs/04：不删消息不中继） */

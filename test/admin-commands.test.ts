@@ -213,13 +213,14 @@ describe('parseCommand 纯函数', () => {
     expect(parseCommand('')).toBeNull();
   });
 
-  it('注册表：S6 ban / unban + S7 risk / unrisk（S8 尚未注册）', () => {
+  it('注册表：docs/04 命令全集（S6 ban / unban + S7 risk / unrisk + S8 purge / deluser）', () => {
     expect(getCommandHandler('ban')).toBeDefined();
     expect(getCommandHandler('unban')).toBeDefined();
     expect(getCommandHandler('risk')).toBeDefined(); // S7
     expect(getCommandHandler('unrisk')).toBeDefined(); // S7
-    expect(getCommandHandler('purge')).toBeUndefined(); // S8
-    expect(getCommandHandler('deluser')).toBeUndefined(); // S8
+    expect(getCommandHandler('purge')).toBeDefined(); // S8
+    expect(getCommandHandler('deluser')).toBeDefined(); // S8
+    expect(getCommandHandler('nonexistent')).toBeUndefined();
   });
 });
 
@@ -406,7 +407,7 @@ describe('handleCommand 管理命令（design.md 测试设计）', () => {
     const auditBefore = (await auditRows('purge')).length;
     const { telegram, calls } = makeTelegram(commandOkStubs());
 
-    await handleCommand(ctxFor(commandUpdate(4007, 4007, ADMIN_ID, '/purge', 907), telegram)); // /purge S8 才注册
+    await handleCommand(ctxFor(commandUpdate(4007, 4007, ADMIN_ID, '/nonexistent', 907), telegram)); // 未注册命令
 
     expect(calls).toHaveLength(0); // 不删消息（保留在群内）、零外呼
     expect((await customerRow(BOT_ID, 7707))?.blocked).toBe(0);
