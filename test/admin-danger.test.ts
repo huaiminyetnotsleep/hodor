@@ -19,6 +19,8 @@ import { callsOf, makeTelegram, type MethodStub } from './telegram-stub';
 // ⑤重复 confirm 幂等（反查失败 → 静默）⑥/deluser 墓碑先于 customer 删除 ⑦deluser 后非 /start 静默
 // ⑧/start 复活（新 #序号 + was_watchlisted 继承）⑨白名单外零副作用 ⑩deleteForumTopic permanent
 // 视为已删继续。
+// S10 补齐（docs/10 管理命令清单「/deluser:confirm 序号不匹配 / 超时拒绝…重复 confirm 幂等」）：
+// ⑥b /deluser confirm 序号不匹配 ⑥c /deluser confirm 超时（种子 audit 11min 前）⑥d /deluser 重复 confirm 幂等。
 // 真 D1（cloudflare-pool + 本文件隔离存储）+ 桩 telegram client（makeTelegram 共用；
 // 未编排 method 抛错 = 「不得发生」断言）；超时窗口用真实时钟减偏移的种子审计行控制（design.md：不注入假时钟）。
 
@@ -558,5 +560,89 @@ describe('白名单前置（design.md 测试设计 ⑨，docs/04 步骤 1）', (
     expect(await customerRow(BOT_ID, 9939)).not.toBeNull();
     expect((await auditRows('purge')).length).toBe(purgeBefore);
     expect((await auditRows('deluser')).length).toBe(deluserBefore);
+  });
+});
+
+// ── /deluser 专属 confirm 边界（S10 补齐，docs/10 管理命令清单）─────────────────
+// docs/10 对 /deluser 单独列了与 /purge 同型的三条边界；⑫/⑬ 与 ②/③ 同构但 action=deluser，
+// 且拒绝路径额外断言墓碑未写（deluser 独有的「关门」副作用不得提前发生）。
+
+describe('/deluser 专属 confirm 边界（S10 补齐 ⑥b–⑥d，docs/04 步骤 3）', () => {
+  it('⑥b confirm 序号不匹配拒绝：零删除零墓碑、无执行 audit、提示作废（docs/04 步骤 3）', async () => {
+    const customerId = await seedCustomer(BOT_ID, 9941, { watchlisted: 1 });
+    const conversationId = await seedConversation(BOT_ID, customerId, SUPPORT_CHAT_ID, 2011);
+    await seedMessage(conversationId, 2011, 7011);
+    await handleCommand(ctxFor(commandUpdate(7031, 7031, ADMIN_ID, '/deluser', 2011), makeTelegram(dangerOkStubs()).telegram));
+
+    const { telegram, calls } = makeTelegram(noticeOnlyStubs()); // 删消息/删 Topic 未编排 = 不得发生
+    await handleCommand(
+      ctxFor(commandUpdate(7032, 7032, ADMIN_ID, `/deluser confirm ${customerId + 100}`, 2011), telegram),
+    );
+
+    // 零删除 + 墓碑未写（关门不得在拒绝路径发生）
+    expect(await customerRow(BOT_ID, 9941)).not.toBeNull();
+    expect(await conversationsCount(customerId)).toBe(1);
+    expect(await messagesCount(conversationId)).toBe(1);
+    expect(await tombstoneRow(BOT_ID, 9941)).toBeNull();
+
+    // 仅发起审计一条，无 confirmed 执行行
+    const audits = auditsForCustomer(await auditRows('deluser'), customerId);
+    expect(audits).toHaveLength(1);
+    expect(JSON.parse(audits[0]?.detail_json ?? '{}').confirmed).toBeUndefined();
+
+    // 拒绝提示（不发删除类外呼）
+    expect(callsOf(calls, 'sendMessage')).toHaveLength(1);
+    expect(callsOf(calls, 'sendMessage')[0]?.payload).toEqual({
+      chat_id: SUPPORT_CHAT_ID,
+      message_thread_id: 2011,
+      text: CONFIRM_MISMATCH_NOTICE,
+    });
+  });
+
+  it('⑥c confirm 超时拒绝（种子发起 audit 11min 前）：零删除零墓碑、提示作废、无执行 audit（docs/04 步骤 3）', async () => {
+    const customerId = await seedCustomer(BOT_ID, 9942);
+    const conversationId = await seedConversation(BOT_ID, customerId, SUPPORT_CHAT_ID, 2012);
+    await seedMessage(conversationId, 2012, 7012);
+    await seedIntentAudit('deluser', customerId, 9942, minutesAgoIso(11)); // 超出 10 分钟窗口
+
+    const { telegram, calls } = makeTelegram(noticeOnlyStubs());
+    await handleCommand(
+      ctxFor(commandUpdate(7033, 7033, ADMIN_ID, `/deluser confirm ${customerId}`, 2012), telegram),
+    );
+
+    expect(await customerRow(BOT_ID, 9942)).not.toBeNull();
+    expect(await conversationsCount(customerId)).toBe(1);
+    expect(await messagesCount(conversationId)).toBe(1);
+    expect(await tombstoneRow(BOT_ID, 9942)).toBeNull();
+    const audits = auditsForCustomer(await auditRows('deluser'), customerId);
+    expect(audits).toHaveLength(1); // 只有种子发起行，无执行审计
+    expect(JSON.parse(audits[0]?.detail_json ?? '{}').confirmed).toBeUndefined();
+    expect(callsOf(calls, 'sendMessage')).toHaveLength(1);
+    expect(callsOf(calls, 'sendMessage')[0]?.payload).toEqual({
+      chat_id: SUPPORT_CHAT_ID,
+      message_thread_id: 2012,
+      text: CONFIRM_EXPIRED_NOTICE,
+    });
+  });
+
+  it('⑥d 重复 confirm 幂等：customer 已删 → 反查失败静默（零外呼、墓碑保留、无新 audit）', async () => {
+    const customerId = await seedCustomer(BOT_ID, 9943);
+    const conversationId = await seedConversation(BOT_ID, customerId, SUPPORT_CHAT_ID, 2013);
+    await seedMessage(conversationId, 2013, 7013);
+    await executeDeluser(customerId, 2013, 7034);
+    expect(await customerRow(BOT_ID, 9943)).toBeNull(); // 前置：已成功删除
+
+    // 空桩：任何外呼都会抛错；customer 已删 → thread 反查失败必须整体静默
+    const { telegram, calls } = makeTelegram({});
+    await expect(
+      handleCommand(ctxFor(commandUpdate(7036, 7036, ADMIN_ID, `/deluser confirm ${customerId}`, 2013), telegram)),
+    ).resolves.toBeUndefined();
+
+    expect(calls).toHaveLength(0);
+    expect(await customerRow(BOT_ID, 9943)).toBeNull();
+    expect(await tombstoneRow(BOT_ID, 9943)).not.toBeNull(); // 墓碑未被重复 confirm 触碰
+    expect(await conversationsCount(customerId)).toBe(0);
+    expect(await messagesCount(conversationId)).toBe(0);
+    expect(auditsForCustomer(await auditRows('deluser'), customerId)).toHaveLength(2); // 发起 + 执行，不追加
   });
 });

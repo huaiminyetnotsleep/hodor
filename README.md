@@ -52,7 +52,7 @@ npm run typecheck && npm run lint
 make db-customers                                 # 只读巡检（另有 db-conversations / db-messages / db-inbox-failed）
 ```
 
-当前实现进度（S1）：Worker 仅暴露 `GET /health`；webhook 路由 S3、管理命令 S6–S8、`/admin` 端点 S9 按任务树逐步挂载。任务树与各子任务验收标准见 `.trellis/tasks/`。
+当前实现进度：S1–S10 全部完成（Phase 1 MVP 功能全集：webhook/inbox、双向中继、六条管理命令、/admin 端点、审计、148 例自动化测试全绿）。剩余工作 = 下方 V4–V10 人工回归（分期计划见 V10 小节）。任务树与各子任务验收标准见 `.trellis/tasks/`。
 
 ## 部署到 Cloudflare（自动部署 · Workers Builds）
 
@@ -123,11 +123,11 @@ curl https://hodor.<你的子域>.workers.dev/health
 
 ### V2 · S2 Telegram 客户端（✅ 自动化已覆盖）
 
-1. `npm test` 全绿——`telegram-client` 21 例：错误分类矩阵、429 原地重试两路径、参数拼装、缓存命中/过期
+1. `npm test` 全绿——`telegram-client` 23 例：错误分类矩阵、429 原地重试两路径、参数拼装、缓存命中/过期
 
 ### V3 · S3 Webhook 与幂等（✅ 自动化已覆盖）
 
-1. `npm test` 全绿——`webhook-auth` 7 例（缺失/错误 Secret → 401 且零副作用、key 不匹配 → 404）、`inbox-machine` 15 例（docs/10 幂等七条）、`classify` 14 例（忽略矩阵）
+1. `npm test` 全绿——`webhook-auth` 7 例（缺失/错误 Secret → 401 且零副作用、key 不匹配 → 404）、`inbox-machine` 15 例（docs/10 幂等七条）、`classify` 18 例（忽略矩阵 + 出站改判）
 2. 手工抽查（可选）：错误 Secret curl → 401；重放同 `update_id` → 200 跳过
 
 ### V4 · S4 入站中继 0→1（★ 人工回归，**待执行**）
@@ -148,7 +148,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 3. ★ A 拉黑 Bot → 管理员回复 → Topic 出现一次「⚠️ 用户已停止与 Bot 的对话」提示；重复回复不刷屏且仍尝试送达
 4. ★ A 解除拉黑再发消息 → 管理员回复恢复送达（A 侧也会看到恢复）
 5. ★ 非白名单成员在群 Topic 发言 → 无任何中继
-6. 自动化：`outbound-handler` 10 例（校验矩阵/403 置位/恢复闭环/429 重投）已覆盖上述逻辑
+6. 自动化：`outbound-handler` 12 例（校验矩阵/群主 creator 放行/403 置位/恢复闭环/429 重投/400 毒丸）已覆盖上述逻辑
 
 ### V6 · S6 管理命令 /ban /unban（★ 人工回归，**待执行**，依赖 V4/V5 完成）
 
@@ -156,7 +156,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 2. ★ 用户 B 全程不受影响
 3. ★ `/unban` → A 恢复、🔇 消失（watchlisted 用户则变 ⚠️）
 4. ★ 非白名单账号发 `/ban` → 不执行、无任何反应
-5. 自动化：`admin-commands` 14 例（白名单内外/删消息/图标三态/审计/单一事实源联动）
+5. 自动化：`admin-commands` 16 例（parseCommand 纯函数/白名单内外/删消息/图标三态/审计/单一事实源联动）
 
 ### V7 · S7 高危名单 /risk /unrisk（★ 人工回归，**待执行**，依赖 V6 完成）
 
@@ -176,7 +176,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 /deluser（场景 21）：
 4. ★ 两步确认后 → customer/conversations/messages 全删 + Topic 删除 + General 公告 + 审计含 deluser
 5. ★ 该用户再发消息无响应；发 `/start` → 新序号恢复对话，高危标记按墓碑继承
-6. 自动化：`admin-danger` 10 例（审计先行顺序断言/墓碑先行/幂等/白名单）
+6. 自动化：`admin-danger` 13 例（/purge 与 /deluser 各自的两步确认边界/审计先行顺序断言/墓碑先行/幂等/白名单）
 
 ### V9 · S9 管理端点与绑定（★ 人工回归，**待执行**；完成后 S4 手工 seed 可退役）
 
@@ -186,14 +186,58 @@ curl https://hodor.<你的子域>.workers.dev/health
 4. ★ （可选）`/admin/webhook/unbind` → 重绑恢复；错误 Bearer → 401；1 分钟内 >10 次 → 429
 5. 自动化：`admin-endpoints` 11 例（setup 全链路/幂等/回退/限速/审计无敏感值）
 
-### V5+ · S5 起随任务交付追加本节
+### V10 · S10 终验：docs/10 全部 21 条真机场景（★ 人工回归，**待执行**，依赖 V4–V9 完成）
 
-出站中继（管理员回复送达/403 提示/恢复提示）、管理命令、管理端点、S10 终验（docs/10 全部 21 条）。
+> docs/10「集成测试（真机）」21 条的执行 runbook。每条标注：必做/顺延、对应 V 小节或
+> [bootstrap.md](scripts/dev/bootstrap.md) 步骤、判定要点。实际结果由执行人逐条记录到
+> `.trellis/tasks/09-28-s10-acceptance/acceptance-report.md`（或任务工件）。
+> 12/17/18 为换绑/灰度类，**换绑实际发生时补做**；其余 18 条必做。
+
+**分期执行建议**（依赖关系决定顺序，危险命令最后做）：
+
+| 期 | 前提 | 执行内容 |
+|---|---|---|
+| 第一期 | V4 完成（bootstrap.md 快径已走通） | 场景 1–2、10–11（入站基础 + 幂等） |
+| 第二期 | V5–V7 完成 | 场景 3–9、13–16、20（双向中继 + /ban /unban /risk） |
+| 第三期 | V8–V9 完成（**V8 不可逆命令放最后**） | 场景 19、21（/purge /deluser 演练） |
+| 顺延 | 换绑/灰度实际发生时 | 场景 12、17、18 |
+
+**逐条清单**：
+
+| # | 场景（docs/10 原文摘要） | 状态 | 对应节 | 判定要点 |
+|---|---|---|---|---|
+| 1 | 用户 A、B 同时发送消息 | 必做 | V4.2/V4.4（bootstrap 5 步 #1/#3） | 两条都进群 |
+| 2 | 确认分别进入 Topic A、Topic B | 必做 | V4.4 | 各自 Topic、标题 `👤 昵称 完整ID · #序号` |
+| 3 | 管理员分别回复 | 必做 | V5.1 | 在 Topic 内直接回复任意消息即可 |
+| 4 | 确认回复回到正确用户 | 必做 | V5.1 | A/B 各收到自己 Topic 的回复，不串线 |
+| 5 | 在 Topic A 执行 /ban | 必做 | V6.1 | 命令消息即被删除 |
+| 6 | 确认 A 后续消息被阻止且标题显示 🔇 | 必做 | V6.1 | A 再发无响应，标题 🔇 |
+| 7 | 确认 B 不受影响 | 必做 | V6.2 | B 照常收发 |
+| 8 | 在 Topic A 执行 /unban | 必做 | V6.3 | 命令消息被删 |
+| 9 | 确认 A 恢复且 🔇 消失 | 必做 | V6.3 | 标题恢复 👤（watchlisted 则 ⚠️），消息照常中继 |
+| 10 | 重复发送同一 Update（重放 inbox payload） | 必做 | V4.6（bootstrap 5 步 #5 curl 模板） | 200，无新登记 |
+| 11 | 确认没有重复创建 Topic 或重复发送 | 必做 | V4.6 | Topic 数、WELCOME 数不变 |
+| 12 | 解绑/重绑和灰度更新期间确认不丢 Update | 顺延 | V9.4（unbind 缺省保留积压；bootstrap 附录台账） | 重绑后积压 Update 补投不丢 |
+| 13 | 用户 A 拉黑 Bot → 管理员回复 → 「无法送达」提示 | 必做 | V5.3 | Topic 出现一次提示，重复回复不刷屏 |
+| 14 | 用户 A 解除拉黑并再发消息 → 标志清除、回复恢复 | 必做 | V5.4 | 恢复提示出现，回复可达 |
+| 15 | 非白名单成员在支持群 Topic 发言 → 无任何中继 | 必做 | V5.5 | 群内无反应、用户私聊无反应 |
+| 16 | 制造 429（短时间大量发送）→ 退避后仍全部送达 | 必做 | V5.6（连发数十条触发限流） | 无丢失；`getWebhookInfo` 无堆积 |
+| 17 | 换绑演练：归档台账并绑定新 Bot → 老用户进原 Topic | 顺延 | bootstrap.md「附录：换绑归档台账」+ docs/05 Runbook | 历史连续、Topic 不新建 |
+| 18 | 换绑演练：新 Bot 低位 update_id 不被旧台账幂等命中 | 顺延 | 同上 | 新消息正常处理 |
+| 19 | /purge 演练（两步确认） | 必做 | V8 /purge 1–3 | 整题删除、D1 无残留、General 公告、审计含 purge；再发消息同 #序号新题 |
+| 20 | /risk 演练（⚠️、WATCH_NOTICE 24h、与 /ban 正交、/unrisk） | 必做 | V7.1–V7.4 | 全链路按 V7 判定 |
+| 21 | /deluser 演练（两步确认、墓碑） | 必做 | V8 /deluser 4–5 | 全删、General 公告、审计含 deluser；再发无响应，/start 后新序号恢复并继承高危标记 |
+
+**附带实测项（终验时顺带，一次即可）**：手动 close 一个**未封禁**测试用户的 Topic → 该用户在 Bot 私聊发一条消息（入站 copyMessage 会写入该 Topic）→
+消息出现在该 closed Topic，则 `CLOSE_TOPIC_ON_BAN` 选项（`src/pipeline/commands/ban.ts` TODO）可在后续版本启用；
+若 Telegram 报 TOPIC_CLOSED 类错误，则永久移除该选项并删除 TODO（决策记录见 acceptance-report.md 第三节）。
+⚠️ 判定主体是 **Bot**（copyMessage 的写入方），不是人类管理员——管理员自己能在 closed Topic 发言不代表 Bot 可以。
 
 ### 部署后的更新与回滚（三条路径通用）
 
 - 源码更新走 push 自动部署（路径三则手工 deploy）；**不再点按钮 / 不再重复导入**
 - 回滚：Dashboard → Deployments 一键回退（秒级）或 `npx wrangler rollback`；**Worker 回滚不回滚 D1**，迁移始终 append-only（docs/08）
+- 默认全量生效；需要灰度时用 Dashboard → Deployments → 版本上线控制（Versions gradual deployments，如 1% → 10% → 50% → 100%），任一阶段异常立即回退 Worker 版本（docs/08「滚动发布」）；灰度期间新旧版本共用兼容 Schema 与状态值
 - Webhook URL、Secrets、D1 资源跨更新原样保留（发布不重设 Webhook，docs/08）
 - Bot 行为的人工验证从 S4 开始（首条真实消息建 Topic）；S1 阶段远端验证的是部署链路与 `/health`
 

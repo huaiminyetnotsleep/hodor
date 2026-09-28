@@ -11,9 +11,11 @@ import { callsOf, makeTelegram, type MethodStub } from './telegram-stub';
 
 // design.md 测试设计（S5）：校验矩阵 4 分支各自 ignore、正常出站 copy 参数 + 落库 9 字段、
 // 403 首次置位 + 提示一次、置位期不重复提示但仍尝试、恢复提示、命令文本不中继、429 → 5xx。
+// S10 补齐（docs/10 幂等状态机「400 毒丸」+ 出站校验链）：④b Bot 为群主（creator）放行、
+// ⑪ 非 403 permanent（400 毒丸）→ markProcessed(last_error)、不落库不提示。
 // 真 D1（cloudflare-pool + 本文件隔离存储）+ 桩 telegram client（makeTelegram 与入站套件共用）。
 // 注意：outbound 处理器内的 getChatMember 缓存是模块级（Worker 隔离实例存活）——
-// 「Bot 非管理员」用例使用独立 bot（不同 support_chat_id/telegram_bot_id），避免污染主 bot 的缓存键。
+// 「Bot 非管理员」/「Bot 群主」用例各自使用独立 bot（不同 support_chat_id/telegram_bot_id），避免污染主 bot 的缓存键。
 
 const db = env.DB;
 const BOT_ID = 1;
@@ -36,6 +38,9 @@ const BOT: Bot = {
 
 /** 「Bot 非管理员」专用 bot：独立缓存键（chatId:userId），与主 bot 互不污染 */
 const BOT_NON_ADMIN: Bot = { ...BOT, id: 2, telegram_bot_id: 4304, support_chat_id: -100555004 };
+
+/** 「Bot 是群主（creator）」专用 bot：独立缓存键，同上 */
+const BOT_CREATOR: Bot = { ...BOT, id: 3, telegram_bot_id: 4305, support_chat_id: -100555005 };
 
 // ── telegram 桩（docs/10：fetch 层打桩；makeTelegram/callsOf 共用于 ./telegram-stub.ts）──
 
@@ -199,6 +204,11 @@ beforeAll(async () => {
       "INSERT INTO bots (telegram_bot_id, webhook_key, webhook_secret_hash, support_chat_id, created_at, updated_at) VALUES (4304, 'k-outbound-test-bot-2', 'sha256hex', -100555004, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
     )
     .run();
+  await db
+    .prepare(
+      "INSERT INTO bots (telegram_bot_id, webhook_key, webhook_secret_hash, support_chat_id, created_at, updated_at) VALUES (4305, 'k-outbound-test-bot-3', 'sha256hex', -100555005, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+    )
+    .run();
 });
 
 // ── design.md 测试设计 ───────────────────────────────────────────────────────
@@ -269,6 +279,32 @@ describe('handleOutbound 出站链路（design.md 测试设计）', () => {
     expect(callsOf(calls, 'getChatMember')).toHaveLength(1); // 校验外呼仅此一次
     expect(callsOf(calls, 'copyMessage')).toHaveLength(0);
     expect(await messagesOfConversation(conversationId)).toHaveLength(0);
+  });
+
+  it('④b Bot 是群主（creator）→ 放行（isPrivilegedMember creator 分支，docs/10 校验链，S10 补齐）', async () => {
+    const customerId = await seedCustomer(BOT_CREATOR.id, 9914);
+    const conversationId = await seedOpenConversation(BOT_CREATOR.id, customerId, BOT_CREATOR.support_chat_id, 819);
+    await seedAdmin(BOT_CREATOR.id, ADMIN_ID);
+    const { telegram, calls } = makeTelegram({
+      getChatMember: () => ({ status: 'creator', user: { id: BOT_CREATOR.telegram_bot_id, is_bot: true, first_name: 'hodor' } }),
+      copyMessage: () => ({ message_id: 9041 }),
+    });
+    const update: TelegramUpdate = {
+      update_id: 3005,
+      message: {
+        message_id: 3005,
+        from: { id: ADMIN_ID, is_bot: false, first_name: 'Admin' },
+        chat: { id: BOT_CREATOR.support_chat_id, type: 'supergroup' },
+        date: 1760000000,
+        message_thread_id: 819,
+        text: 'bot is group owner',
+      },
+    };
+
+    await expect(handleOutbound(ctxFor(update, telegram, BOT_CREATOR))).resolves.toBeUndefined();
+
+    expect(callsOf(calls, 'copyMessage')).toHaveLength(1); // creator 与 administrator 同为特权身份 → 放行
+    expect(await messagesOfConversation(conversationId)).toHaveLength(1); // 照常落库
   });
 
   it('⑤ 正常出站：copy 参数（from=群消息/to=客户私聊，无 thread）+ 落库 9 字段 + 文本/媒体提取 + 缓存复用', async () => {
@@ -427,5 +463,29 @@ describe('handleOutbound 出站链路（design.md 测试设计）', () => {
     expect(row?.last_error).toContain('copyMessage failed (retryable)');
     expect(await messagesOfConversation(conversationId)).toHaveLength(0);
     expect(callsOf(calls, 'sendMessage')).toHaveLength(0);
+  });
+
+  it('⑪ 400 毒丸（非 403 permanent）→ markProcessed(last_error)、不落库不提示（docs/03 毒丸不重试，S10 补齐）', async () => {
+    const conversationId = await seedValidTopic(9908, 820);
+    const update = topicTextUpdate(3061, 3061, ADMIN_ID, 'poison pill', 820);
+    const registration = await registerUpdate(db, BOT_ID, update);
+    const { telegram, calls } = makeTelegram({
+      getChatMember: adminMemberStub,
+      copyMessage: () => ({
+        status: 400,
+        body: { ok: false, error_code: 400, description: 'Bad Request: message to copy not found' },
+      }),
+    });
+
+    const result = await processUpdate(ctxFor(update, telegram), registration, handleOutbound, resolveMaxAttempts('8'));
+
+    expect(result.httpStatus).toBe(200); // 永久失败不进重试（docs/03 错误分类）
+    expect(result.rowStatus).toBe('processed');
+    const row = await inboxRow(3061);
+    expect(row?.status).toBe('processed');
+    expect(row?.attempts).toBe(0);
+    expect(row?.last_error).toContain('copyMessage permanent'); // 毒丸留痕（与入站同语义）
+    expect(await messagesOfConversation(conversationId)).toHaveLength(0); // 不落库
+    expect(callsOf(calls, 'sendMessage')).toHaveLength(0); // 非拉黑：不置位不提示
   });
 });

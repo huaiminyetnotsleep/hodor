@@ -349,6 +349,11 @@ describe('/risk /unrisk 命令（design.md 测试设计 ①–⑤、⑨）', () 
 });
 
 describe('入站 WATCH_NOTICE 24h 限频（design.md 测试设计 ⑥–⑧，docs/03 步骤 11）', () => {
+  // 边界说明（S10 终验豁免记录）：docs/04 语义为「距上次提示**超过** 24h 才再次发送」——
+  // 代码用严格 > 比较（src/pipeline/inbound/handler.ts 的 WATCH_NOTICE_INTERVAL_MS），
+  // 恰好 24h 整点不提示（「等于」不算「超过」），与文档一致。整点用例无法以真实时钟种子稳定命中：
+  // 写种到断言之间时钟必然前进，24h 整点即漂移为「刚超过」；注入假时钟又违反本套件 design.md 决策。
+  // 故 ⑦（1h 前）/⑧（25h 前）两例覆盖窗口两侧，整点命中列入 acceptance-report.md 豁免表。
   it('⑥ last_watch_notice_at=NULL 首次入站 → 发提示 + 写时间戳（消息照常中继）', async () => {
     const customerId = await seedCustomer(BOT_ID, 9906, { watchlisted: 1 });
     await seedConversation(BOT_ID, customerId, SUPPORT_CHAT_ID, 1006);
