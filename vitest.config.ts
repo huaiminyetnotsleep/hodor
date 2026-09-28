@@ -11,7 +11,19 @@ export default defineConfig(async () => {
   const workers = {
     wrangler: { configPath: './wrangler.jsonc' },
     miniflare: {
-      bindings: { TEST_MIGRATIONS: migrations },
+      bindings: {
+        TEST_MIGRATIONS: migrations,
+        // S9：管理端点经 env 取 Secret/配置，测试必须不依赖本地 .dev.vars（真值不入库、
+        // CI 无此文件）——注入确定测试值（全为假值，仅测试隔离用），miniflare bindings
+        // 覆盖 wrangler 配置加载的 dev vars。
+        TELEGRAM_BOT_TOKEN: 'test-bot-token',
+        TELEGRAM_WEBHOOK_SECRET: 'test-webhook-secret',
+        ADMIN_SETUP_SECRET: 'test-admin-secret',
+        SUPPORT_CHAT_ID: '-1001234567890',
+        ADMIN_IDS: '111111111,222222222',
+        ALLOW_UNKNOWN_USERS: 'true',
+        MAX_ATTEMPTS: '8',
+      },
     },
   };
 

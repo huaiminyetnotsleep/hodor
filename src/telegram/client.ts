@@ -252,7 +252,7 @@ export function createTelegramClient(options: { botToken: string; fetchImpl?: ty
         message_id: params.messageId,
       }),
 
-    setMyCommands: (params) => request<true>('setMyCommands', { commands: params.commands }),
+    setMyCommands: (params) => request<true>('setMyCommands', compactBody({ commands: params.commands, scope: params.scope })),
 
     getChatMember: (params) =>
       request<TelegramChatMember>('getChatMember', {

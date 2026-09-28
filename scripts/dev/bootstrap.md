@@ -109,6 +109,28 @@ curl -sS "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/deleteWebhook"   # 解
 
 巡检辅助：`make db-customers / db-conversations / db-messages / db-inbox-failed`（`REMOTE=1` 查远端）或 D1 Console。
 
+## 附录：换绑归档台账（S9 · docs/05 换绑 Runbook 步骤 ③）
+
+> 适用时机：**跨 Bot 换绑**（docs/05「换绑机器人」）时执行一次；常规部署/重绑**不需要**。
+> 前提：已 `POST /admin/webhook/unbind`（此后 Worker 无入站流量，是唯一安全窗口），且
+> `inbox_updates` 无 pending 积压——pending 不为 0 时**禁止继续**，先排干（docs/08）。
+
+```sql
+-- ① 核对：pending 必须为 0（不为 0 说明还有积压在投递，先等它排干）
+SELECT COUNT(*) FROM inbox_updates WHERE status = 'pending';
+
+-- ② 先导出备份（Phase 3 起落 R2），再清空已终结行（幂等：重复执行无副作用）
+DELETE FROM inbox_updates WHERE status IN ('processed','failed');
+```
+
+执行通道：D1 Console 或 `npx wrangler d1 execute hodor --remote --command "<SQL>"`；
+直查库不经过 `audit_logs`（docs/09 运维边界），操作者自律：只在换绑窗口执行、不外发数据。
+
+**为什么必须做**：`update_id` 序列每个 Bot 独立递增。老 Bot 已把 1..N 写进 `inbox_updates`，
+新 Bot 的 Update 几乎必然从低位重新开始——不清台账，新消息会与旧行命中
+`UNIQUE(bot_id, telegram_update_id)`，旧行状态是 processed → 新消息被幂等机制**静默吞掉**
+（docs/05「为什么必须归档台账」）。换绑收尾见 docs/05 Runbook ④–⑦。
+
 ## 排错表
 
 | 现象 | 原因与解法 |

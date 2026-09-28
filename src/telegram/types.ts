@@ -63,6 +63,15 @@ export interface TelegramBotCommand {
   description: string;
 }
 
+/**
+ * setMyCommands 的作用域（docs/04「命令注册」：Phase 1 只用群级 BotCommandScopeChat，
+ * 命令菜单对支持群内成员可见；per-Topic scope 不用）。type 即 Bot API 的 "chat"。
+ */
+export interface TelegramBotCommandScopeChat {
+  type: 'chat';
+  chat_id: number | string;
+}
+
 /** getWebhookInfo → WebhookInfo（S9 自检用） */
 export interface TelegramWebhookInfo {
   url: string;
@@ -128,6 +137,8 @@ export interface DeleteMessageParams {
 
 export interface SetMyCommandsParams {
   commands: readonly TelegramBotCommand[];
+  /** 缺省为 Bot API 默认 scope（全聊默认菜单）；setup 传群级 scope（docs/04） */
+  scope?: TelegramBotCommandScopeChat;
 }
 
 export interface GetChatMemberParams {

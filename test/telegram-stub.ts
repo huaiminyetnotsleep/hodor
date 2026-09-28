@@ -1,6 +1,10 @@
 /**
  * test 共用 · telegram fetch 桩（docs/10：fetch 层打桩，不发起真实网络）。
- * 由 inbound-handler.test.ts（S4）与 outbound-handler.test.ts（S5）共用——
+ * 两种接线方式共用同一核心 createStubFetch：
+ *   1. makeTelegram：注入 fetchImpl 直调处理器（inbound/outbound 单测，S4/S5）；
+ *   2. vi.stubGlobal('fetch', createStubFetch(...).fetchImpl)：SELF.fetch 全链路测试
+ *      （admin-endpoints，S9）——main worker 与测试同 isolate，全局 mock 对其同样生效
+ *      （cloudflare:test SELF 契约）。
  * 桩按 method + 入参返回编排结果并记录调用，未编排的 method 直接抛错（等价「不得发生」断言）。
  */
 import { createTelegramClient, type TelegramClient } from '../src/telegram';
@@ -18,7 +22,8 @@ function isRawResponse(value: StubResult): value is { status: number; body: unkn
   return typeof value === 'object' && value !== null && 'status' in value && 'body' in value;
 }
 
-export function makeTelegram(handlers: Record<string, MethodStub>): { telegram: TelegramClient; calls: TelegramCall[] } {
+/** fetch 桩核心：按 Bot API URL 中的 method 分发 handlers，记录 (method, payload) 调用 */
+export function createStubFetch(handlers: Record<string, MethodStub>): { fetchImpl: typeof fetch; calls: TelegramCall[] } {
   const calls: TelegramCall[] = [];
   const fetchImpl: typeof fetch = async (input, init) => {
     const method = /\/bot[^/]+\/([A-Za-z]+)/.exec(String(input))?.[1] ?? '';
@@ -40,6 +45,11 @@ export function makeTelegram(handlers: Record<string, MethodStub>): { telegram: 
       headers: { 'content-type': 'application/json' },
     });
   };
+  return { fetchImpl, calls };
+}
+
+export function makeTelegram(handlers: Record<string, MethodStub>): { telegram: TelegramClient; calls: TelegramCall[] } {
+  const { fetchImpl, calls } = createStubFetch(handlers);
   return { telegram: createTelegramClient({ botToken: 'test-token', fetchImpl }), calls };
 }
 

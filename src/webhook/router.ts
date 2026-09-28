@@ -12,6 +12,8 @@
  * 响应只携带状态码：200 = 已处理/已吸收，5xx = 处理失败待重投，401/404 = 拒绝。
  */
 import { classifyUpdate, getUpdateHandler, type UpdateContext } from '../domain';
+import { sha256Hex, timingSafeEqual } from '../crypto';
+import { isRecord } from '../http';
 import { processUpdate, registerUpdate, resolveMaxAttempts } from '../inbox';
 import { findByWebhookKey } from '../store';
 import { createTelegramClient, type TelegramUpdate } from '../telegram';
@@ -26,31 +28,6 @@ function notFound(): Response {
 
 function emptyOk(): Response {
   return new Response(null, { status: 200 });
-}
-
-/** SHA-256 十六进制小写（与 bots.webhook_secret_hash 的存储格式一致，docs/05） */
-async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-/**
- * 常量时间比较：长度相同逐位 XOR 累积，全部相同才返回 true（防时序侧信道，docs/05）。
- * 长度不同直接 false——哈希长度本身不是机密（定长 64 hex）。
- */
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i++) {
-    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return mismatch === 0;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export async function handleTelegramWebhook(request: Request, env: Env): Promise<Response> {
