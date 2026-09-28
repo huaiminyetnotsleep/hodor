@@ -1,0 +1,29 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor and temporary files
+*.swp
+*.swo
+*~
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and generated output
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+coverage/
+dist/
+build/
+*.log
+
+# Local planning and Trellis state
+.zcode/plans/
+.trellis/tasks/
+.trellis/workspace/
