@@ -1,8 +1,11 @@
 import { beforeAll, expect, it } from 'vitest';
 import { applyD1Migrations, env, SELF } from 'cloudflare:test';
+import { setUpdateHandler } from '../src/domain';
 
 // docs/10「入口与鉴权」3 条 + 幂等重放 + 判空 payload。
 // 存储按文件隔离：本文件自迁移 + 种子一条 bots 行（webhook_secret_hash = SHA-256(测试 Secret)）。
+// 本文件只测鉴权/幂等/判空，不测业务链路：S4 起 inbound 槽位为真实处理器（会外呼 Telegram），
+// 故注入 no-op 桩（docs/10：处理器注入点仅供 registry 本体与测试使用）。
 
 const db = env.DB;
 
@@ -27,7 +30,7 @@ function webhookPost(options: { key?: string; secret?: string; body: string }): 
   return SELF.fetch(webhookUrl(options.key), { method: 'POST', headers, body: options.body });
 }
 
-/** 私聊文本 Update（分类 inbound → 占位处理器 → processed） */
+/** 私聊文本 Update（分类 inbound → 已注入的 no-op 桩处理器 → processed） */
 function privateUpdateJson(updateId: number): string {
   return JSON.stringify({
     update_id: updateId,
@@ -61,6 +64,7 @@ async function auditCount(): Promise<number> {
 
 beforeAll(async () => {
   await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+  setUpdateHandler('inbound', async () => {}); // 业务链路无关本文件（S4 真实处理器会外呼 Telegram）
   const secretHash = await sha256Hex(SECRET);
   await db
     .prepare(

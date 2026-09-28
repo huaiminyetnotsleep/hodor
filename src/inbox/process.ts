@@ -44,13 +44,32 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-/** pending → processed；带 status='pending' 守卫，处理器已自行标记时为无害 no-op */
-async function markProcessed(db: D1Database, botId: number, updateId: number): Promise<void> {
+/**
+ * pending → processed；带 status='pending' 守卫，处理器已自行标记时为无害 no-op。
+ * 状态机内部在处理器成功后调用；导出版本供处理器执行「标记 processed」语义
+ * （docs/03 错误分类：400 毒丸 / blocked 拒绝等「拒绝不是故障」分支，S4 起）——
+ * 可选 lastError 用于毒丸留痕（docs/03：记录 last_error 后标记 processed）。
+ */
+export async function markProcessed(
+  db: D1Database,
+  botId: number,
+  updateId: number,
+  lastError?: string,
+): Promise<void> {
+  if (lastError === undefined) {
+    await db
+      .prepare(
+        "UPDATE inbox_updates SET status = 'processed', processed_at = ? WHERE bot_id = ? AND telegram_update_id = ? AND status = 'pending'",
+      )
+      .bind(nowIso(), botId, updateId)
+      .run();
+    return;
+  }
   await db
     .prepare(
-      "UPDATE inbox_updates SET status = 'processed', processed_at = ? WHERE bot_id = ? AND telegram_update_id = ? AND status = 'pending'",
+      "UPDATE inbox_updates SET status = 'processed', processed_at = ?, last_error = ? WHERE bot_id = ? AND telegram_update_id = ? AND status = 'pending'",
     )
-    .bind(nowIso(), botId, updateId)
+    .bind(nowIso(), lastError, botId, updateId)
     .run();
 }
 

@@ -27,12 +27,26 @@ export interface TelegramForumTopic {
   message_thread_id: number;
 }
 
-/** Bot API User（getMe；本仓库只消费 id/username/is_bot） */
+/** Bot API User（getMe / message.from；本仓库只消费 id/username/is_bot 与姓名字段） */
 export interface TelegramUser {
   id: number;
   is_bot: boolean;
   first_name: string;
+  /** display_name 渲染用（docs/03 速查）；可选，判空 */
+  last_name?: string;
   username?: string;
+}
+
+/** Bot API PhotoSize（photo 数组项；只消费 file_id/width/height，docs/03 判空） */
+export interface TelegramPhotoSize {
+  file_id: string;
+  width: number;
+  height: number;
+}
+
+/** 媒体附件共同形状（voice/video/document/sticker；只消费 file_id，docs/03：不解析本体） */
+export interface TelegramFileRef {
+  file_id: string;
 }
 
 /** Bot API ChatMember（getChatMember；出站校验只看 status === 'administrator'，docs/02） */
@@ -63,6 +77,16 @@ export interface CopyMessageParams {
   chatId: number | string;
   fromChatId: number | string;
   messageId: number;
+  /** 复制进 Topic 时提供（docs/02：to = (support_chat_id, message_thread_id)，缺省落 General） */
+  messageThreadId?: number;
+}
+
+/** sendMessage：WELCOME / 服务提示 / 崩溃窗口标记消息（S4 起，docs/02/03） */
+export interface SendMessageParams {
+  chatId: number | string;
+  text: string;
+  /** 发进 Topic 时提供（docs/02） */
+  messageThreadId?: number;
 }
 
 export interface CreateForumTopicParams {
@@ -136,6 +160,15 @@ export interface TelegramMessage {
   message_thread_id?: number;
   text?: string;
   caption?: string;
+  /**
+   * 媒体内容字段（互斥出现；docs/03：不解析文件本体，只取 file_id 落库）。
+   * 未声明的媒体类型（audio/video_note/animation 等）不解析，content_type 回落 'text'。
+   */
+  photo?: TelegramPhotoSize[];
+  voice?: TelegramFileRef;
+  video?: TelegramFileRef;
+  document?: TelegramFileRef;
+  sticker?: TelegramFileRef;
 }
 
 /**

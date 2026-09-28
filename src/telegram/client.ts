@@ -26,6 +26,7 @@ import type {
   EditForumTopicParams,
   GetChatMemberParams,
   ReopenForumTopicParams,
+  SendMessageParams,
   SetMyCommandsParams,
   SetWebhookParams,
   TelegramChatMember,
@@ -42,6 +43,7 @@ const API_BASE = 'https://api.telegram.org';
 const RETRY_IN_PLACE_MAX_SECONDS = 3;
 
 export interface TelegramClient {
+  sendMessage(params: SendMessageParams): Promise<TelegramResult<TelegramMessageId>>;
   copyMessage(params: CopyMessageParams): Promise<TelegramResult<TelegramMessageId>>;
   createForumTopic(params: CreateForumTopicParams): Promise<TelegramResult<TelegramForumTopic>>;
   editForumTopic(params: EditForumTopicParams): Promise<TelegramResult<true>>;
@@ -161,12 +163,26 @@ export function createTelegramClient(options: { botToken: string; fetchImpl?: ty
   }
 
   return {
+    sendMessage: (params) =>
+      request<TelegramMessageId>(
+        'sendMessage',
+        compactBody({
+          chat_id: params.chatId,
+          text: params.text,
+          message_thread_id: params.messageThreadId,
+        }),
+      ),
+
     copyMessage: (params) =>
-      request<TelegramMessageId>('copyMessage', {
-        chat_id: params.chatId,
-        from_chat_id: params.fromChatId,
-        message_id: params.messageId,
-      }),
+      request<TelegramMessageId>(
+        'copyMessage',
+        compactBody({
+          chat_id: params.chatId,
+          from_chat_id: params.fromChatId,
+          message_id: params.messageId,
+          message_thread_id: params.messageThreadId,
+        }),
+      ),
 
     createForumTopic: (params) =>
       request<TelegramForumTopic>(
