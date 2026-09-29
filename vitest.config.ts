@@ -18,10 +18,9 @@ export default defineConfig(async () => {
         // 覆盖 wrangler 配置加载的 dev vars。
         TELEGRAM_BOT_TOKEN: 'test-bot-token',
         TELEGRAM_WEBHOOK_SECRET: 'test-webhook-secret',
-        ADMIN_SETUP_SECRET: 'test-admin-secret',
+        ADMIN_SECRET: 'test-admin-secret',
         SUPPORT_CHAT_ID: '-1001234567890',
         ADMIN_IDS: '111111111,222222222',
-        ALLOW_UNKNOWN_USERS: 'true',
         MAX_ATTEMPTS: '8',
       },
     },
