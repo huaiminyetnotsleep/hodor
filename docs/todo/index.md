@@ -12,6 +12,8 @@
 - [ ] Git 集成构建：自动创建 D1 数据库并完成绑定（变量名 `HODOR_DB`，需验证构建令牌的 D1 权限）
 - [ ] 部署时自动执行数据库迁移
 - [ ] vitest + vitest-pool-workers 测试基座
+- [ ] 版本注入（构建脚本生成版本模块，/health 展示版本号）
+- [ ] release-please workflow（Release PR + 自动 tag / GitHub Release）
 
 ### M1 Webhook 入口
 
