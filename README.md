@@ -132,24 +132,20 @@ curl https://hodor.<你的子域>.workers.dev/health
 
 ### V4 · S4 入站中继 0→1（★ 人工回归，**待执行**）
 
-**准备（一次性，约 5 分钟，全程浏览器 + 一条本地命令）**
+**准备（一次性，全程浏览器 + 一条 curl，无本地哈希/无 SQL）**
 
-1. 备齐：测试 Bot（记 Token）、测试私有 Forum 群（开 Topics、Bot 设管理员）、用户 A/B 账号
+1. 备齐：测试 Bot（Token 已在面板 `TELEGRAM_BOT_TOKEN`）、测试私有 Forum 群（开 Topics、Bot 设管理员）、用户 A/B 账号
 2. Bot 进群后在群里发一条消息 → 浏览器打开 `https://api.telegram.org/bot<TOKEN>/getUpdates` → 记下群 `chat.id`（-100 开头）和你的 `from.id`
-3. 本地算 Secret 哈希（值 = 面板 `TELEGRAM_WEBHOOK_SECRET`，注意无换行）：
-   `printf '%s' '<面板 Secret 值>' | shasum -a 256`
-4. 面板 → D1 `hodor` → Console，粘贴执行（三处占位替换）：
+3. 面板 → Worker → 设置 → 变量和机密：把 `SUPPORT_CHAT_ID`、`ADMIN_IDS` 更新为第 2 步真值（保存即生效）
+4. 一键绑定（终端一条命令，两处占位替换；哈希计算/建行/拉白名单/setWebhook 全部由 `/admin/setup` 自动完成）：
 
-   ```sql
-   INSERT INTO bots (telegram_bot_id, webhook_key, webhook_secret_hash, support_chat_id, status, created_at, updated_at)
-   VALUES (<getMe 的 bot id>, 'k-test-bot', '<第 3 步哈希>', <群 chat_id>, 'active',
-           strftime('%Y-%m-%dT%H:%M:%SZ','now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-   ON CONFLICT (telegram_bot_id) DO NOTHING;
+   ```bash
+   curl -X POST "https://hodor.<子域>.workers.dev/admin/setup" \
+        -H "Authorization: Bearer <面板 ADMIN_SETUP_SECRET 的值>"
    ```
 
-5. 浏览器打开绑 webhook（三处占位替换）：
-   `https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://hodor.<子域>.workers.dev/telegram/webhook/k-test-bot&secret_token=<面板 Secret 原文>&allowed_updates=["message"]`
-6. 验活：`https://hodor.<子域>.workers.dev/health` → `{"ok":true,"version":"0.1.0"}`
+   响应含 bot_id / webhook_key / webhook 信息即成功（空请求体 = 自动使用面板变量）
+5. 验活：响应里 webhook 项无 `last_error`；或访问 `https://hodor.<子域>.workers.dev/health` → `{"ok":true,"version":"0.1.0"}`
 
 **验证（5 项）**
 
@@ -159,7 +155,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 4. ★ A 改昵称再发 → 标题刷新
 5. ★ 重放：取 A 刚发那条的 `update_id`，curl 重发同 payload（带 Secret 头）→ 200 且不重复建题/发 WELCOME
 
-排错：401=第 3 步哈希与面板 Secret 不同源｜404=webhook_key 不是 `k-test-bot`｜无 Topic 创建=查面板 `ALLOW_UNKNOWN_USERS` 或 deleted_users 墓碑｜WELCOME 偶发丢失=best-effort 副调用属正常。
+排错：401=Bearer 与面板 `ADMIN_SETUP_SECRET` 不一致｜setup 502=Token 错（看响应 message）｜404=路径不符（以 setup 响应返回的 webhook_key 为准）｜无 Topic 创建=查面板 `ALLOW_UNKNOWN_USERS` 或 deleted_users 墓碑｜WELCOME 偶发丢失=best-effort 副调用属正常。
 
 ### V5 · S5 出站中继与 403（★ 人工回归，**待执行**，依赖 V4 完成）
 
