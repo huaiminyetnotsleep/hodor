@@ -5,4 +5,24 @@ hero:
   name: hodor
   text: Telegram 客服消息中继 Bot
   tagline: 一个用户，一个话题，消息不串线。
+
+features:
+  - icon: 🆓
+    title: 免费自部署
+    details: 跑在 Cloudflare Workers + D1 免费套餐上即可运行；消息数据只经过你自己的 Worker 和数据库，不经任何第三方中转，不怕消息泄露。
+  - icon: 🚀
+    title: 一键部署
+    details: Fork 仓库后在 Cloudflare 连接 Git 即完成部署：D1 建库、绑定、建表全自动，push 即更新；全程浏览器操作，无需本地环境。
+  - icon: 🗂️
+    title: 一人一话题
+    details: 每个用户独占超级群组的一个 topic，消息不再堆叠、分不清来自谁；多名管理员在 topic 里直接说话即可回复，无需回复某条特定消息。
+  - icon: 🤖
+    title: 人机验证 + 限频
+    details: 数学题 / 按钮验证码，一次验证永久有效（可配置 TTL）；每分钟消息数超限自动触发重新验证，防止 bot 刷掉 CF 免费额度。
+  - icon: 🔐
+    title: 隐私与安全
+    details: 三种密钥各司其职，bot token 永不进 URL；图片、视频、附件全部 Telegram file_id 直传，不落盘、零存储成本。
+  - icon: 🧩
+    title: 平滑演进
+    details: 所有数据表预留 bot 维度，多机器人、bot / 群组换绑迁移、TGuard 验证均已排期（见 TODO），v1 数据无需迁移即可升级。
 ---

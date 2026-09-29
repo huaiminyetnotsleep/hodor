@@ -28,12 +28,7 @@ export default defineConfig({
           { text: '全量列表', link: '/todo/' },
           { text: 'P1', link: '/todo/p1' },
           { text: 'P2', link: '/todo/p2' },
-          { text: 'P3', link: '/todo/p3' },
         ],
-      },
-      {
-        text: 'GitHub',
-        link: 'https://github.com/huaiminyetnotsleep/hodor',
       },
     ],
 
@@ -45,7 +40,6 @@ export default defineConfig({
             { text: '全量列表', link: '/todo/' },
             { text: 'P1', link: '/todo/p1' },
             { text: 'P2', link: '/todo/p2' },
-            { text: 'P3', link: '/todo/p3' },
           ],
         },
       ],
