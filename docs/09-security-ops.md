@@ -77,7 +77,7 @@
 - 解绑 Webhook 默认不丢 pending updates(见 [05](05-webhook-management.md));
 - 历史归档与清理分批执行(Phase 3);
 - 任何绑定/解绑、白名单变更都写审计日志,不记录敏感值;
-- 表数据查看(用户/消息等)走 Cloudflare 管理通道:Dashboard 的 D1 Console 或 `wrangler d1 execute --remote`,并**统一用脚本维护**——常用只读查询固化进 Makefile,目标命名:`db-customers`(用户列表:封禁状态、最近活跃)、`db-conversations`(会话与 Topic 映射)、`db-messages`(按会话查最近消息)、`db-inbox-failed`(failed 行巡检,与监控项同源);**不在 Worker 暴露数据查询端点**——消息正文属敏感数据,不为其新增公网 HTTP 面;直查库不经过 `audit_logs`,操作者自律:只读、不外发、不贴日志(见 [07](07-storage.md))。
+- 表数据查看(用户/消息等)走 Cloudflare 管理通道:Dashboard 的 D1 Console,常用只读查询固化进 `scripts/d1-console.sql`(客户、Bot 绑定、管理员、会话与 Topic 映射、消息截断、inbox 状态机总览、failed 行巡检与监控项同源、审计、已删除用户、会话活跃度);**不在 Worker 暴露数据查询端点**——消息正文属敏感数据,不为其新增公网 HTTP 面;直查库不经过 `audit_logs`,操作者自律:只读、不外发、不贴日志(见 [07](07-storage.md))。
 
 ---
 

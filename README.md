@@ -20,7 +20,7 @@ Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题�
 
 **环境变量**
 
-7. `cp .dev.vars.example .dev.vars`（本地开发用）；部署后在面板 Worker → 设置 → 变量和机密 配置同样 7 条（一次即可，`keep_vars: true` 已保证跨部署持久）
+7. 部署后在面板 Worker → 设置 → 变量和机密 配置 7 条（模板与说明见 `.dev.vars.example`，一次即可，`keep_vars: true` 已保证跨部署持久）；本地调试可选：`cp .dev.vars.example .dev.vars` 后 `npx wrangler dev`
 
 ## 环境变量说明（模板与注释见 `.dev.vars.example`）
 
@@ -37,19 +37,15 @@ Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题�
 注入方式（⚠️ 2026-09-28 实测与官方文档核实）：`wrangler deploy` 默认按配置重置绑定，但本仓库已设 **`keep_vars: true`**——面板「变量和机密」配置的变量（Text 或机密均可）**跨部署持久**；官方文档另明确 **Secrets 永不因部署删除**。
 
 - **全部 7 个**：部署后在面板 Worker → 设置 → 变量和机密 配置一次即可（fork 使用者零代码改动）；3 个 Secret 建议用「机密」类型，4 个配置 Text/机密均可
-- **本地开发**：写 `.dev.vars`（已被 git 忽略），与面板互不影响
+- **本地调试（可选）**：`cp .dev.vars.example .dev.vars` 后 `npx wrangler dev`（`.dev.vars` 已被 git 忽略），与面板互不影响
 - 也可用 `npx wrangler secret put <NAME>`（Secret 类型，等价持久）
 
 ## 开发流程
 
 ```bash
 npm install
-cp .dev.vars.example .dev.vars                    # 本地开发用；远端在面板「变量和机密」配一次
-npx wrangler d1 migrations apply hodor --local    # 本地建表（幂等，可重复执行）
-npm run dev                                       # http://localhost:8787/health
 npm test                                          # Vitest：本地 D1 + 打桩 Telegram
 npm run typecheck && npm run lint
-make db-customers                                 # 只读巡检（另有 db-conversations / db-messages / db-inbox-failed）
 ```
 
 当前实现进度：S1–S10 全部完成（Phase 1 MVP 功能全集：webhook/inbox、双向中继、六条管理命令、/admin 端点、审计、148 例自动化测试全绿）。剩余工作 = 下方 V4–V10 人工回归（分期计划见 V10 小节）。任务树与各子任务验收标准见 `.trellis/tasks/`。
@@ -118,7 +114,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 ### V1 · S1 部署冒烟（✅ 2026-09-28 已通过）
 
 1. `curl https://hodor.<你的子域>.workers.dev/health` → `{"ok":true,"version":"0.1.0"}`（workers.dev 地址：面板 → Workers & Pages → `hodor`）
-2. 数据库连通（二选一）：`make db-customers REMOTE=1` 返回 `success:true`；或面板 D1 `hodor` 看到 8 张表
+2. 数据库连通：面板 D1 `hodor` 看到 8 张表；或在 D1 Console 执行 [scripts/d1-console.sql](scripts/d1-console.sql) 首段表清单查询
 3. 自动部署闭环：任意 push → Workers Builds 自动构建部署
 
 ### V2 · S2 Telegram 客户端（✅ 自动化已覆盖）
@@ -258,5 +254,10 @@ curl https://hodor.<你的子域>.workers.dev/health
 
 ## 运维（docs/09 约定）
 
-- 只读查询走 Makefile：`make db-customers` / `db-conversations` / `db-messages` / `db-inbox-failed`（加 `REMOTE=1` 打远端）
 - 管理端操作不封装脚本，直接调 `/admin/*` 端点（docs/05），Bearer `ADMIN_SETUP_SECRET`（S9 起可用）
+
+### 数据库巡检（Dashboard D1 Console）
+
+**唯一查询途径**：Dashboard → Storage & Databases → D1 → `hodor` → Console，直接输入 SQL 执行。现成查询集见 [scripts/d1-console.sql](scripts/d1-console.sql)：8 张表的常用查询（客户 / Bot 绑定 / 管理员 / 会话与 Topic 映射 / 消息截断 / inbox 状态机总览 / 失败队列 / 审计 / 已删除用户 / 会话活跃度 Top 20），整段或单条粘贴执行。
+
+只读约定（docs/09）：只固化只读查询，不封装任何写操作或管理操作（管理走 `/admin/*` 端点）；消息正文属敏感数据，直查结果不外发、不贴日志。

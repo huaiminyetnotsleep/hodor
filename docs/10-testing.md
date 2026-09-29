@@ -7,7 +7,7 @@
 
 ## 测试环境建议
 
-- **单元/管线测试**:`wrangler dev` + 本地 D1 + mock Telegram API(fetch 层打桩,覆盖 429/403/400/5xx 分类,见 [03](03-message-pipeline.md));测试框架用 Vitest(Workers 生态惯例);
+- **单元/管线测试**:Vitest + `@cloudflare/vitest-pool-workers`(真实 workerd 运行时,本地 D1/miniflare,迁移由测试自动应用) + mock Telegram API(fetch 层打桩,覆盖 429/403/400/5xx 分类,见 [03](03-message-pipeline.md));
 - **真机集成测试**:专用测试 Bot + 测试私有 Forum 群 + 两个测试账号(扮演用户 A/B)+ 一个测试管理员账号;绝不使用生产 Bot。
 
 ## 单元测试清单
