@@ -46,6 +46,7 @@
 - [ ] `/ban` `/unban`
 - [ ] `/risk` `/unrisk`（置顶标注 + 24 小时一次性提示）
 - [ ] `/purgemsg`（清空 topic + 重置置顶）
+- [ ] `/wipealldata`（一键清空全部数据，两步危险确认）
 - [ ] `/deluser`（关 topic 留历史 + 重新 start 复用重开）
 - [ ] `/note` `/unnote`（备注写入 / 清除，展示于置顶信息）
 - [ ] `/verifyon` `/verifyoff`（存量验证保留）

@@ -119,6 +119,10 @@ DELETE FROM users;
 -- settings 保留：验证开关与模式不重置
 ```
 
+::: warning
+此 SQL 与 topic 内命令 `/wipealldata` 效果相同，但**没有确认步骤**，粘贴执行即生效；日常建议优先使用带两步危险确认的 `/wipealldata`（见[功能介绍](/guide/features.md)）。
+:::
+
 ## 故障排查
 
 | 现象 | 排查 |

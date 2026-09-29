@@ -21,7 +21,6 @@ export default defineConfig({
           { text: '数据表', link: '/guide/database' },
         ],
       },
-      { text: 'PRD', link: '/prd' },
       {
         text: 'TODO',
         items: [
@@ -57,7 +56,6 @@ export default defineConfig({
         {
           text: '更多',
           items: [
-            { text: '产品需求文档（PRD）', link: '/prd' },
             { text: 'TODO', link: '/todo/' },
           ],
         },
