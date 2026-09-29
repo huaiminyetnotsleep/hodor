@@ -113,7 +113,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 
 ## 验证指南（按子任务编号）
 
-> 每个 S\* 任务的交付验证。自动化验证（`npm test` / typecheck / lint）随构建跑；带 ★ 的人工回归**按序执行、待人工完成**，结果记入对应任务工件。操作细节（seed SQL、setWebhook、排错表）见 [scripts/dev/bootstrap.md](scripts/dev/bootstrap.md)。
+> 每个 S\* 任务的交付验证。自动化验证（`npm test` / typecheck / lint）随构建跑；带 ★ 的人工回归**按序执行、待人工完成**，结果记入对应任务工件。
 
 ### V1 · S1 部署冒烟（✅ 2026-09-28 已通过）
 
@@ -132,14 +132,34 @@ curl https://hodor.<你的子域>.workers.dev/health
 
 ### V4 · S4 入站中继 0→1（★ 人工回归，**待执行**）
 
-前提与详细命令：[scripts/dev/bootstrap.md](scripts/dev/bootstrap.md)「快径」（D1 Console seed → setWebhook → /health）。
+**准备（一次性，约 5 分钟，全程浏览器 + 一条本地命令）**
 
-1. ★ 前置：面板 7 变量已配 + seed bots 行 + setWebhook 成功（getWebhookInfo 无 last_error）
-2. ★ 用户 A 首条文本 → 自动建 Topic（标题 `👤 昵称 完整ID · #序号`）+ 消息入 Topic + A 收到 WELCOME
-3. ★ A 发图片 → 同 Topic 收到 + `db-messages` 可见 media_file_id
-4. ★ 用户 B 发消息 → B 自己的 Topic，与 A 不串线
-5. ★ A 改昵称再发 → 标题刷新
-6. ★ 重放已登记 `update_id` → 200，不重复建题/发 WELCOME
+1. 备齐：测试 Bot（记 Token）、测试私有 Forum 群（开 Topics、Bot 设管理员）、用户 A/B 账号
+2. Bot 进群后在群里发一条消息 → 浏览器打开 `https://api.telegram.org/bot<TOKEN>/getUpdates` → 记下群 `chat.id`（-100 开头）和你的 `from.id`
+3. 本地算 Secret 哈希（值 = 面板 `TELEGRAM_WEBHOOK_SECRET`，注意无换行）：
+   `printf '%s' '<面板 Secret 值>' | shasum -a 256`
+4. 面板 → D1 `hodor` → Console，粘贴执行（三处占位替换）：
+
+   ```sql
+   INSERT INTO bots (telegram_bot_id, webhook_key, webhook_secret_hash, support_chat_id, status, created_at, updated_at)
+   VALUES (<getMe 的 bot id>, 'k-test-bot', '<第 3 步哈希>', <群 chat_id>, 'active',
+           strftime('%Y-%m-%dT%H:%M:%SZ','now'), strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+   ON CONFLICT (telegram_bot_id) DO NOTHING;
+   ```
+
+5. 浏览器打开绑 webhook（三处占位替换）：
+   `https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://hodor.<子域>.workers.dev/telegram/webhook/k-test-bot&secret_token=<面板 Secret 原文>&allowed_updates=["message"]`
+6. 验活：`https://hodor.<子域>.workers.dev/health` → `{"ok":true,"version":"0.1.0"}`
+
+**验证（5 项）**
+
+1. ★ 用户 A 私聊发文本 → 群自动建 Topic（`👤 昵称 完整ID · #序号`）+ 消息入 Topic + A 收到 WELCOME
+2. ★ A 发图片 → Topic 收到；D1 Console 查 `messages` 表有 `media_file_id`
+3. ★ 用户 B 发消息 → B 自己的 Topic，与 A 不串线
+4. ★ A 改昵称再发 → 标题刷新
+5. ★ 重放：取 A 刚发那条的 `update_id`，curl 重发同 payload（带 Secret 头）→ 200 且不重复建题/发 WELCOME
+
+排错：401=第 3 步哈希与面板 Secret 不同源｜404=webhook_key 不是 `k-test-bot`｜无 Topic 创建=查面板 `ALLOW_UNKNOWN_USERS` 或 deleted_users 墓碑｜WELCOME 偶发丢失=best-effort 副调用属正常。
 
 ### V5 · S5 出站中继与 403（★ 人工回归，**待执行**，依赖 V4 完成）
 
@@ -181,15 +201,14 @@ curl https://hodor.<你的子域>.workers.dev/health
 ### V9 · S9 管理端点与绑定（★ 人工回归，**待执行**；完成后 S4 手工 seed 可退役）
 
 1. ★ `curl -X POST https://hodor.<子域>.workers.dev/admin/setup -H "Authorization: Bearer <ADMIN_SETUP_SECRET>" -H 'content-type: application/json' -d '{}'` → 成功响应（空体回退 env）；此后 getWebhookInfo 与 `/admin/webhook/status` 一致
-2. ★ 绑定后用户消息照常入站（链路不回归；手工 bootstrap 的 seed 行被 upsert 接管）
+2. ★ 绑定后用户消息照常入站（链路不回归；手工 seed 的 bots 行被 setup 的 upsert 接管）
 3. ★ `/admin/admins` 增删管理员 → 生效且审计可查（db 或审计查询）
 4. ★ （可选）`/admin/webhook/unbind` → 重绑恢复；错误 Bearer → 401；1 分钟内 >10 次 → 429
 5. 自动化：`admin-endpoints` 11 例（setup 全链路/幂等/回退/限速/审计无敏感值）
 
 ### V10 · S10 终验：docs/10 全部 21 条真机场景（★ 人工回归，**待执行**，依赖 V4–V9 完成）
 
-> docs/10「集成测试（真机）」21 条的执行 runbook。每条标注：必做/顺延、对应 V 小节或
-> [bootstrap.md](scripts/dev/bootstrap.md) 步骤、判定要点。实际结果由执行人逐条记录到
+> docs/10「集成测试（真机）」21 条的执行清单。每条标注：必做/顺延、对应 V 小节步骤、判定要点。实际结果由执行人逐条记录到
 > `.trellis/tasks/09-28-s10-acceptance/acceptance-report.md`（或任务工件）。
 > 12/17/18 为换绑/灰度类，**换绑实际发生时补做**；其余 18 条必做。
 
@@ -197,7 +216,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 
 | 期 | 前提 | 执行内容 |
 |---|---|---|
-| 第一期 | V4 完成（bootstrap.md 快径已走通） | 场景 1–2、10–11（入站基础 + 幂等） |
+| 第一期 | V4 完成（准备 6 步 + 5 项验证通过） | 场景 1–2、10–11（入站基础 + 幂等） |
 | 第二期 | V5–V7 完成 | 场景 3–9、13–16、20（双向中继 + /ban /unban /risk） |
 | 第三期 | V8–V9 完成（**V8 不可逆命令放最后**） | 场景 19、21（/purge /deluser 演练） |
 | 顺延 | 换绑/灰度实际发生时 | 场景 12、17、18 |
@@ -206,7 +225,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 
 | # | 场景（docs/10 原文摘要） | 状态 | 对应节 | 判定要点 |
 |---|---|---|---|---|
-| 1 | 用户 A、B 同时发送消息 | 必做 | V4.2/V4.4（bootstrap 5 步 #1/#3） | 两条都进群 |
+| 1 | 用户 A、B 同时发送消息 | 必做 | V4 验证 1/3 | 两条都进群 |
 | 2 | 确认分别进入 Topic A、Topic B | 必做 | V4.4 | 各自 Topic、标题 `👤 昵称 完整ID · #序号` |
 | 3 | 管理员分别回复 | 必做 | V5.1 | 在 Topic 内直接回复任意消息即可 |
 | 4 | 确认回复回到正确用户 | 必做 | V5.1 | A/B 各收到自己 Topic 的回复，不串线 |
@@ -215,14 +234,14 @@ curl https://hodor.<你的子域>.workers.dev/health
 | 7 | 确认 B 不受影响 | 必做 | V6.2 | B 照常收发 |
 | 8 | 在 Topic A 执行 /unban | 必做 | V6.3 | 命令消息被删 |
 | 9 | 确认 A 恢复且 🔇 消失 | 必做 | V6.3 | 标题恢复 👤（watchlisted 则 ⚠️），消息照常中继 |
-| 10 | 重复发送同一 Update（重放 inbox payload） | 必做 | V4.6（bootstrap 5 步 #5 curl 模板） | 200，无新登记 |
+| 10 | 重复发送同一 Update（重放 inbox payload） | 必做 | V4 验证 5（curl 重放） | 200，无新登记 |
 | 11 | 确认没有重复创建 Topic 或重复发送 | 必做 | V4.6 | Topic 数、WELCOME 数不变 |
-| 12 | 解绑/重绑和灰度更新期间确认不丢 Update | 顺延 | V9.4（unbind 缺省保留积压；bootstrap 附录台账） | 重绑后积压 Update 补投不丢 |
+| 12 | 解绑/重绑和灰度更新期间确认不丢 Update | 顺延 | V9.4（unbind 缺省保留积压） | 重绑后积压 Update 补投不丢 |
 | 13 | 用户 A 拉黑 Bot → 管理员回复 → 「无法送达」提示 | 必做 | V5.3 | Topic 出现一次提示，重复回复不刷屏 |
 | 14 | 用户 A 解除拉黑并再发消息 → 标志清除、回复恢复 | 必做 | V5.4 | 恢复提示出现，回复可达 |
 | 15 | 非白名单成员在支持群 Topic 发言 → 无任何中继 | 必做 | V5.5 | 群内无反应、用户私聊无反应 |
 | 16 | 制造 429（短时间大量发送）→ 退避后仍全部送达 | 必做 | V5.6（连发数十条触发限流） | 无丢失；`getWebhookInfo` 无堆积 |
-| 17 | 换绑演练：归档台账并绑定新 Bot → 老用户进原 Topic | 顺延 | bootstrap.md「附录：换绑归档台账」+ docs/05 Runbook | 历史连续、Topic 不新建 |
+| 17 | 换绑演练：归档台账并绑定新 Bot → 老用户进原 Topic | 顺延 | 归档台账 SQL：`DELETE FROM inbox_updates WHERE status IN ('processed','failed')`（先核对 pending=0，D1 Console 执行）+ docs/05 Runbook | 历史连续、Topic 不新建 |
 | 18 | 换绑演练：新 Bot 低位 update_id 不被旧台账幂等命中 | 顺延 | 同上 | 新消息正常处理 |
 | 19 | /purge 演练（两步确认） | 必做 | V8 /purge 1–3 | 整题删除、D1 无残留、General 公告、审计含 purge；再发消息同 #序号新题 |
 | 20 | /risk 演练（⚠️、WATCH_NOTICE 24h、与 /ban 正交、/unrisk） | 必做 | V7.1–V7.4 | 全链路按 V7 判定 |
