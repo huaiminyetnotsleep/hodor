@@ -1,6 +1,6 @@
 # 02 · 私有 Forum 群与 Topic 路由
 
-> **hodor 设计文档 · 02/12**
+> **hodor 设计文档 · 02/13**
 > 上一篇:[01-architecture](01-architecture.md) · 下一篇:[03-message-pipeline](03-message-pipeline.md) · [返回总览](README.md)
 
 ---
@@ -36,7 +36,8 @@ Telegram API 中表现为:
 
 - 正向:用户发消息 → 按 `(bot_id, telegram_user_id)` 找 conversation → 找到 `message_thread_id` → 复制进 Topic;
 - 反向:管理员在 Topic 发消息 → 按 `(bot_id, support_chat_id, message_thread_id)` 找 conversation → 找到用户 → 复制进用户私聊;
-- `General` Topic(`message_thread_id = 1` 或无 thread 字段)**不绑定用户**,其中的一切消息按忽略策略处理(见 [03](03-message-pipeline.md))。
+- `General` Topic(`message_thread_id = 1` 或无 thread 字段)**不绑定用户**,其中的一切消息按忽略策略处理(见 [03](03-message-pipeline.md));
+- `support_chat_id` 在 conversation 行中是**数据坐标**而非全局常量:换群 = 更新绑定行 + 会话坐标重置,旧坐标保留在 `messages` 历史中可回查;「Bot 轴与群轴解耦」的架构声明见 [01](01-architecture.md)。
 
 ## Topic 标题规则
 
@@ -89,9 +90,18 @@ Worker 侧的 Bot 管理员身份校验(`getChatMember`)结果做**内存缓存*
 
 这是 Phase 1/2 共同的已知限制,Phase 4 引入 DO 后可在 Topic 创建上加更强的串行保护,但「无列举接口」决定了无法彻底自动消除,预案必须保留。
 
+## 会话信息卡置顶(Phase 4 · 步骤 19,规划)
+
+PRD 要求用户第一次对话后在 Topic 中置顶显示用户信息,便于管理员在长会话中随时核对「这是谁」。契约([13](13-implementation-steps.md) 步骤 19):
+
+- **形态**:Topic 创建成功后发送一条服务消息(信息卡:用户名、Telegram 用户 ID、首次发起聊天时间)并 `pinMessage`;内容取自 `customers` 行(`display_name`、`telegram_user_id`、`created_at`);
+- **静态快照**:置顶后不随改名更新——动态标识由标题承担(改名刷新见「Topic 标题规则」),卡片定格首次接触时点,恰好保留「初次联系」信息;用户 ID 永远完整显示(与标题同一原则);
+- **权限**:依赖权限表中的 Pin Messages——本功能立项后该项由「可选」变为必需;
+- **幂等**:置顶动作仅创建时一次,不因重试重复置顶(重复投递语义与 [03](03-message-pipeline.md) 幂等状态机一致);unpin/重新置顶由管理员手动操作,Worker 不干预。
+
 ## 删除 Topic
 
-`deleteForumTopic` 日常流程**不使用**——历史永久保留是默认语义(见 [07](07-storage.md)、[08](08-reliability.md));唯一例外是管理命令 `/purge`(清除用户全部会话数据,见 [04](04-admin-commands.md)),属管理员显式发起的不可逆操作。如未来提供「关闭并归档」能力,通过 `conversations.status = 'archived'` 表达,不做物理删除。
+`deleteForumTopic` 日常流程**不使用**——历史永久保留是默认语义(见 [07](07-storage.md)、[08](08-reliability.md));唯一例外是管理命令 `/purgemsg`(清理该用户的全部消息,见 [04](04-admin-commands.md)),属管理员显式发起的不可逆操作。如未来提供「关闭并归档」能力,通过 `conversations.status = 'archived'` 表达,不做物理删除。
 
 ---
 

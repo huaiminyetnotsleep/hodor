@@ -1,6 +1,6 @@
 # 07 · 存储策略与平台限制
 
-> **hodor 设计文档 · 07/12**
+> **hodor 设计文档 · 07/13**
 > 上一篇:[06-data-model](06-data-model.md) · 下一篇:[08-reliability](08-reliability.md) · [返回总览](README.md)
 
 ---

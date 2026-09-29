@@ -1,6 +1,6 @@
 # 05 · Webhook 管理与初始化
 
-> **hodor 设计文档 · 05/12**
+> **hodor 设计文档 · 05/13**
 > 上一篇:[04-admin-commands](04-admin-commands.md) · 下一篇:[06-data-model](06-data-model.md) · [返回总览](README.md)
 
 ---
@@ -17,7 +17,7 @@ Webhook Secret
 = 只用于验证 Webhook 请求来源(数据面:Telegram → Worker)
 
 Admin Setup Secret
-= 调用 /admin/* 管理端点的凭证(管理面:管理员 → Worker)
+= 调用 /public/setwebhook、/public/deletewebhook 管理端点的凭证(管理面:管理员 → Worker)
 = 与 Webhook Secret 必须是两个不同的值
 ```
 
@@ -25,7 +25,7 @@ Admin Setup Secret
 
 **Phase 1 存储(env 与 `bots` 表的共存规则)**:
 
-- `TELEGRAM_BOT_TOKEN`、`TELEGRAM_WEBHOOK_SECRET`、`ADMIN_SETUP_SECRET` 全部放 **Worker Secrets(env)**,这是 Phase 1 的运行时事实源;
+- `TELEGRAM_BOT_TOKEN`、`TELEGRAM_WEBHOOK_SECRET`、`ADMIN_SECRET` 全部放 **Worker Secrets(env)**,这是 Phase 1 的运行时事实源;
 - `bots` 表仍存在,由初始化流程 seed(记录 `telegram_bot_id`、`webhook_key`、`support_chat_id`、`webhook_secret_hash` 等),供外键与查询使用;**`encrypted_bot_token` 允许为 NULL**——多 Bot 主密钥加密体系是 Phase 4 的事,Phase 1 不实现。
 
 ## Secret 校验实现
@@ -40,41 +40,41 @@ Admin Setup Secret
 
 Phase 1 运行时的 secret 来自 env,校验为 `SHA-256(header) === SHA-256(env)`。
 
-## 管理端凭证:ADMIN_SETUP_SECRET 的配置与用途
+## 管理端凭证:ADMIN_SECRET 的配置与用途
 
-`ADMIN_SETUP_SECRET` 保护的是**管理面**——管理员调用 `/admin/*` 端点的能力。它**不是网页登录密码**(Phase 1 没有任何网页):所谓管理端,就是一组直接可调的 HTTP API。
+`ADMIN_SECRET` 保护的是**管理面**——管理员调用 `/public/setwebhook`、`/public/deletewebhook` 端点的能力。它**不是网页登录密码**(Phase 1 没有任何网页):所谓管理端,就是一组直接可调的 HTTP API。
 
 **什么时候用**(全部是低频运维动作,与消息链路 `/telegram/webhook/:key` 无关):
 
-| 场景 | 端点 | 频率 |
-|------|------|------|
-| 首次部署/初始化:验证 Token(读 Secret)、seed bots 行、写初始白名单、`setWebhook` + `setMyCommands` | `POST /admin/setup` | 基本一次 |
-| 重绑/换配置(setup 为 upsert 语义) | `POST /admin/setup` | 偶尔 |
-| 解绑 Webhook(下线/迁移) | `POST /admin/webhook/unbind` | 罕见 |
-| 排障:查看 Webhook 状态(URL / pending / last_error) | `POST /admin/webhook/status` | 需要时 |
-| 白名单维护 | `POST /admin/admins` | 人员变动时 |
+| 场景 | 端点/途径 | 频率 |
+|------|----------|------|
+| 首次部署/初始化:验证 Token(读 Secret)、seed bots 行、同步白名单、`setWebhook` + `setMyCommands` | `POST /public/setwebhook` | 基本一次 |
+| 重绑/换配置(setwebhook 为 upsert 语义) | `POST /public/setwebhook` | 偶尔 |
+| 白名单增删(改 `ADMIN_IDS` 后重跑) | `POST /public/setwebhook` | 人员变动时 |
+| 解绑 Webhook(下线/迁移) | `POST /public/deletewebhook` | 罕见 |
+| 排障:查看 Webhook 状态(URL / pending / last_error) | 直接调 Telegram `getWebhookInfo`(Token 在部署者手里,无需 Worker 端点);`GET /health` 只验 Worker 活性 | 需要时 |
 
 **怎么配置**(Worker Secrets:加密注入运行时 `env`):
 
 ```bash
-# 生产:设置后不可读回,代码统一从 env.ADMIN_SETUP_SECRET 取值
-wrangler secret put ADMIN_SETUP_SECRET
+# 生产:设置后不可读回,代码统一从 env.ADMIN_SECRET 取值
+wrangler secret put ADMIN_SECRET
 
 # 本地:写入 .dev.vars(必须 .gitignore,不入库)
 ```
 
 - **禁止**写入 `wrangler.toml` 的 `[vars]`——明文随代码进仓库等于把钥匙提交进 Git;
-- 轮换该值后改 env 即生效;若同时轮换了 `TELEGRAM_WEBHOOK_SECRET`,需重跑 `/admin/setup` 让 `setWebhook` 带上新值。
+- 轮换该值后改 env 即生效;若同时轮换了 `TELEGRAM_WEBHOOK_SECRET`,需重跑 `/public/setwebhook` 让 `setWebhook` 带上新值。
 
 **怎么携带与校验**:
 
-- 请求头携带:`Authorization: Bearer <ADMIN_SETUP_SECRET>`;**绝不放 URL / 查询参数**;
+- 请求头携带:`Authorization: Bearer <ADMIN_SECRET>`;**绝不放 URL / 查询参数**;
 - Worker 与 env 值比对,不匹配 → `401`,不做业务处理、不留业务日志(与 Webhook Secret 同一原则);
 - 端点做基础限速防探测;成功的变更操作写 `audit_logs`。
 
 **与 Webhook Secret 的分工**:
 
-| 维度 | `TELEGRAM_WEBHOOK_SECRET` | `ADMIN_SETUP_SECRET` |
+| 维度 | `TELEGRAM_WEBHOOK_SECRET` | `ADMIN_SECRET` |
 |---|---|---|
 | 方向 | Telegram → Worker(数据面) | 管理员 → Worker(管理面) |
 | 验证目标 | 请求确实来自 Telegram | 调用者确实是管理员 |
@@ -85,7 +85,7 @@ wrangler secret put ADMIN_SETUP_SECRET
 
 ## 前置准备清单(Telegram 侧,部署前一次性完成)
 
-本节产物 = 三个值(Bot Token、支持群 `chat_id`、管理员 `user_id` 列表)+ 两个自定 Secret。Token 与两个 Secret 走 Secret 存储;`chat_id` 与管理员列表属**非敏感配置**,走普通环境变量——部署表单合计 5 项,去向见下方汇总表与「初始化与绑定流程」。
+本节产物 = 三个值(Bot Token、支持群 `chat_id`、管理员 `user_id` 列表)+ 两个自定 Secret。Token 与两个 Secret 走 Secret 存储;`chat_id` 与管理员列表属**非敏感配置**,走普通环境变量——部署表单合计 5 项(另有 1 个选填变量有代码缺省,一般不动),去向见下方汇总表与「初始化与绑定流程」。
 
 ### 1. 创建机器人(BotFather)
 
@@ -111,25 +111,26 @@ curl "https://api.telegram.org/bot<TOKEN>/getUpdates"
 ```
 
 - 让每位管理员在支持群里各发一条消息,返回的 `message.chat.id` 即支持群 **chat_id**(`-100` 开头的负数),`message.from.id` 即各管理员的 **user_id**(正整数);
-- 管理员 user_id 是 `support_admins` 白名单的初始内容——随 `/admin/setup` 写入,后续经 `POST /admin/admins` 增删(见下文「管理员白名单」);管理员还应同时是支持群的群管理员,两者定期核对是 [09](09-security-ops.md) 的安全清单项;
+- 管理员 user_id 是 `support_admins` 白名单的来源——随 `/public/setwebhook` 写入;后续增删 = 改 `ADMIN_IDS` 环境变量后重跑 setwebhook 全量同步(见下文「管理员白名单」);管理员还应同时是支持群的群管理员,两者定期核对是 [09](09-security-ops.md) 的安全清单项;
 - 也可用任一第三方 ID 查询 Bot 代替,信任自担。
 
 ### 4. Secret 与 ID 汇总
 
-| 值 | 来源 | 去向 |
-|----|------|------|
-| `TELEGRAM_BOT_TOKEN` | 步骤 1 BotFather | `wrangler secret put` / 按钮 Secret 表单 |
-| `TELEGRAM_WEBHOOK_SECRET` | 自定随机值,建议 `openssl rand -hex 32` | 同上;setup 时经 `setWebhook` 注入 Telegram |
-| `ADMIN_SETUP_SECRET` | 自定随机值,**与上一个不同** | 同上;调用 `/admin/*` 时作 Bearer |
-| 支持群 `chat_id` | 步骤 3 | 部署表单普通变量 `SUPPORT_CHAT_ID`(非敏感,入 wrangler.jsonc [vars]);也可 setup 请求体显式给 |
-| 管理员 `user_id` 列表 | 步骤 3 | 部署表单普通变量 `ADMIN_IDS`(逗号分隔);也可 setup 请求体显式给 |
+| 变量 | 必填 | 用途 | 来源 | 去向 |
+|------|------|------|------|------|
+| `TELEGRAM_BOT_TOKEN` | **必填** | Bot API 调用凭证:setWebhook、copyMessage、Topic 管理全靠它 | 步骤 1 BotFather | `wrangler secret put` / 按钮 Secret 表单 |
+| `TELEGRAM_WEBHOOK_SECRET` | **必填** | 数据面鉴权:校验 Telegram 回调头(SHA-256 比对);三个 Secret 必须互异 | 自定随机值,建议 `openssl rand -hex 32` | 同上;setwebhook 时经 `setWebhook` 注入 Telegram |
+| `ADMIN_SECRET` | **必填** | 管理面鉴权:调用 `/public/setwebhook`、`/public/deletewebhook` 时作 Bearer | 自定随机值,**与上一个不同** | 同上 |
+| `SUPPORT_CHAT_ID` | **必填** | 私有支持群 chat_id(`-100` 开头):Topic 所在群,双向路由依据 | 步骤 3 | 部署表单普通变量(非敏感) |
+| `ADMIN_IDS` | **必填** | 管理员白名单(逗号分隔):setwebhook 时全量同步进 `support_admins` | 步骤 3 | 部署表单普通变量(非敏感) |
+| `MAX_ATTEMPTS` | 选填(缺省 8) | inbox 处理尝试上限,超限转人工 DLQ(见 [03](03-message-pipeline.md)) | 代码缺省即可 | 可选环境变量 |
 
 三个 Secret 绝不相互复用、绝不入 Git;Telegram 侧准备就绪后,进入「初始化与绑定流程」或「一键部署」。
 
 ## 初始化与绑定流程
 
 ```text
-┌──────────────┐   ADMIN_SETUP_SECRET    ┌──────────┐
+┌──────────────┐   ADMIN_SECRET    ┌──────────┐
 │ 管理员管理端  │ ─────────────────────> │ Worker   │
 └──────────────┘   请求体可空(缺省读 env) └────┬─────┘
                                              │ getMe(验证 Secret 中的 Token)
@@ -139,7 +140,7 @@ curl "https://api.telegram.org/bot<TOKEN>/getUpdates"
                                        webhook_secret_hash, status=active)
                                              │
                                              ▼
-                                      写入管理员白名单(support_admins)
+                                      写入管理员白名单(support_admins 全量对齐 = ADMIN_IDS 镜像)
                                              │
                                              ▼
                               setWebhook
@@ -148,7 +149,7 @@ curl "https://api.telegram.org/bot<TOKEN>/getUpdates"
                                 allowed_updates = ["message"]
                                              │
                                              ▼
-                              setMyCommands(support 群 scope,ban/unban,非致命,见 04)
+                              setMyCommands(support 群 scope,管理命令菜单,非致命,见 04)
                                              │
                                              ▼
                                       getWebhookInfo(核对 URL / pending / last_error)
@@ -157,52 +158,41 @@ curl "https://api.telegram.org/bot<TOKEN>/getUpdates"
                                       写 audit_logs(action = webhook_bind)
 ```
 
-- 管理端本身用 `ADMIN_SETUP_SECRET`(或 Cloudflare Access)保护,端点做基础限速防探测;
+- 管理端本身用 `ADMIN_SECRET`(或 Cloudflare Access)保护,端点做基础限速防探测;
 - `webhook_key` 是随机标识符,只用于 URL 混淆,不承担鉴权(鉴权靠 Secret 头);
 - Webhook URL 长期稳定,**发布新版本 Worker 不重设 Webhook**(见 [08](08-reliability.md))。
 
-### 实操:三个管理端点的调用示例(Phase 1 无 UI,端点即运维接口)
+### 实操:两个管理端点的调用示例(Phase 1 无 UI,端点即运维接口)
 
 `<worker-domain>` 为 Worker 公网域名(如 `<name>.<account>.workers.dev`);Secret 从环境变量读入,不写进脚本(见文末「运维方式」)。
 
 ```bash
-# ① 绑定(upsert:首次初始化与换配置共用)
-# 推荐形式:配置已放入环境变量时,空请求体即可
-curl -X POST "https://<worker-domain>/admin/setup" \
-  -H "Authorization: Bearer $ADMIN_SETUP_SECRET"
-
-# 也可在请求体显式覆盖(临时换群/换白名单);未提供的字段回退环境变量
-curl -X POST "https://<worker-domain>/admin/setup" \
-  -H "Authorization: Bearer $ADMIN_SETUP_SECRET" \
-  -H "Content-Type: application/json" \
-  -d '{
-        "support_chat_id": -1001234567890,
-        "admin_ids": [111111111, 222222222]
-      }'
-# Worker 内部依次:getMe 验证 env Token → 解析配置(请求体优先,缺省回退
-#   env 的 SUPPORT_CHAT_ID / ADMIN_IDS)→ seed/更新 bots 行 → upsert 初始白名单
+# ① 绑定(upsert:首次初始化、换配置、白名单同步共用;空请求体,配置全部读 env)
+curl -X POST "https://<worker-domain>/public/setwebhook" \
+  -H "Authorization: Bearer $ADMIN_SECRET"
+# Worker 内部依次:getMe 验证 env Token → seed/更新 bots 行 → 白名单全量对齐
+#   (support_admins 表同步为 ADMIN_IDS 的镜像,差集写 admin_add/admin_remove 审计)
 #   → setWebhook(url = 本 Worker 的 /telegram/webhook/<webhook_key>)
 #   → setMyCommands → getWebhookInfo 核对 → 写审计
 #
-# 语义注意:env 是引导通道,D1 才是事实源——修改环境变量后需重跑 setup 才生效;
-# admin_ids 为 upsert(缺则增、不删除),白名单删除走 /admin/admins。
+# 语义注意:配置的唯一通道是 env——修改 SUPPORT_CHAT_ID / ADMIN_IDS 后重跑 setwebhook 即生效;
+# 白名单没有独立端点(增删 = 改 env + 重跑)。
 
-# ② 查看绑定状态(getWebhookInfo 透出:URL / pending / last_error / allowed_updates)
-curl -X POST "https://<worker-domain>/admin/webhook/status" \
-  -H "Authorization: Bearer $ADMIN_SETUP_SECRET"
-
-# ③ 解绑(下线/迁移;默认保留 Telegram 侧积压)
-curl -X POST "https://<worker-domain>/admin/webhook/unbind" \
-  -H "Authorization: Bearer $ADMIN_SETUP_SECRET" \
+# ② 解绑(下线/迁移;默认保留 Telegram 侧积压)
+curl -X POST "https://<worker-domain>/public/deletewebhook" \
+  -H "Authorization: Bearer $ADMIN_SECRET" \
   -H "Content-Type: application/json" \
   -d '{ "drop_pending_updates": false }'
 ```
 
 要点:
 
-- **全程不碰 BotFather**:BotFather 不管理 Webhook;也**不手搓** `api.telegram.org` 调用——`setWebhook` / `deleteWebhook` 由 Worker 代你完成;
-- Webhook 接收地址确实是 Cloudflare Worker 的公网地址 + `/telegram/webhook/<webhook_key>` 路径,但它由 setup 自动注册给 Telegram,无需抄写;路径里的 `webhook_key` 只是混淆,鉴权全靠 Secret 头;
-- 请求体字段名以实现时的 API 契约为准,本文固定的是端点、鉴权方式与语义。
+- **端点命名与 PRD 一致**(`setwebhook` / `deletewebhook`);`/public` 前缀为固定字面量路径(沿用 PRD 默认值,不做配置项),不承担鉴权——鉴权全靠 Bearer;
+- **排障不需要 Worker 端点**:Webhook 状态直接调 Telegram `curl "https://api.telegram.org/bot<TOKEN>/getWebhookInfo"`(Token 在部署者手里);`GET /health` 只回答「Worker 活着吗」,不透出 Telegram 侧状态——两者不是一回事;
+- **全程不碰 BotFather**:BotFather 不管理 Webhook;`setWebhook` / `deleteWebhook` 由 Worker 代你完成;
+- Webhook 接收地址确实是 Cloudflare Worker 的公网地址 + `/telegram/webhook/<webhook_key>` 路径,但它由 setwebhook 自动注册给 Telegram,无需抄写;路径里的 `webhook_key` 只是混淆,鉴权全靠 Secret 头。
+
+> 命名注:本组端点按 PRD 定名 `/public/setwebhook`、`/public/deletewebhook`;当前代码实现为 `/admin/setup`、`/admin/webhook/unbind`(另有按本设计移除的 status / admins 端点),收敛与重命名随下一批代码变更执行。
 
 ### 参数为什么不放进 URL(安全约定,不做变通)
 
@@ -233,13 +223,13 @@ fork 仓库 → 在自己 fork 的 wrangler.jsonc [vars] 填 SUPPORT_CHAT_ID / A
         → 关联 Git 建立 CI/CD(Workers Builds),执行部署命令:
           npx wrangler d1 migrations apply DB --remote && npx wrangler deploy
         → 打开 /health 验活
-        → POST /admin/setup(无参数,配置取自环境变量)完成绑定与 setWebhook
+        → POST /public/setwebhook(空请求体,配置取自环境变量)完成绑定与 setWebhook
 ```
 
-- `.dev.vars.example` 一职两用:本地开发的变量模板 + 按钮 Secret 清单。注意按钮会把其中**每个未注释条目都当作 Secret** 置备,所以只列三个真 Secret(`TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` / `ADMIN_SETUP_SECRET`);
+- `.dev.vars.example` 一职两用:本地开发的变量模板 + 按钮 Secret 清单。注意按钮会把其中**每个未注释条目都当作 Secret** 置备,所以只列三个真 Secret(`TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` / `ADMIN_SECRET`);
 - **非敏感引导配置**(`SUPPORT_CHAT_ID`、`ADMIN_IDS`)放 `wrangler.jsonc` 的 `[vars]`:不含敏感值、可随 fork 入库,fork 者填自己的值;与三个 Secret 合计,部署表单共 5 项;
 - **迁移缺口**:按钮只创建 D1 数据库、不执行迁移(官方已知缺口),因此部署命令必须前置 `d1 migrations apply`,见 [01](01-architecture.md) 一键部署设计约束;
-- **先有鸡还是先有蛋**:调 `/admin/setup` 需要 `ADMIN_SETUP_SECRET`——该值在按钮的 Secret 填写步骤中一并注入,链条闭合;不走按钮、用 `wrangler deploy` 手工部署时,先 `wrangler secret put` 配好三个 Secret 再调 setup;
+- **先有鸡还是先有蛋**:调 `/public/setwebhook` 需要 `ADMIN_SECRET`——该值在按钮的 Secret 填写步骤中一并注入,链条闭合;不走按钮、用 `wrangler deploy` 手工部署时,先 `wrangler secret put` 配好三个 Secret 再调 setwebhook;
 - **不采用**「bots 表为空时开放 setup」的自举窗口:公开仓库的部署 URL 可能被第三方抢先初始化;前置注入 Secret 更简单且无竞态;
 - 按钮只是入口之一,`wrangler deploy` 手工路径永远保留,两者共用同一套声明式配置。
 
@@ -258,10 +248,10 @@ fork 仓库 → 在自己 fork 的 wrangler.jsonc [vars] 填 SUPPORT_CHAT_ID / A
 
 ## 管理员白名单
 
-- 存于 `support_admins` 表(`UNIQUE(bot_id, telegram_user_id)`,见 [06](06-data-model.md)),初始化时写入,后续可增删;
-- `/ban`、`/unban` 与出站中继均以此表为准(见 [03](03-message-pipeline.md)、[04](04-admin-commands.md));
-- 每次变更写 `audit_logs`;
-- 群内真实管理员与白名单**定期核对**(见 [09](09-security-ops.md)):群管理员变动时白名单同步更新。
+- **`ADMIN_IDS`(env)是唯一来源**;`support_admins` 表(`UNIQUE(bot_id, telegram_user_id)`,见 [06](06-data-model.md))是运行时镜像(查询用):`/public/setwebhook` 每次执行时**全量对齐**,差集写 `audit_logs`(action = `admin_add` / `admin_remove`);
+- 增删管理员 = 面板改 `ADMIN_IDS` → 重跑 `/public/setwebhook`(幂等、低频);**没有独立的白名单维护端点**;
+- `/ban`、`/unban` 与出站中继均以 `support_admins` 表为准(见 [03](03-message-pipeline.md)、[04](04-admin-commands.md));
+- 群内真实管理员与白名单**定期核对**(见 [09](09-security-ops.md)):群管理员变动时同步改 `ADMIN_IDS` 并重跑 setwebhook。
 
 ## 解绑与重绑
 
@@ -283,6 +273,8 @@ deleteWebhook(drop_pending_updates = false)    ← 默认保留积压
 - **群与媒体不绑 Bot**:支持群、Topic、Topic 内消息与媒体都在 Telegram 侧,与绑定哪个 Bot 无关;新 Bot 以群管理员身份获得同等的 Topic 操作与 `copyMessage` 能力;
 - **用户身份是 `telegram_user_id`**:老用户加新 Bot 发消息 → 命中同一 customer / conversation → 在**原 Topic** 继续对话,序号、封禁状态、历史全部连续。
 
+这三条即总览架构原则「Bot 轴与群轴解耦」([01](01-architecture.md))在换绑场景的具体化:换绑 = 替换轴 + 指针切换,pipeline 与历史数据不动。
+
 唯一无法消除的缝:**Bot 用户名必须换**——Telegram 不支持把私聊会话在 Bot 间过户,只能由老 Bot 在下线前逐户发搬家通知;用户主动加新 Bot 后一切照旧。老用户消息不丢的原理:解绑老 Webhook 后 Telegram 仍为该 Bot 缓冲 Update(约 24 小时),绑上新 Webhook 后立即补投。
 
 ### 换绑 Runbook
@@ -291,11 +283,11 @@ deleteWebhook(drop_pending_updates = false)    ← 默认保留积压
 
 ```text
 ① 老 Bot 逐户发送搬家通知(脚本遍历 customers,含新 Bot 用户名 deep link)
-② POST /admin/webhook/unbind(老 Bot 停收;此后 Update 进入 Telegram 缓冲)
+② POST /public/deletewebhook(老 Bot 停收;此后 Update 进入 Telegram 缓冲)
 ③ 归档幂等台账(关键,见下节)——此刻 Worker 无入站流量,是唯一安全窗口
 ④ wrangler secret put TELEGRAM_BOT_TOKEN(新 Token;若一并轮换 Webhook Secret,setup 时 setWebhook 带新值)
 ⑤ 新 Bot 拉入支持群,授予与老 Bot 相同权限(Manage Topics / Send / Delete / Pin),老 Bot 移出
-⑥ POST /admin/setup —— upsert 更新 bots 行(config_version+1)、setWebhook、setMyCommands
+⑥ POST /public/setwebhook —— upsert 更新 bots 行(config_version+1)、setWebhook、setMyCommands
 ⑦ 验证:测试账号发消息 → 落在既有 Topic;getWebhookInfo 的 pending 清零;观察 24–48h
 ```
 
@@ -316,14 +308,21 @@ DELETE FROM inbox_updates WHERE status IN ('processed','failed');
 
 双 Bot 并行过渡(老 Bot 继续收、新 Bot 回复)需要多 Bot 架构——Worker 无法区分 Update 来自哪个 Bot,且新 Bot 无法主动私聊未 `/start` 的老用户——属 Phase 4(见 [11](11-roadmap.md)),Phase 1 单 Bot 不采用。
 
+## 多 Bot 架构(Phase 4 · 步骤 20,规划)
+
+Phase 1 单 Bot。多 Bot 是「换绑机器人」能力的完整形态,设计契约([13](13-implementation-steps.md) 步骤 20):
+
+- **Token 入库**:启用 `bots.encrypted_bot_token`(Phase 1 恒 NULL,字段已预留,见 [06](06-data-model.md))——主密钥加密存储,Worker 按行解密调用对应 Bot,Token 不再依赖单一 env;
+- **路由隔离**:每个 Bot 独立 `webhook_key` 与 Webhook Secret,Update 按 key 定位 bot 行;幂等命名空间天然按 `bot_id` 隔离(`update_id` 各 Bot 独立递增,见 [03](03-message-pipeline.md));
+- **双 Bot 并行过渡**:老 Bot 继续收、新 Bot 回复,消除换绑时「未 `/start` 新 Bot 的老用户无法触达」的缺口(即上节所指 Phase 4 能力);依赖它的无缝迁移/广播已延后(见 [11](11-roadmap.md)「延后意向」);
+- 多 Bot 常态化运营的管理台需求,触发条件见「Worker 路由总览」的运维方式决策。
+
 ## Worker 路由总览(Phase 1)
 
 ```text
 POST /telegram/webhook/:webhook_key   → 03 消息管线(Secret 头校验)
-POST /admin/setup                     → 初始化/绑定(ADMIN_SETUP_SECRET)
-POST /admin/webhook/unbind            → 解绑(ADMIN_SETUP_SECRET)
-POST /admin/webhook/status            → getWebhookInfo 透出(ADMIN_SETUP_SECRET)
-POST /admin/admins                    → 白名单维护(ADMIN_SETUP_SECRET)
+POST /public/setwebhook               → 绑定/upsert(ADMIN_SECRET)
+POST /public/deletewebhook            → 解绑(ADMIN_SECRET)
 GET  /health                          → 健康检查(无敏感信息,见 09)
 ```
 

@@ -23,10 +23,9 @@ declare global {
     interface Env {
       TELEGRAM_BOT_TOKEN: string;
       TELEGRAM_WEBHOOK_SECRET: string;
-      ADMIN_SETUP_SECRET: string;
+      ADMIN_SECRET: string;
       SUPPORT_CHAT_ID: string;
       ADMIN_IDS: string;
-      ALLOW_UNKNOWN_USERS: string;
       MAX_ATTEMPTS: string;
     }
   }
@@ -43,10 +42,9 @@ declare global {
 | `DB` | D1Database | wrangler.jsonc | wrangler.jsonc | — |
 | `TELEGRAM_BOT_TOKEN` | string | `.dev.vars` | dashboard 变量和机密 / `wrangler secret put` | required |
 | `TELEGRAM_WEBHOOK_SECRET` | string | `.dev.vars` | dashboard 变量和机密 / `wrangler secret put` | required |
-| `ADMIN_SETUP_SECRET` | string | `.dev.vars` | dashboard 变量和机密 / `wrangler secret put` | required |
+| `ADMIN_SECRET` | string | `.dev.vars` | dashboard 变量和机密 / `wrangler secret put` | required |
 | `SUPPORT_CHAT_ID` | string | `.dev.vars` | dashboard 变量和机密 | required |
 | `ADMIN_IDS` | string (comma-separated) | `.dev.vars` | dashboard 变量和机密 | empty = none |
-| `ALLOW_UNKNOWN_USERS` | string | `.dev.vars` | dashboard 变量和机密 | anything but literal `"false"` = true |
 | `MAX_ATTEMPTS` | string | `.dev.vars` | dashboard 变量和机密 | missing/invalid → `8` |
 
 `.dev.vars.example` is the annotated local template (one comment + one assignment + blank line per
@@ -60,7 +58,6 @@ Repo carries zero variable values → fork users edit nothing.
 
 - Secret missing at runtime → binding is `undefined`; fail fast at the call site that needs it
   (do not silently continue with empty credentials).
-- `ALLOW_UNKNOWN_USERS === "false"` → feature off; every other value (including unset) → on.
 - `MAX_ATTEMPTS` not a positive integer → fall back to `8` (parse, don't trust).
 
 ### 5. Good / Base / Bad Cases
@@ -72,7 +69,7 @@ Repo carries zero variable values → fork users edit nothing.
 ### 6. Tests Required
 
 - `test/health.test.ts` asserts the exact response shape — guards against config leaking into output.
-- S2+: default-semantics branches (`ALLOW_UNKNOWN_USERS`, `MAX_ATTEMPTS`) need explicit unit tests.
+- S2+: default-semantics branches (`MAX_ATTEMPTS`) need explicit unit tests.
 
 ### 7. Wrong vs Correct
 
@@ -90,8 +87,8 @@ observed in production 2026-09-28)
 ```
 
 ```
-# Remote: dashboard Worker → Settings → 变量和机密 — all 7 values, configured once, persist
-# Local:  .dev.vars (git-ignored) — same 7 keys for wrangler dev
+# Remote: dashboard Worker → Settings → 变量和机密 — all 6 values, configured once, persist
+# Local:  .dev.vars (git-ignored) — same 6 keys for wrangler dev
 ```
 
 **Why**: with `keep_vars: true` dashboard variables (Text or Secret) survive every deploy, and

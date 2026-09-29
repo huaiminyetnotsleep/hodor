@@ -1,7 +1,7 @@
 # hodor
 
 Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题，消息不串线。
-完整设计文档见 [docs/README.md](docs/README.md)（v2.12，12 篇）。
+完整设计文档见 [docs/README.md](docs/README.md)（v3.0，14 篇）。
 
 ## 准备工作（一次性，docs/05 前置清单）
 
@@ -20,23 +20,22 @@ Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题�
 
 **环境变量**
 
-7. 部署后在面板 Worker → 设置 → 变量和机密 配置 7 条（模板与说明见 `.dev.vars.example`，一次即可，`keep_vars: true` 已保证跨部署持久）；本地调试可选：`cp .dev.vars.example .dev.vars` 后 `npx wrangler dev`
+7. 部署后在面板 Worker → 设置 → 变量和机密 配置 6 条（模板与说明见 `.dev.vars.example`，一次即可，`keep_vars: true` 已保证跨部署持久）；本地调试可选：`cp .dev.vars.example .dev.vars` 后 `npx wrangler dev`
 
 ## 环境变量说明（模板与注释见 `.dev.vars.example`）
 
-| 变量 | 说明 | 敏感 | 缺省 |
-|------|------|------|------|
-| `TELEGRAM_BOT_TOKEN` | Bot Token（BotFather 发放） | 是 | — |
-| `TELEGRAM_WEBHOOK_SECRET` | Telegram 回调头鉴权（SHA-256 比对）；三个 Secret 必须互异 | 是 | — |
-| `ADMIN_SETUP_SECRET` | `/admin/*` 管理端 Bearer | 是 | — |
-| `SUPPORT_CHAT_ID` | 私有支持群 chat_id（`-100` 开头） | 否 | — |
-| `ADMIN_IDS` | 管理员 user_id 白名单，逗号分隔 | 否 | — |
-| `ALLOW_UNKNOWN_USERS` | 未知用户首条消息是否建户建档（docs/09） | 否 | `true`（仅显式 `"false"` 关闭） |
-| `MAX_ATTEMPTS` | inbox 处理尝试上限（docs/03 重试闭环） | 否 | `8` |
+| 变量 | 必填 | 用途 | 敏感 | 缺省 |
+|------|------|------|------|------|
+| `TELEGRAM_BOT_TOKEN` | 必填 | Bot Token（BotFather 发放），所有 Bot API 调用的凭证 | 是 | — |
+| `TELEGRAM_WEBHOOK_SECRET` | 必填 | Telegram 回调头鉴权（SHA-256 比对）；三个 Secret 必须互异 | 是 | — |
+| `ADMIN_SECRET` | 必填 | `/admin/*` 管理端 Bearer | 是 | — |
+| `SUPPORT_CHAT_ID` | 必填 | 私有支持群 chat_id（`-100` 开头），Topic 所在群与双向路由依据 | 否 | — |
+| `ADMIN_IDS` | 必填 | 管理员 user_id 白名单，逗号分隔 | 否 | — |
+| `MAX_ATTEMPTS` | 选填 | inbox 处理尝试上限（docs/03 重试闭环） | 否 | `8` |
 
 注入方式（⚠️ 2026-09-28 实测与官方文档核实）：`wrangler deploy` 默认按配置重置绑定，但本仓库已设 **`keep_vars: true`**——面板「变量和机密」配置的变量（Text 或机密均可）**跨部署持久**；官方文档另明确 **Secrets 永不因部署删除**。
 
-- **全部 7 个**：部署后在面板 Worker → 设置 → 变量和机密 配置一次即可（fork 使用者零代码改动）；3 个 Secret 建议用「机密」类型，4 个配置 Text/机密均可
+- **全部 6 个**：部署后在面板 Worker → 设置 → 变量和机密 配置一次即可（fork 使用者零代码改动）；3 个 Secret 建议用「机密」类型，3 个配置 Text/机密均可
 - **本地调试（可选）**：`cp .dev.vars.example .dev.vars` 后 `npx wrangler dev`（`.dev.vars` 已被 git 忽略），与面板互不影响
 - 也可用 `npx wrangler secret put <NAME>`（Secret 类型，等价持久）
 
@@ -48,7 +47,7 @@ npm test                                          # Vitest：本地 D1 + 打桩 
 npm run typecheck && npm run lint
 ```
 
-当前实现进度：S1–S10 全部完成（Phase 1 MVP 功能全集：webhook/inbox、双向中继、六条管理命令、/admin 端点、审计、148 例自动化测试全绿）。剩余工作 = 下方 V4–V10 人工回归（分期计划见 V10 小节）。任务树与各子任务验收标准见 `.trellis/tasks/`。
+当前实现进度：S1–S10 全部完成（Phase 1 MVP 功能全集：webhook/inbox、双向中继、六条管理命令、/admin 端点、审计、148 例自动化测试全绿）。剩余工作 = 下方 V4–V10 人工回归（分期计划见 V10 小节）。**完整功能实现清单（✅ 已实现 / 🔄 进行中 / ⬜ 未实现，逐项可勾选）见 [docs/README.md「功能实现清单」](docs/README.md#六功能实现清单)**。任务树与各子任务验收标准见 `.trellis/tasks/`。
 
 ## 部署到 Cloudflare（自动部署 · Workers Builds）
 
@@ -61,7 +60,7 @@ npm run typecheck && npm run lint
 1. Fork `huaiminyetnotsleep/hodor` 到自己的 GitHub 账号
 2. Cloudflare 面板 → **Workers & Pages → Create → Workers → Import a repository** → 授权 Cloudflare GitHub App → 选中**你的 fork**，向导逐项配置：
    - 项目名称：`hodor`
-   - 变量表单：7 个值在此一次填齐（向导按 `.dev.vars.example` 生成表单项）；`keep_vars: true` 已在仓库配置，这些值**跨部署持久，fork 使用者零代码改动**（3 个 Secret 建议机密类型）
+   - 变量表单：6 个值在此一次填齐（向导按 `.dev.vars.example` 生成表单项）；`keep_vars: true` 已在仓库配置，这些值**跨部署持久，fork 使用者零代码改动**（3 个 Secret 建议机密类型）
    - 构建命令：**留空**；部署命令：**保持向导默认 `npx wrangler deploy`，无需改动**——置备（创建/复用同名 D1 → 注入 database_id 到构建工作区，**不改动你的仓库** → 幂等迁移）由 `npm install` 的 postinstall 钩子自动完成，先于部署执行
    - 关闭「启用预览构建」（Phase 1 无 preview 分支部署需求）
 3. 部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"ok":true,"version":"0.1.0"}`（S9 起 `POST /admin/setup` 完成绑定与 setWebhook）
@@ -83,7 +82,7 @@ npm run typecheck && npm run lint
 
 - 副本仓库名默认取项目名——你的账号下已有同名仓库会报「已存在具有该名称的存储库」（仓库所有者部署请走路径一直接导入现有仓库）
 - 报「无法获取存储库内容」多为瞬时失败：确认 URL 为标准 HTTPS 地址（非 `git@…` SSH 形式）、仓库 Public，稍后重试或改走路径一
-- 其余置备项（D1 / 7 变量 / 部署命令）与路径一相同；`.dev.vars.example` 一职两用（本地开发模板 + 表单清单）
+- 其余置备项（D1 / 6 变量 / 部署命令）与路径一相同；`.dev.vars.example` 一职两用（本地开发模板 + 表单清单）
 
 ### 路径三：手工 wrangler（不依赖 GitHub，救急/本地验证用）
 
@@ -93,7 +92,7 @@ npm run deploy          # = node scripts/deploy.mjs：自动建/复用 D1、注�
 curl https://hodor.<你的子域>.workers.dev/health
 ```
 
-仅注入/更新变量时：`npx wrangler secret put <NAME>`（共 7 个，见 `.dev.vars.example`）。
+仅注入/更新变量时：`npx wrangler secret put <NAME>`（共 6 个，见 `.dev.vars.example`）。
 
 ### 与业界做法的对照
 
@@ -137,7 +136,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 
    ```bash
    curl -X POST "https://hodor.<子域>.workers.dev/admin/setup" \
-        -H "Authorization: Bearer <面板 ADMIN_SETUP_SECRET 的值>"
+        -H "Authorization: Bearer <面板 ADMIN_SECRET 的值>"
    ```
 
    响应含 bot_id / webhook_key / webhook 信息即成功（空请求体 = 自动使用面板变量）
@@ -151,7 +150,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 4. ★ A 改昵称再发 → 标题刷新
 5. ★ 重放：取 A 刚发那条的 `update_id`，curl 重发同 payload（带 Secret 头）→ 200 且不重复建题/发 WELCOME
 
-排错：401=Bearer 与面板 `ADMIN_SETUP_SECRET` 不一致｜setup 502=Token 错（看响应 message）｜404=路径不符（以 setup 响应返回的 webhook_key 为准）｜无 Topic 创建=查面板 `ALLOW_UNKNOWN_USERS` 或 deleted_users 墓碑｜WELCOME 偶发丢失=best-effort 副调用属正常。
+排错：401=Bearer 与面板 `ADMIN_SECRET` 不一致｜setup 502=Token 错（看响应 message）｜404=路径不符（以 setup 响应返回的 webhook_key 为准）｜无 Topic 创建=查 deleted_users 墓碑｜WELCOME 偶发丢失=best-effort 副调用属正常。
 
 ### V5 · S5 出站中继与 403（★ 人工回归，**待执行**，依赖 V4 完成）
 
@@ -192,7 +191,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 
 ### V9 · S9 管理端点与绑定（★ 人工回归，**待执行**；完成后 S4 手工 seed 可退役）
 
-1. ★ `curl -X POST https://hodor.<子域>.workers.dev/admin/setup -H "Authorization: Bearer <ADMIN_SETUP_SECRET>" -H 'content-type: application/json' -d '{}'` → 成功响应（空体回退 env）；此后 getWebhookInfo 与 `/admin/webhook/status` 一致
+1. ★ `curl -X POST https://hodor.<子域>.workers.dev/admin/setup -H "Authorization: Bearer <ADMIN_SECRET>" -H 'content-type: application/json' -d '{}'` → 成功响应（空体回退 env）；此后 getWebhookInfo 与 `/admin/webhook/status` 一致
 2. ★ 绑定后用户消息照常入站（链路不回归；手工 seed 的 bots 行被 setup 的 upsert 接管）
 3. ★ `/admin/admins` 增删管理员 → 生效且审计可查（db 或审计查询）
 4. ★ （可选）`/admin/webhook/unbind` → 重绑恢复；错误 Bearer → 401；1 分钟内 >10 次 → 429
@@ -254,7 +253,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 
 ## 运维（docs/09 约定）
 
-- 管理端操作不封装脚本，直接调 `/admin/*` 端点（docs/05），Bearer `ADMIN_SETUP_SECRET`（S9 起可用）
+- 管理端操作不封装脚本，直接调 `/admin/*` 端点（docs/05），Bearer `ADMIN_SECRET`（S9 起可用）
 
 ### 数据库巡检（Dashboard D1 Console）
 

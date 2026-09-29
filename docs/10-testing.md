@@ -1,6 +1,6 @@
 # 10 · 测试与验收
 
-> **hodor 设计文档 · 10/12**
+> **hodor 设计文档 · 10/13**
 > 上一篇:[09-security-ops](09-security-ops.md) · 下一篇:[11-roadmap](11-roadmap.md) · [返回总览](README.md)
 
 ---
@@ -52,7 +52,7 @@
 - 标题图标与 `customers.blocked` 一致;`conversations.status` 不含 blocked;
 - `CLOSE_TOPIC_ON_BAN` 关闭时 ban 后 Topic 仍可发消息(服务提示可达);
 - 命令写审计日志;
-- `/purge`:非白名单拒绝;confirm 序号不匹配 / 超时拒绝;执行顺序审计先行;conversation 与 messages 删除而 customer 保留;重复 confirm 幂等;
+- `/purgemsg`:非白名单拒绝;confirm 序号不匹配 / 超时拒绝;执行顺序审计先行;conversation 与 messages 删除而 customer 保留;重复 confirm 幂等;
 - `/risk` `/unrisk`:白名单内外;标题 `⚠️` 与 `customers.watchlisted` 一致;与封禁独立(可并存,unban 后 `⚠️` 恢复);置位提示一次;入站 WATCH_NOTICE 24h 限频(时间戳内不重复);
 - `/deluser`:confirm 序号不匹配 / 超时拒绝;墓碑先于 customer 删除;messages/conversations/customer 全删而审计保留;非 `/start` 静默忽略;`/start` 重建新序号并继承 `was_watchlisted`;重复 confirm 幂等。
 
@@ -82,7 +82,7 @@
 16. 制造 429(短时间大量发送)→ 消息退避后仍全部送达
 17. 换绑演练:归档台账并绑定新 Bot 后,老用户发消息 → 进入原 Topic,历史连续
 18. 换绑演练:新 Bot 的低位 update_id 正常处理,不被旧台账幂等命中
-19. /purge 演练:确认执行后 Topic 整体删除、D1 无会话残留、General 出现公告、审计含 purge;该用户再发消息 → 新建 Topic 且序号不变
+19. /purgemsg 演练:确认执行后 Topic 整体删除、D1 无会话残留、General 出现公告、审计含 purgemsg;该用户再发消息 → 新建 Topic 且序号不变
 20. /risk 演练:标记后标题出现 ⚠️ 且收到置位提示;用户与管理员继续正常收发;再入站出现 WATCH_NOTICE(24h 内不重复);期间 /ban 后标题 🔇、/unban 后恢复 ⚠️;/unrisk 后 ⚠️ 消失
 21. /deluser 演练:确认后 customer/conversations/messages 全删、Topic 删除、General 公告、审计含 deluser;该用户再发消息无响应;/start 后新序号恢复对话,高危标记按墓碑继承
 ```

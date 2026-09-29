@@ -1,6 +1,6 @@
 # 06 · D1 数据模型
 
-> **hodor 设计文档 · 06/12**
+> **hodor 设计文档 · 06/13**
 > 上一篇:[05-webhook-management](05-webhook-management.md) · 下一篇:[07-storage](07-storage.md) · [返回总览](README.md)
 
 ---
@@ -41,6 +41,8 @@ bots 1─────* support_admins
 | status | TEXT | `active` / `disabled` |
 | config_version | INTEGER | 配置代数,绑定/解绑递增 |
 | created_at / updated_at | TEXT | |
+
+Phase 4 预定列(Expand/Contract 加入,见 [08](08-reliability.md)):`verification_enabled INTEGER`——人机验证开关唯一事实源(见 [04](04-admin-commands.md)、[09](09-security-ops.md)),Phase 1 不建列。
 
 ### customers(用户,封禁唯一事实源)
 
@@ -139,7 +141,7 @@ bots 1─────* support_admins
 | bot_id | INTEGER FK | |
 | actor_type | TEXT | `admin` / `system` |
 | actor_id | INTEGER | admin 的 telegram_user_id;system 为 NULL |
-| action | TEXT | `ban` / `unban` / `purge` / `risk` / `unrisk` / `deluser` / `webhook_bind` / `webhook_unbind` / `admin_add` / `admin_remove` / `topic_creation_retry` … |
+| action | TEXT | `ban` / `unban` / `purgemsg` / `risk` / `unrisk` / `deluser` / `webhook_bind` / `webhook_unbind` / `admin_add` / `admin_remove` / `topic_creation_retry` / `verify_on` / `verify_off`(后两者 Phase 4 预定) … |
 | detail_json | TEXT | 上下文(customer_id、thread_id 等;**不含 Token/Secret/消息正文**) |
 | created_at | TEXT | |
 
@@ -154,6 +156,13 @@ bots 1─────* support_admins
 | payload_json | TEXT | |
 | status | TEXT | `pending / sent / failed` |
 | attempts / sent_at / last_error / created_at | | |
+
+### 迁移结构(Phase 4 预定,Phase 1 不建;已延后,见 [11](11-roadmap.md)「延后意向」)
+
+无缝迁移已延后,原设计契约已删除,具体 Schema 立项时随重新设计另定。此处仅保留结构性边界,避免提前建表返工:
+
+- 迁移编排状态(generation、active 绑定指针等)属未来迁移控制面,落地时经 Expand/Contract 加入(见 [08](08-reliability.md)),与 `bots.status` 的 `active / disabled` 语义**分离**,不得混用(对应总览「Bot 轴与群轴解耦」,见 [01](01-architecture.md));
+- 广播复用上表通用 outbox(以 action 区分迁移广播),不另造重试引擎。
 
 ## 索引清单(唯一索引之外的主查询索引)
 

@@ -1,7 +1,7 @@
 # 12 · 参考资源
 
-> **hodor 设计文档 · 12/12**
-> 上一篇:[11-roadmap](11-roadmap.md) · [返回总览](README.md)
+> **hodor 设计文档 · 12/13**
+> 上一篇:[11-roadmap](11-roadmap.md) · 下一篇:[13-implementation-steps](13-implementation-steps.md) · [返回总览](README.md)
 
 ---
 

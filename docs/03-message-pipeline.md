@@ -1,6 +1,6 @@
 # 03 · 消息链路与幂等状态机
 
-> **hodor 设计文档 · 03/12**
+> **hodor 设计文档 · 03/13**
 > 上一篇:[02-forum-routing](02-forum-routing.md) · 下一篇:[04-admin-commands](04-admin-commands.md) · [返回总览](README.md)
 
 本篇是全项目的核心:一条 Update 从进入 Worker 到处理完成的全过程。**业务逻辑与触发方式解耦**——本文的处理函数在 Phase 1 由 Webhook 同步调用,Phase 2 由 Queue 消费调用,代码不变。
@@ -22,7 +22,7 @@
 ③ 来源分类
     ├── 私聊消息(用户 → Bot)      → 入站链路
     ├── 支持群 Topic 消息(管理员) → 校验后先判命令:
-    │       ├── /ban /unban /purge /risk /unrisk /deluser → 管理命令(04)
+    │       ├── /ban /unban /purgemsg /risk /unrisk /deluser → 管理命令(04)
     │       └── 普通消息           → 出站链路
     └── 其他(见「忽略策略」)      → 标记 processed,返回 200
     │
@@ -31,7 +31,7 @@
    (任何一步失败 → 按错误分类决定:重试 or 记永久失败,见「错误处理」)
 ```
 
-命令必须在普通中继逻辑**之前**解析,`/ban`、`/unban`、`/purge` 绝不进入 `copyMessage`。
+命令必须在普通中继逻辑**之前**解析,`/ban`、`/unban`、`/purgemsg` 绝不进入 `copyMessage`。
 
 ---
 
@@ -253,10 +253,11 @@ allowed_updates = ["message"]
 
 | 模板 | 触发 | 默认文案 |
 |------|------|----------|
-| `WELCOME` | 用户 `/start` | 简短说明用途与响应预期 |
+| `WELCOME` | 用户 `/start` | 简短说明用途与响应预期;Phase 4 增强(步骤 19,PRD):附项目名称、项目地址与「直接对话即可」的使用方式 |
 | `BANNED_NOTICE` | 被 `/ban` 时(可选,默认关) | 「你已被暂时停止服务」 |
 | `REJECTED`(可选,默认关) | blocked 期间用户再来消息 | 静默为默认;开启时最多每 24h 提示一次 |
 | `WATCH_NOTICE` | 高危用户入站(24h 限频,见 04) | 「⚠️ 该用户在高危名单,请多加注意」 |
+| `HELP` | 管理员 `/help`(Phase 4,见 04) | 管理命令清单与用途(仅支持群可见) |
 
 ## 已知限制:并发乱序
 

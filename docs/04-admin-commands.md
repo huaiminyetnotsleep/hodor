@@ -1,13 +1,13 @@
 # 04 · 管理命令与用户管理
 
-> **hodor 设计文档 · 04/12**
+> **hodor 设计文档 · 04/13**
 > 上一篇:[03-message-pipeline](03-message-pipeline.md) · 下一篇:[05-webhook-management](05-webhook-management.md) · [返回总览](README.md)
 
 ---
 
 ## 命令优先级
 
-命令在普通中继逻辑之前解析(见 [03](03-message-pipeline.md) 处理顺序总览):收到管理员 Topic 消息,先判是否管理命令(`/ban` / `/unban` / `/purge` / `/risk` / `/unrisk` / `/deluser`)——是则执行管理操作并结束,否则走普通出站中继。以上命令**绝不进入 `copyMessage`**,用户侧完全不可见(命令消息本身随后删除)。
+命令在普通中继逻辑之前解析(见 [03](03-message-pipeline.md) 处理顺序总览):收到管理员 Topic 消息,先判是否管理命令(`/ban` / `/unban` / `/purgemsg` / `/risk` / `/unrisk` / `/deluser`)——是则执行管理操作并结束,否则走普通出站中继。以上命令**绝不进入 `copyMessage`**,用户侧完全不可见(命令消息本身随后删除)。
 
 ## `/ban` 流程
 
@@ -31,29 +31,31 @@
 5. `deleteMessage` 删除 `/unban` 命令消息;
 6. 写 `audit_logs`(action = `unban`);标记 processed。
 
-## `/purge` 流程(清除用户全部会话数据)
+## `/purgemsg` 流程(清理与该用户的全部消息)
 
-清除当前 Topic 绑定用户在本系统内的全部会话痕迹——消息、媒体引用、会话与 Topic 本体。**高危且不可逆,仅 `support_admins` 白名单内的管理员可执行**,并设计为两步确认:
+清理当前 Topic 绑定用户在系统内的**全部消息**(PRD:清理和该用户的所有消息)——D1 消息行、媒体引用,以及群内 Topic 中的消息副本。**高危且不可逆,仅 `support_admins` 白名单内的管理员可执行**,并设计为两步确认:
 
 1. 校验发送者在白名单 + 消息来自 `support_chat_id` 且 thread 有映射(同 `/ban` 前置校验;General/未知 thread → 忽略);
-2. 收到 `/purge`(未带 confirm)→ Bot 在本 Topic 发确认提示:`⚠️ 将清除 #<id> 的全部会话数据(含图片/视频/文件引用),不可逆。10 分钟内发送 /purge confirm <id> 执行。`;
-3. **10 分钟内、在同一 Topic 内**发送 `/purge confirm <id>`,且 `<id>` 与该 Topic 绑定的 customer 序号**一致**才执行;序号不匹配(发错 Topic/写错号)或超时一律拒绝并提示作废;
+2. 收到 `/purgemsg`(未带 confirm)→ Bot 在本 Topic 发确认提示:`⚠️ 将清理 #<id> 的全部消息(含图片/视频/文件引用),不可逆。10 分钟内发送 /purgemsg confirm <id> 执行。`;
+3. **10 分钟内、在同一 Topic 内**发送 `/purgemsg confirm <id>`,且 `<id>` 与该 Topic 绑定的 customer 序号**一致**才执行;序号不匹配(发错 Topic/写错号)或超时一律拒绝并提示作废;
 4. 执行顺序(**审计先行**,与 Topic 创建「意图先落库」同一原则):
-   ① 写 `audit_logs`(action = `purge`,detail 含 customer_id 与 actor_id,不含消息内容);
+   ① 写 `audit_logs`(action = `purgemsg`,detail 含 customer_id 与 actor_id,不含消息内容);
    ② 删除该 conversation 的全部 `messages` 行(含 `media_file_id` / `r2_object_key` 引用;Phase 3 起同时删除对应 R2 对象);
    ③ 删除 `conversations` 行;
    ④ `deleteForumTopic`(整话题删除——Topic 内的用户消息、管理员回复与媒体副本随之清除);
    ⑤ 在 **General Topic** 发一条结果公告(含 `#序号`)——Topic 本体已删除,公告与审计是仅存的痕迹;
-5. 重复 `/purge confirm` 幂等:conversation 已不存在即视为已清除,回复提示。
+5. 重复 `/purgemsg confirm` 幂等:conversation 已不存在即视为已清理,回复提示。
 
 设计取舍与边界:
 
-- **customer 行保留**:身份、`#序号`、封禁状态不动——用户下次发消息会新建 conversation 与新 Topic(同号新会话);「删除用户身份」不提供,审计链完整性优先;
-- **为什么整题删除而不是逐条删消息**:Bot API 的 `deleteMessage` 只能删除 **48 小时内**的消息,逐条清除覆盖不了历史;`deleteForumTopic` 无此限制,是唯一完整的清除手段;
-- **确认是无状态的**:`/purge confirm <id>` 携带序号并在同一 Topic 内校验,错发到其他 Topic 会因序号不匹配被拒——不为确认引入任何存储;
-- **崩溃窗口**:审计(①)先于一切删除,若中途崩溃会留下「有 purge 审计但 Topic/数据仍在」的残留——残留 Topic 因无 conversation 映射已被忽略策略覆盖,由管理员在客户端手动删除,或按审计对账后重试;
-- **清除范围**:系统持有的全部副本与引用(D1 行、群内 Topic 及其媒体副本、Phase 3 的 R2 对象)。不覆盖:用户私聊中用户收到的回复副本(属用户自己的聊天记录,Bot 无权删除)、Telegram 平台底层的媒体原件(`file_id` 所指)、`inbox_updates` 的原始 payload(投递台账,按 [07](07-storage.md) 老化策略统一处理);
+- **为什么「清消息」要整题删除**:PRD 要求清理**所有**消息,而 Bot API 的 `deleteMessage` 只能删除 **48 小时内**的消息,逐条清除覆盖不了历史;`deleteForumTopic` 无此限制,是唯一完整的清除手段。「保留 Topic、只删 48h 内消息」的方案因达不到「所有」被否决。整题删除连带清理了会话行与 Topic 本体,故本命令的效果是「消息全清、会话重开」;
+- **customer 行保留**:身份、`#序号`、封禁状态不动——用户下次发消息会新建 conversation 与新 Topic(同号新会话),对话无缝继续;「删除用户身份」不属于本命令,那是 `/deluser` 的职责(审计链完整性优先);
+- **确认是无状态的**:`/purgemsg confirm <id>` 携带序号并在同一 Topic 内校验,错发到其他 Topic 会因序号不匹配被拒——不为确认引入任何存储;
+- **崩溃窗口**:审计(①)先于一切删除,若中途崩溃会留下「有 purgemsg 审计但 Topic/数据仍在」的残留——残留 Topic 因无 conversation 映射已被忽略策略覆盖,由管理员在客户端手动删除,或按审计对账后重试;
+- **清除范围**:系统持有的全部消息副本与引用(D1 行、群内 Topic 及其媒体副本、Phase 3 的 R2 对象)。不覆盖:用户私聊中用户收到的回复副本(属用户自己的聊天记录,Bot 无权删除)、Telegram 平台底层的媒体原件(`file_id` 所指)、`inbox_updates` 的原始 payload(投递台账,按 [07](07-storage.md) 老化策略统一处理);
 - **不可恢复边界**:D1 侧可经 Time Travel(30 天)救援误删(见 [09](09-security-ops.md));Telegram 侧 Topic 删除不可逆。
+
+> 命名注:本命令按 PRD 定名 `/purgemsg`;当前代码实现为 `/purge`(audit 值 `purge`),重命名与审计值同步属实现任务,随下一批代码变更执行。
 
 ## `/risk` / `/unrisk` 流程(高危名单)
 
@@ -74,7 +76,7 @@
 
 ## `/deluser` 流程(删除用户)
 
-删除用户的**全部数据与身份**——customer 行、全部会话与消息、媒体引用、Topic 本体。与 `/purge` 的区别:`/purge` 清数据但保留 customer 身份(同号新会话);`/deluser` 连身份一起删除,该用户必须重新 `/start` 才能开启全新对话(全新 `#序号`)。典型场景:响应用户「删除我的全部数据」类请求、彻底清除骚扰账号。高危且不可逆,仅白名单管理员可执行,两步确认与 `/purge` 相同(`/deluser` → 10 分钟内、同一 Topic 发送 `/deluser confirm <序号>`,序号匹配才执行)。
+删除用户的**全部数据与身份**——customer 行、全部会话与消息、媒体引用、Topic 本体。与 `/purgemsg` 的区别:`/purgemsg` 清理全部消息但保留 customer 身份(同号新会话);`/deluser` 连身份一起删除,该用户必须重新 `/start` 才能开启全新对话(全新 `#序号`)。典型场景:响应用户「删除我的全部数据」类请求、彻底清除骚扰账号。高危且不可逆,仅白名单管理员可执行,两步确认与 `/purgemsg` 相同(`/deluser` → 10 分钟内、同一 Topic 发送 `/deluser confirm <序号>`,序号匹配才执行)。
 
 执行顺序(**关门先于删除**——先写墓碑,防止「自动重建新用户」的竞态):
 
@@ -93,25 +95,42 @@
 - 重复 `/deluser confirm` 幂等:customer 已不存在即视为已删除;
 - 墓碑只存 id、时间与操作者,**不含任何内容**——它本身满足「删除数据」类请求的隐私要求;
 - 崩溃窗口:①② 先落库,后续步骤可按审计对账重试;
-- Telegram 侧 Topic 删除不可逆;用户私聊副本与平台底层媒体不受控(边界同 `/purge`)。
+- Telegram 侧 Topic 删除不可逆;用户私聊副本与平台底层媒体不受控(边界同 `/purgemsg`)。
 
 ## 命令注册(setMyCommands,输入辅助)
 
-`/ban`、`/unban`、`/purge`、`/risk`、`/unrisk`、`/deluser` 的解析与执行**不依赖**命令菜单——即使不注册,管理员手动输入命令也照常工作。注册 `setMyCommands` 只为输入体验:管理员在群内输入 `/` 即出现自动补全与说明:
+`/ban`、`/unban`、`/purgemsg`、`/risk`、`/unrisk`、`/deluser` 的解析与执行**不依赖**命令菜单——即使不注册,管理员手动输入命令也照常工作。注册 `setMyCommands` 只为输入体验:管理员在群内输入 `/` 即出现自动补全与说明:
 
 | command | 菜单描述 |
 |---------|----------|
 | `ban` | 封禁当前 Topic 绑定的用户 |
 | `unban` | 解除当前 Topic 用户的封禁 |
-| `purge` | 清除当前 Topic 用户的全部会话数据(不可逆,需二次确认) |
+| `purgemsg` | 清理当前 Topic 用户与该用户的全部消息(不可逆,需二次确认) |
 | `risk` | 将当前 Topic 用户列入高危名单(仍可正常对话,持续提示) |
 | `unrisk` | 将当前 Topic 用户移出高危名单 |
 | `deluser` | 删除当前 Topic 用户及其全部数据(不可逆,需二次确认) |
 
 - **注册时机**:绑定流程内(`setWebhook` 之后,见 [05](05-webhook-management.md)),调用一次;
 - **作用域**:`BotCommandScopeChat`(`chat_id = support_chat_id`),命令菜单对支持群内成员可见;Phase 1 **不用** per-Topic scope(`message_thread_id` 参数)——群级已够用,命令在 General/未知 Topic 被触发也无妨,解析层按忽略策略静默丢弃(见 [03](03-message-pipeline.md));
-- **失败非致命**:调用失败(限流/网络)只记 `audit_logs` 与 `last_error`,**不阻断绑定**——管理员仍可手动输入命令,重跑 `/admin/setup` 即可补注册;
+- **失败非致命**:调用失败(限流/网络)只记 `audit_logs` 与 `last_error`,**不阻断绑定**——管理员仍可手动输入命令,重跑 `/public/setwebhook` 即可补注册;
 - 到达 Worker 的仍是一条 `/ban` 文本消息,幂等、白名单校验、审计流程全部照旧,命令菜单不引入新的处理路径。
+
+## Phase 4 命令:/help 与 /verifyon /verifyoff(规划)
+
+以下为已合并进设计的 Phase 4 命令契约([13](13-implementation-steps.md) 步骤 18/19),落地前用户侧不可见,现有六条命令的解析与执行不受影响。与现有命令同守三条底线:白名单校验、命令绝不进入 `copyMessage`、命令消息执行后删除。
+
+### /help(管理员帮助,步骤 19)
+
+- 仅 `support_admins` 白名单可触发,每个 Topic 内可用(PRD:可在每个 Topic 中触发);
+- 行为:在本 Topic 回复帮助文案(当前可用命令与用途,文案模板 `HELP` 见 [03](03-message-pipeline.md)),随后 `deleteMessage` 删除命令消息;
+- 纯只读提示:无状态变更,不写审计。
+
+### /verifyon /verifyoff(人机验证开关,步骤 18)
+
+- 开关 [09](09-security-ops.md)「人机验证与频率限制」体系的总闸,仅白名单管理员可执行;
+- **状态唯一来源**:`bots.verification_enabled`(0/1,Phase 4 经 Expand/Contract 加列,见 [06](06-data-model.md)、[08](08-reliability.md))——禁止在 conversations 或 KV 存第二份(同「状态唯一来源」原则);
+- `/verifyon` 置 1、`/verifyoff` 置 0,各写 `audit_logs`(action = `verify_on` / `verify_off`),随后按新状态重注册命令菜单(PRD:两个命令按状态互斥展示,注册机制见「命令注册」节);
+- 关闭期间 `/start` 跳过验证直接建户;开启后新 `/start` 需通过验证才建户(流程见 [09](09-security-ops.md))。
 
 ## 封禁语义:应用层封禁
 
@@ -145,7 +164,7 @@ false     true
 
 ## 相关验收
 
-命令的测试与验收条目见 [10](10-testing.md)(命令不进 copyMessage、白名单外不可执行、标题与 D1 状态一致、`/purge` 的确认与删除链路等)。
+命令的测试与验收条目见 [10](10-testing.md)(命令不进 copyMessage、白名单外不可执行、标题与 D1 状态一致、`/purgemsg` 的确认与清理链路等)。
 
 ---
 

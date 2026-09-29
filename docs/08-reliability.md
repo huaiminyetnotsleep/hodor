@@ -1,6 +1,6 @@
 # 08 · 可靠性与发布
 
-> **hodor 设计文档 · 08/12**
+> **hodor 设计文档 · 08/13**
 > 上一篇:[07-storage](07-storage.md) · 下一篇:[09-security-ops](09-security-ops.md) · [返回总览](README.md)
 
 ---
