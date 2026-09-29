@@ -22,7 +22,15 @@ export default defineConfig({
         ],
       },
       { text: 'PRD', link: '/prd' },
-      { text: 'TODO', link: '/todo' },
+      {
+        text: 'TODO',
+        items: [
+          { text: '全量列表', link: '/todo/' },
+          { text: 'P1', link: '/todo/p1' },
+          { text: 'P2', link: '/todo/p2' },
+          { text: 'P3', link: '/todo/p3' },
+        ],
+      },
       {
         text: 'GitHub',
         link: 'https://github.com/huaiminyetnotsleep/hodor',
@@ -30,6 +38,17 @@ export default defineConfig({
     ],
 
     sidebar: {
+      '/todo/': [
+        {
+          text: 'TODO',
+          items: [
+            { text: '全量列表', link: '/todo/' },
+            { text: 'P1', link: '/todo/p1' },
+            { text: 'P2', link: '/todo/p2' },
+            { text: 'P3', link: '/todo/p3' },
+          ],
+        },
+      ],
       '/guide/': [
         {
           text: '指南',
@@ -45,7 +64,7 @@ export default defineConfig({
           text: '更多',
           items: [
             { text: '产品需求文档（PRD）', link: '/prd' },
-            { text: 'TODO', link: '/todo' },
+            { text: 'TODO', link: '/todo/' },
           ],
         },
       ],
