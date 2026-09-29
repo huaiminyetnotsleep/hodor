@@ -56,9 +56,7 @@
 4. MAX_ATTEMPTS， 最大重试次数
 5. ALLOW_UNKNOWN_USERS，默认可以删除了，当然是用来和陌生人聊天的
 6. ADMIN_IDS 管理员ids, 支持有多个管理员
-7. ADMIN_SETUP_SECRET ，管理员的token，可以进行管理员的操作，还需要吗？
-8. PREFIX：worker url 的一个前缀地址，比如 `https://open-wegram-bot.username.workers.dev/public`中**public**就是一个前缀，可以防止被其他人恶意利用worker地址，不是必填项，没有时默认就是public
-9. MAX_MESSAGES_PER_MINUTE_ENV，每分钟消息频率限制
+7. MAX_MESSAGES_PER_MINUTE_ENV，每分钟消息频率限制
 ## 准备工作
 1. bot的申请
 2. 超级群组的创建，还有获取超级群组chat_id的方法，下面是3种方式
