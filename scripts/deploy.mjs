@@ -4,11 +4,20 @@
 // 默认流程：注入版本模块 → 解析/创建 D1 数据库 → 应用远端迁移 → 部署 Worker。
 //
 // 核心不变量：
-//   1. 仓库 wrangler.jsonc 一字不改：真实 database_id 只写入
-//      .wrangler/resolved.wrangler.jsonc（.wrangler/ 已 gitignore），
-//      migrate / deploy 均通过 --config 指向该临时配置。
+//   1. 本地模式（默认 / --provision-only / --migrate-only）：仓库 wrangler.jsonc
+//      一字不改，真实 database_id 只写入 .wrangler/resolved.wrangler.jsonc
+//      （.wrangler/ 已 gitignore），migrate / deploy 均通过 --config 指向该
+//      临时配置。唯一豁免：--install-hook（postinstall 门控注入，2026-09-30
+//      第三次范围变更）仅在 Workers Builds（WORKERS_CI=1）中把真实 id 就地
+//      注入仓库路径的 wrangler.jsonc——构建工作区是一次性克隆，注入不回传 git
+//      仓库；Workers Builds 官方默认命令 `npx wrangler deploy` 从 cwd 读配置、
+//      不带 --config，注入因此必需。
 //   2. 迁移失败 → 中止且不部署（T06 契约：不发布不兼容代码），修复后重跑即可。
-//   3. 日志纪律：本脚本只输出步骤前缀、命令名、退出码与数据库 uuid（uuid 非
+//      --install-hook 下即：迁移失败 → npm install 失败 → 构建中止 → 不部署。
+//   3. --install-hook 门控：非 Workers Builds 环境（无 WORKERS_CI=1；本地与
+//      GitHub Actions 等只有 CI=true）下零写入、零子进程、零网络，直接跳过
+//      （exit 0）。这是本地 npm install 与各类 CI npm ci 无账号副作用的基石。
+//   4. 日志纪律：本脚本只输出步骤前缀、命令名、退出码与数据库 uuid（uuid 非
 //      密钥，全量打印便于排障）。除 D1_DATABASE_ID 的取值外，脚本不读取任何
 //      其他环境变量的内容，任何路径下都不回显凭据；wrangler 自身的输出（含
 //      报错）通过 stdio 直接透传，不经过本脚本的日志。
@@ -20,9 +29,9 @@
 // .bin/wrangler 是指向 wrangler/bin/wrangler.js 的符号链接，node 可直接执行）。
 // 注意：.bin 直启假定类 Unix 平台（macOS / Linux，含 Workers Builds）。
 //
-// 纯函数（JSONC 剥注释解析 / database_id 原地替换）在 scripts/lib/config.mjs，
-// 版本模块纯渲染/校验在 scripts/lib/version.mjs——两者均可被 workerd 沙箱内的
-// 测试导入；本文件只做进程与文件编排，不被测试导入。
+// 纯函数（JSONC 剥注释解析 / database_id 原地替换 / postinstall 门控判定）在
+// scripts/lib/config.mjs，版本模块纯渲染/校验在 scripts/lib/version.mjs——两者
+// 均可被 workerd 沙箱内的测试导入；本文件只做进程与文件编排，不被测试导入。
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -33,6 +42,7 @@ import {
   PLACEHOLDER_DATABASE_ID,
   parseWranglerConfig,
   replaceJsoncString,
+  shouldRunInstallHook,
   withDatabaseId,
 } from "./lib/config.mjs";
 import { renderVersionModule } from "./lib/version.mjs";
@@ -79,24 +89,33 @@ function log(step, message) {
  * wrangler 调用之前短路返回。
  */
 function printUsage() {
-  console.log(`用法：npm run deploy [--provision-only | --migrate-only]
+  console.log(`用法：npm run deploy [--provision-only | --migrate-only | --install-hook]
 
 模式：
   （默认）           注入版本模块 → 解析/创建 D1 数据库 → 应用远端迁移 → 部署 Worker
   --provision-only   只解析/创建数据库并写出 resolved 配置（不迁移、不部署、不注入版本）
   --migrate-only     注入版本模块 → 解析数据库 + 应用远端迁移（不部署）
+  --install-hook     postinstall 预置钩子（package.json 的 postinstall 自动运行，
+                     通常无需手动调用）。仅当 WORKERS_CI=1（Cloudflare Workers
+                     Builds 注入）时执行：解析/创建 D1 → 就地注入真实
+                     database_id 到仓库 wrangler.jsonc → 生成版本模块 → 远端
+                     迁移；随后交由官方默认部署命令（npx wrangler deploy）继续。
+                     其余环境（本地 npm install、GitHub Actions npm ci 等）打印
+                     一行提示后零副作用跳过
   --help, -h         显示本帮助
 
 环境变量：
   D1_DATABASE_ID     可选。直接指定数据库 uuid，跳过 wrangler 查询/创建
-                     （构建环境 token 无 D1 查询/创建权限时的逃生口）`);
+                     （构建环境 token 无 D1 查询/创建权限时的逃生口）
+  WORKERS_CI         由 Workers Builds 自动注入（固定为 1），--install-hook 的
+                     门控信号；其他 CI 环境只有 CI=true，不会命中`);
 }
 
 /**
  * 解析命令行参数为运行模式。未知参数 / 位置参数 / 模式互斥冲突直接报错退出。
  *
  * @param {string[]} argv process.argv.slice(2)
- * @returns {{ mode: "default" | "provision-only" | "migrate-only" | "help" }}
+ * @returns {{ mode: "default" | "provision-only" | "migrate-only" | "install-hook" | "help" }}
  */
 function parseArgs(argv) {
   const flags = argv.filter((arg) => arg.startsWith("-"));
@@ -104,7 +123,7 @@ function parseArgs(argv) {
   if (flags.includes("--help") || flags.includes("-h")) {
     return { mode: "help" };
   }
-  const known = new Set(["--provision-only", "--migrate-only"]);
+  const known = new Set(["--provision-only", "--migrate-only", "--install-hook"]);
   const unknown = flags.filter((flag) => !known.has(flag));
   if (positional.length > 0) {
     console.error(`不接受位置参数：${positional.join(" ")}`);
@@ -118,7 +137,7 @@ function parseArgs(argv) {
   }
   const modes = flags.filter((flag) => known.has(flag));
   if (modes.length > 1) {
-    console.error("--provision-only 与 --migrate-only 不能同时使用。");
+    console.error("--provision-only / --migrate-only / --install-hook 不能同时使用。");
     printUsage();
     process.exit(1);
   }
@@ -127,6 +146,9 @@ function parseArgs(argv) {
   }
   if (modes[0] === "--migrate-only") {
     return { mode: "migrate-only" };
+  }
+  if (modes[0] === "--install-hook") {
+    return { mode: "install-hook" };
   }
   return { mode: "default" };
 }
@@ -336,6 +358,37 @@ async function createDatabase(databaseName) {
 }
 
 /**
+ * 读取仓库 wrangler.jsonc，校验并提取 d1_databases[0].database_name。
+ * 默认模式与 --install-hook 共用的入口步骤：路径基于脚本位置推导，与 cwd
+ * 无关；database_name 缺失属于仓库配置损坏，任何模式下都直接中止。
+ *
+ * @returns {{ rawText: string, databaseName: string }}
+ */
+function readSourceConfig() {
+  const rawText = readFileSync(SOURCE_CONFIG_PATH, "utf8");
+  const parsed = parseWranglerConfig(rawText);
+  const database = parsed?.d1_databases?.[0];
+  if (database === undefined || typeof database.database_name !== "string") {
+    console.error(
+      "[provision] wrangler.jsonc 缺少 d1_databases[0].database_name，无法解析目标数据库。",
+    );
+    process.exit(1);
+  }
+  const databaseName = database.database_name;
+
+  // 信息性提示：无论当前 database_id 是占位符还是真实 id，都以名称为唯一事实源
+  if (database.database_id === PLACEHOLDER_DATABASE_ID) {
+    log("provision", `配置 database_id 为占位符，将以名称 ${databaseName} 解析真实 id。`);
+  } else {
+    log(
+      "provision",
+      `配置 database_id 为 ${database.database_id}，仍以名称 ${databaseName} 为准重新解析。`,
+    );
+  }
+  return { rawText, databaseName };
+}
+
+/**
  * 解析目标数据库 uuid。
  *
  * 顺序：D1_DATABASE_ID 环境变量（逃生口，跳过一切查询）→ wrangler d1 info
@@ -366,6 +419,22 @@ async function resolveDatabaseId(databaseName) {
   log("provision", `数据库 ${databaseName} 不存在，开始创建…`);
   const uuid = await createDatabase(databaseName);
   return { uuid, source: "created" };
+}
+
+/**
+ * 打印 uuid 解析来源的补充日志（默认模式与 --install-hook 共用；
+ * source === "created" 的「已创建数据库 …」在 createDatabase 内打印，不重复）。
+ *
+ * @param {string} databaseName
+ * @param {string} uuid
+ * @param {"env" | "existing" | "created"} source
+ */
+function logResolvedSource(databaseName, uuid, source) {
+  if (source === "env") {
+    log("provision", `使用 D1_DATABASE_ID 指定的数据库 ${uuid}`);
+  } else if (source === "existing") {
+    log("provision", `数据库 ${databaseName} 已存在，复用 ${uuid}`);
+  }
 }
 
 /**
@@ -445,22 +514,28 @@ function generateVersionModule() {
  * wrangler 输出走完整 inherit，用户能看到待应用/已应用的迁移清单。
  *
  * @param {string} databaseName
+ * @param {{ configPath?: string | null, abortLine?: string }} options
+ *   configPath：迁移所用配置，默认 resolved 临时配置（本地各模式）。传 null
+ *   表示不带 --config——--install-hook 用它让 wrangler 直接读仓库 cwd 中已
+ *   注入的 wrangler.jsonc（与官方默认命令一致的裸调用形态）。
+ *   abortLine：失败时第二行提示；默认为本地模式的中止话术，--install-hook
+ *   传「安装中止 → 构建中止」变体（npm install 失败即构建失败）。
  */
-async function applyMigrations(databaseName) {
+async function applyMigrations(
+  databaseName,
+  { configPath = RESOLVED_CONFIG_PATH, abortLine } = {},
+) {
   log("migrate", `应用远端迁移（数据库 ${databaseName}）…`);
-  const result = await runWrangler([
-    "d1",
-    "migrations",
-    "apply",
-    databaseName,
-    "--remote",
-    "--config",
-    RESOLVED_CONFIG_PATH,
-  ]);
+  const args = ["d1", "migrations", "apply", databaseName, "--remote"];
+  if (configPath !== null) {
+    args.push("--config", configPath);
+  }
+  const result = await runWrangler(args);
   if (result.code !== 0) {
     console.error(`[migrate] 迁移失败（退出码 ${result.code}）。`);
     console.error(
-      "[migrate] 迁移失败，已中止部署（未发布不兼容代码）；修复后重新运行 npm run deploy 即可重试。",
+      abortLine ??
+        "[migrate] 迁移失败，已中止部署（未发布不兼容代码）；修复后重新运行 npm run deploy 即可重试。",
     );
     process.exit(1);
   }
@@ -482,14 +557,95 @@ async function deployWorker() {
 }
 
 /**
- * 主流程：解析模式 → 读取仓库配置 → 解析/创建数据库 → 写 resolved 配置 →
- * 按模式执行迁移/部署。
+ * postinstall 预置钩子（--install-hook，2026-09-30 第三次范围变更）。
+ *
+ * 目标：Cloudflare Workers Builds 的官方默认命令（部署 `npx wrangler deploy`、
+ * 预览 `npx wrangler preview`）零改动可用——构建的依赖安装步骤触发 npm
+ * postinstall，在此完成一切预置，默认部署命令随后直接读取仓库 cwd 的
+ * wrangler.jsonc（官方构建命令不带 --config、也不运行 npm pre* 钩子）。
+ *
+ * 门控不变量（本地与其它 CI 的安全基石）：shouldRunInstallHook 为假时，本
+ * 函数不做任何文件读取、写入或子进程调用，打印一行提示后直接 return
+ * （exit 0）。只有 Workers Builds 注入的 WORKERS_CI=1 才放行；GitHub Actions
+ * 等仅有 CI=true，绝不触发远端 D1 查询/创建/迁移等账号级操作。
+ *
+ * 放行后的执行顺序（任一步失败 exit 1 → npm install 失败 → 构建中止 → 不部署）：
+ *   1. 解析/创建数据库 uuid（与本地模式共用 resolveDatabaseId：含
+ *      D1_DATABASE_ID 逃生口、uuid 校验、d1 info → d1 create、权限引导）；
+ *   2. 就地注入：把真实 id 写入仓库路径的 wrangler.jsonc（withDatabaseId 做
+ *      原文区间替换，注释逐字保留；重复执行幂等）。这是「本地模式仓库配置
+ *      一字不改」不变的唯一豁免场景——Workers Builds 工作区是一次性克隆，
+ *      注入不回传 git 仓库；
+ *   3. 生成版本模块（默认部署命令不经过 npm 生命周期，注入时机在此）；
+ *   4. `wrangler d1 migrations apply <name> --remote`：不带 --config，读仓库
+ *      cwd 中已注入的配置（与用户手动运行的形态一致）。
+ * 本模式不部署：安装成功后官方默认部署命令自然接管。
+ */
+async function runInstallHook() {
+  // 门控必须先于一切副作用：本地 npm install 与 GitHub Actions npm ci 的
+  // 零副作用保证完全依赖这一行。
+  if (!shouldRunInstallHook(process.env)) {
+    log(
+      "install-hook",
+      "非 Workers Builds 环境（无 WORKERS_CI=1），跳过；本地部署请使用 npm run deploy",
+    );
+    return;
+  }
+  log("install-hook", "Workers Builds 环境已确认（WORKERS_CI=1），开始预置…");
+
+  if (!existsSync(WRANGLER_BIN)) {
+    console.error(
+      `[install-hook] 未找到本地 wrangler（${WRANGLER_BIN}），安装中止（构建将失败，不会部署）。`,
+    );
+    process.exit(1);
+  }
+
+  const { rawText, databaseName } = readSourceConfig();
+  const { uuid, source } = await resolveDatabaseId(databaseName);
+  logResolvedSource(databaseName, uuid, source);
+
+  // 就地注入（豁免理由见函数头注释）。withDatabaseId 对「当前已是该 id」同样
+  // 适用：内容不变则跳过写入，保 mtime，幂等。
+  const injected = withDatabaseId(rawText, uuid);
+  if (injected === rawText) {
+    log("install-hook", `wrangler.jsonc 的 database_id 已是 ${uuid}，无需注入。`);
+  } else {
+    writeFileSync(SOURCE_CONFIG_PATH, injected, "utf8");
+    log(
+      "install-hook",
+      `已就地注入真实 database_id=${uuid}（仓库路径 ${SOURCE_CONFIG_PATH}）。`,
+    );
+  }
+
+  // 官方默认部署命令不运行 npm pre* 钩子 → 版本模块在此生成
+  generateVersionModule();
+
+  await applyMigrations(databaseName, {
+    configPath: null,
+    abortLine:
+      "[migrate] 迁移失败，安装中止 → 构建中止（未发布不兼容代码）；修复后重新触发 Workers Builds 构建即可重试。",
+  });
+
+  log("install-hook", "预置完成（数据库/迁移就绪），交由默认部署命令继续");
+}
+
+/**
+ * 主流程：解析模式 → （--install-hook：门控预置，独立分派）→ 读取仓库配置 →
+ * 解析/创建数据库 → 写 resolved 配置 → 按模式执行迁移/部署。
  */
 async function main() {
   const { mode } = parseArgs(process.argv.slice(2));
   if (mode === "help") {
     // 纯本地短路：不检查 wrangler、不读配置、不发起任何 wrangler 调用
     printUsage();
+    return;
+  }
+
+  if (mode === "install-hook") {
+    // 必须先于下方的 wrangler 存在性检查与配置读取分派：本地 npm install 与
+    // GitHub Actions npm ci 都会触发 postinstall，非 Workers Builds 环境下
+    // 这里是零副作用的唯一保证。
+    await runInstallHook();
     return;
   }
 
@@ -500,35 +656,9 @@ async function main() {
     process.exit(1);
   }
 
-  // 读取仓库 wrangler.jsonc（路径基于脚本位置推导，与 cwd 无关）
-  const rawText = readFileSync(SOURCE_CONFIG_PATH, "utf8");
-  const parsed = parseWranglerConfig(rawText);
-  const database = parsed?.d1_databases?.[0];
-  if (database === undefined || typeof database.database_name !== "string") {
-    console.error(
-      "[provision] wrangler.jsonc 缺少 d1_databases[0].database_name，无法解析目标数据库。",
-    );
-    process.exit(1);
-  }
-  const databaseName = database.database_name;
-
-  // 信息性提示：无论当前 database_id 是占位符还是真实 id，都以名称为唯一事实源
-  if (database.database_id === PLACEHOLDER_DATABASE_ID) {
-    log("provision", `配置 database_id 为占位符，将以名称 ${databaseName} 解析真实 id。`);
-  } else {
-    log(
-      "provision",
-      `配置 database_id 为 ${database.database_id}，仍以名称 ${databaseName} 为准重新解析。`,
-    );
-  }
-
+  const { rawText, databaseName } = readSourceConfig();
   const { uuid, source } = await resolveDatabaseId(databaseName);
-  if (source === "env") {
-    log("provision", `使用 D1_DATABASE_ID 指定的数据库 ${uuid}`);
-  } else if (source === "existing") {
-    log("provision", `数据库 ${databaseName} 已存在，复用 ${uuid}`);
-  }
-  // source === "created" 已在 createDatabase 内打印「已创建数据库 …」
+  logResolvedSource(databaseName, uuid, source);
 
   // 真实 id 只写入 .wrangler/ 下的临时配置（仓库文件不动）
   mkdirSync(RESOLVED_CONFIG_DIR, { recursive: true });

@@ -35,3 +35,12 @@ export declare function replaceJsoncString(
   keyPath: string,
   value: string,
 ): string;
+
+/**
+ * postinstall 预置钩子门控（--install-hook）：仅当 env.WORKERS_CI 严格等于
+ * "1"（Cloudflare Workers Builds 注入）时返回 true；未设置或任何其他取值
+ * （含仅有 CI=true 的 GitHub Actions 等环境）返回 false。
+ */
+export declare function shouldRunInstallHook(
+  env: Record<string, string | undefined>,
+): boolean;

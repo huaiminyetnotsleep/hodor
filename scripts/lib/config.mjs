@@ -1,4 +1,5 @@
-// wrangler JSONC 配置的纯函数工具集（T05/T06 提前交付，2026-09-30 范围变更）。
+// wrangler JSONC 配置的纯函数工具集 + postinstall 门控判定（T05/T06 提前交付
+// 与 --install-hook 门控注入，2026-09-30 范围变更）。
 //
 // 纯度约定（重要）：本模块不得引用 process、node:fs、node:child_process 等
 // 任何 Node 专有 API——test/deploy-config.test.ts 会在 workerd 沙箱（vitest
@@ -330,4 +331,25 @@ export function replaceJsoncString(text, keyPath, value) {
  */
 export function withDatabaseId(text, uuid) {
   return replaceJsoncString(text, "d1_databases[0].database_id", uuid);
+}
+
+/**
+ * 判断 postinstall 预置钩子（scripts/deploy.mjs --install-hook）是否应执行。
+ *
+ * 依据官方文档（developers.cloudflare.com/workers/ci-cd/builds/configuration/）：
+ * Cloudflare Workers Builds 的构建环境固定注入 WORKERS_CI=1（同时还有 CI=true
+ * 与 WORKERS_CI_BUILD_UUID / COMMIT_SHA / BRANCH 等构建元数据），官方建议用
+ * WORKERS_CI 区分 Workers Builds 与本地。GitHub Actions 等其他 CI 只注入
+ * CI=true 而没有 WORKERS_CI——它们绝不能触发远端 D1 查询/创建/迁移等账号级
+ * 操作（本地 npm install 更是如此）。
+ *
+ * 因此仅当 WORKERS_CI 严格等于字符串 "1" 才返回 true；未设置、空串、"0"、
+ * "true" 或任何其他取值（包括同时设置了 CI=true 的一切非 Workers Builds
+ * 环境）一律返回 false。
+ *
+ * @param {Record<string, string | undefined>} env 环境变量快照（如 process.env）
+ * @returns {boolean} 是否处于 Workers Builds 构建环境
+ */
+export function shouldRunInstallHook(env) {
+  return env.WORKERS_CI === "1";
 }

@@ -1,13 +1,14 @@
-// scripts/lib/config.mjs 纯函数单元测试（T05/T06 提前交付）
-// 只测 JSONC 剥注释 / 解析 / database_id 原地替换，不触碰 D1 与 SELF；
-// 被 import 的 config.mjs 是纯模块（无 process / node:* 引用），可安全运行在
-// workerd 沙箱（vitest cloudflare pool）内——workerd 里无法读文件，故 fixture
+// scripts/lib/config.mjs 纯函数单元测试（T05/T06 提前交付 + --install-hook 门控注入）
+// 只测 JSONC 剥注释 / 解析 / database_id 原地替换 / postinstall 门控判定，不触碰
+// D1 与 SELF；被 import 的 config.mjs 是纯模块（无 process / node:* 引用），可安全
+// 运行在 workerd 沙箱（vitest cloudflare pool）内——workerd 里无法读文件，故 fixture
 // 以内嵌字符串形式给出，形状与仓库 wrangler.jsonc 同构。
 import { describe, expect, it } from "vitest";
 import {
   PLACEHOLDER_DATABASE_ID,
   parseWranglerConfig,
   replaceJsoncString,
+  shouldRunInstallHook,
   stripJsoncComments,
   withDatabaseId,
 } from "../scripts/lib/config.mjs";
@@ -152,5 +153,51 @@ describe("replaceJsoncString（deploy.mjs 借此把 resolved 配置内的相对�
     const parsed = parseWranglerConfig(replaced);
     expect(parsed.d1_databases[0].migrations_dir).toBe("/repo/migrations");
     expect(parsed.d1_databases[0].database_id).toBe(PLACEHOLDER_DATABASE_ID);
+  });
+});
+
+// postinstall 门控（--install-hook）：本地 npm install 与 GitHub Actions npm ci
+// 的零副作用保证完全依赖该判定——只有 Workers Builds 注入的 WORKERS_CI=1 才放行
+describe("shouldRunInstallHook（postinstall 门控）", () => {
+  it("WORKERS_CI='1'（Workers Builds 注入）→ 命中", () => {
+    expect(shouldRunInstallHook({ WORKERS_CI: "1" })).toBe(true);
+  });
+
+  it("Workers Builds 完整环境（WORKERS_CI=1 + CI=true + 构建元数据）→ 命中", () => {
+    expect(
+      shouldRunInstallHook({
+        WORKERS_CI: "1",
+        CI: "true",
+        WORKERS_CI_BUILD_UUID: "7f9c2d1e-0000-4000-8000-a1b2c3d4e5f6",
+        WORKERS_CI_COMMIT_SHA: "0123456789abcdef",
+        WORKERS_CI_BRANCH: "main",
+      }),
+    ).toBe(true);
+  });
+
+  it("WORKERS_CI 未设置（键缺失或 undefined）→ 跳过", () => {
+    expect(shouldRunInstallHook({})).toBe(false);
+    expect(shouldRunInstallHook({ WORKERS_CI: undefined })).toBe(false);
+  });
+
+  it("仅 CI='true'（GitHub Actions 等其它 CI）必须跳过——不得触发远端操作", () => {
+    expect(shouldRunInstallHook({ CI: "true" })).toBe(false);
+    // 即便再叠加其他 CI 风格变量，只要没有 WORKERS_CI=1 就不命中
+    expect(
+      shouldRunInstallHook({ CI: "true", GITHUB_ACTIONS: "true", NODE_ENV: "ci" }),
+    ).toBe(false);
+  });
+
+  it("WORKERS_CI 为 '0' / 'true' / 其他取值 → 跳过（严格等于 '1' 才命中）", () => {
+    expect(shouldRunInstallHook({ WORKERS_CI: "0" })).toBe(false);
+    expect(shouldRunInstallHook({ WORKERS_CI: "true" })).toBe(false);
+    expect(shouldRunInstallHook({ WORKERS_CI: "yes" })).toBe(false);
+    expect(shouldRunInstallHook({ WORKERS_CI: "1 ", CI: "true" })).toBe(false);
+    expect(shouldRunInstallHook({ WORKERS_CI: "01", CI: "true" })).toBe(false);
+  });
+
+  it("WORKERS_CI 为空字符串 → 跳过", () => {
+    expect(shouldRunInstallHook({ WORKERS_CI: "" })).toBe(false);
+    expect(shouldRunInstallHook({ WORKERS_CI: "", CI: "true" })).toBe(false);
   });
 });
