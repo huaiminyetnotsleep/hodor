@@ -1,49 +1,49 @@
-# Error Handling — Telegram Tri-State Language
+# 错误处理 —— Telegram 三态语言
 
-> How all Telegram API errors are classified and consumed. Established in S2 (2026-09-28).
+> 所有 Telegram API 错误如何分类与消费。S2(2026-09-28)确立。
 
 ---
 
-## Convention: TelegramResult is the only error language for pipeline code
+## 约定:TelegramResult 是流水线代码唯一的错误语言
 
-**What**: `src/telegram/types.ts` defines `TelegramResult<T> = TelegramOk<T> | TelegramError`,
-where `TelegramError.kind` is `'retryable' | 'permanent'` (optional `retryAfterSeconds`,
-`errorMessage`; `permanent` also carries `errorCode?: number`). HTTP/JSON details are classified
-**inside** `src/telegram/client.ts` (`request()`); pipeline modules (S3+) never see status codes —
-they branch on `kind` only.
+**内容**:`src/telegram/types.ts` 定义 `TelegramResult<T> = TelegramOk<T> | TelegramError`,
+其中 `TelegramError.kind` 为 `'retryable' | 'permanent'`(可选 `retryAfterSeconds`、
+`errorMessage`;`permanent` 还携带 `errorCode?: number`)。HTTP/JSON 细节的分类**只**
+发生在 `src/telegram/client.ts`(`request()`)内部;流水线模块(S3 起)永远看不到
+状态码——只根据 `kind` 分支。
 
-**Why**: keeps docs/03's rule that S5 branches 403 into `bot_blocked_by_user` without string
-sniffing HTTP layers; one classification point, testable in isolation.
+**原因**:落实 docs/03 的规则——S5 将 403 分支为 `bot_blocked_by_user` 时,无需在
+HTTP 层嗅探字符串;单一分类点,可独立测试。
 
-### Classification matrix (verbatim from design.md decision table)
+### 分类矩阵(逐字摘自 design.md 决策表)
 
-| Telegram response | Kind | Extra semantics |
+| Telegram 响应 | Kind | 附加语义 |
 |---|---|---|
-| 200 + `ok:true` | Ok | passthrough result |
-| 200 + `ok:false` | permanent | errorMessage = description; `errorCode` = envelope `error_code` when present |
-| 429, `retry_after ≤ 3s` | **in-place retry exactly once** (setTimeout) | still 429 → retryable with new value; never retry twice |
-| 429, `retry_after > 3s` / missing | retryable | upstream re-throw → inbox 5xx → Telegram redelivery |
-| 403 | permanent | `errorCode === 403` drives `bot_blocked_by_user` (S5) — branch on the code, never string sniffing |
-| 400 | permanent (poison pill) | never retried; `errorCode` passthrough |
-| 5xx / network error / non-JSON | retryable | |
-| other 4xx | permanent | conservative default; `errorCode` passthrough |
+| 200 + `ok:true` | Ok | 结果直接透传 |
+| 200 + `ok:false` | permanent | errorMessage = description;信封有 `error_code` 时透传为 `errorCode` |
+| 429,`retry_after ≤ 3s` | **原地重试恰好一次**(setTimeout) | 仍 429 → retryable 携带新值;绝不重试两次 |
+| 429,`retry_after > 3s` 或缺失 | retryable | 向上重新抛出 → inbox 5xx → Telegram 重投递 |
+| 403 | permanent | `errorCode === 403` 驱动 `bot_blocked_by_user`(S5)——按数字码分支,绝不嗅探字符串 |
+| 400 | permanent(毒丸) | 绝不重试;`errorCode` 透传 |
+| 5xx / 网络错误 / 非 JSON | retryable | |
+| 其他 4xx | permanent | 保守默认;`errorCode` 透传 |
 
-### Consumer rules (S3+)
+### 消费方规则(S3 起)
 
-- `retryable` → let the request fail (5xx) so the inbox state machine + Telegram redelivery retry;
-  never loop inside pipeline code.
-- `permanent` → decide per docs/03: mark `processed` (poison pill / blocked user), never 5xx.
-- Do not add new classification branches outside `client.ts`.
+- `retryable` → 让请求失败(5xx),交给 inbox 状态机 + Telegram 重投递去重试;
+  绝不在流水线代码内循环。
+- `permanent` → 按 docs/03 逐项决定:标记 `processed`(毒丸 / 被屏蔽用户),绝不返回 5xx。
+- 不要在 `client.ts` 之外新增分类分支。
 
-## Tests required
+## 必需测试
 
-- Classification matrix + both 429 paths with call-count assertions (test/telegram-client.test.ts).
-- Consumers (S3+): each `kind` branch asserts the resulting inbox status / HTTP response.
+- 分类矩阵 + 两条 429 路径,并断言调用次数(test/telegram-client.test.ts)。
+- 消费方(S3 起):每个 `kind` 分支都要断言最终的 inbox 状态 / HTTP 响应。
 
-## Known follow-ups (recorded in task PRDs)
+## 已知后续(记录在各任务 PRD 中)
 
-- ~~S5 decision: whether `permanent` gains `errorCode?: number`~~ — Resolved in S5 (2026-09-28):
-  `permanent` carries `errorCode?: number` (envelope `error_code` passthrough; also on the
-  200 + `ok:false` path). Consumers branch on the numeric code, never on `errorMessage` text.
-- ~~S3: add the missing case "200 + valid JSON without `ok` field → retryable"~~ — Done
-  (test/telegram-client.test.ts).
+- ~~S5 决策:`permanent` 是否增加 `errorCode?: number`~~ —— 已在 S5(2026-09-28)解决:
+  `permanent` 携带 `errorCode?: number`(信封 `error_code` 透传;`200 + ok:false` 路径
+  同样如此)。消费方按数字码分支,绝不按 `errorMessage` 文本。
+- ~~S3:补充缺失场景「200 + 合法 JSON 但无 `ok` 字段 → retryable」~~ —— 已完成
+  (test/telegram-client.test.ts)。

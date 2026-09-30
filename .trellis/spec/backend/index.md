@@ -1,20 +1,21 @@
-# Backend Development Guidelines
+# 后端开发规范
 
-> Project-specific conventions for the hodor Worker (Cloudflare Workers + D1 + Telegram).
-
----
-
-## Guidelines Index
-
-| Guide | Description | Status |
-|-------|-------------|--------|
-| [Environment & Configuration](./env-config.md) | Env bindings, `.dev.vars` single-point config, `Cloudflare.Env` merge | Filled (S1) |
-| [Error Handling](./error-handling.md) | Telegram tri-state result language, classification matrix, consumer rules | Filled (S2) |
-| [Testing Setup](./testing.md) | vitest-pool-workers 0.22 + Vitest 4 wiring, migrations injection | Filled (S1) |
-
-Add new guideline files here as conventions are established (one file per topic, linked from
-this table). Cross-cutting thinking checklists live in [../guides/index.md](../guides/index.md).
+> hodor Worker(Cloudflare Workers + D1 + Telegram)的项目专属约定。
 
 ---
 
-**Language**: All documentation should be written in **English**.
+## 规范索引
+
+| 规范 | 说明 | 状态 |
+|------|------|------|
+| [环境与配置](./env-config.md) | 环境绑定、`.dev.vars` 单点配置、`Cloudflare.Env` 合并 | 已填写(S1) |
+| [错误处理](./error-handling.md) | Telegram 三态结果语言、分类矩阵、消费方规则 | 已填写(S2) |
+| [测试基座](./testing.md) | vitest-pool-workers 0.22 + Vitest 4 接线方式、迁移注入 | 已填写(S1) |
+| [数据库(D1)](./database.md) | 表结构改动与 `docs/guide/database.md` 的强制同步契约 | 已填写(S1) |
+
+新约定确立后,在此追加新的规范文件(每个主题一个文件,并从本表链接)。
+跨层思维检查清单见 [../guides/index.md](../guides/index.md)。
+
+---
+
+**语言**:所有文档一律使用**中文**撰写。
