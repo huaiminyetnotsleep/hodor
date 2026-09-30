@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.2.0...v1.3.0) (2026-09-30)
+
+
+### Features
+
+* stage 4 security trial — math verification, rate limit, notices, commands, 429 bounds (T18, T27-T30, T34-T35) ([e4a1c85](https://github.com/huaiminyetnotsleep/hodor/commit/e4a1c85a9a0f724fdf8eb3973210628bdd0f8bb3))
+
 ## [1.2.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.1.0...v1.2.0) (2026-09-30)
 
 
