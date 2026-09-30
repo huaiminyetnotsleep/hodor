@@ -10,7 +10,7 @@ cp .dev.vars.example .dev.vars # .dev.vars 已被 git 忽略，不会进入提�
 ```
 
 ::: tip
-当前阶段代码尚不读取任何环境变量，`.dev.vars.example` 的模板值即可跑通全部本地流程（测试与 `wrangler dev`）。待后续阶段实现 Telegram 调用时再填入真值。
+测试所需的变量已由 `vitest.config.ts` 显式注入（不依赖本地 `.dev.vars`，不同机器结果一致）；`.dev.vars` 供 `wrangler dev` 手动运行使用，值可先用 `.dev.vars.example` 模板，真机联调时再填入真实 token。
 :::
 
 文档站（本站）的依赖独立装在 `docs/` 下，首次运行会自动安装：
@@ -89,7 +89,7 @@ npm run dev        # → http://127.0.0.1:8787
 
 ```bash
 curl http://127.0.0.1:8787/health
-# {"status":"ok"}
+# {"status":"ok","version":"x.y.z"}
 ```
 
 查看本地库数据（以 `settings` 表为例）：
@@ -102,7 +102,7 @@ npx wrangler d1 execute hodor --local --command "SELECT * FROM settings"
 `wrangler.jsonc` 中的 `database_id` 只是占位符，**不影响本地模式**——本地状态按 `database_name`（`hodor`）键控。只有 `--remote` 操作（如 `npm run db:migrate:remote`）才需要真实 id，见[部署流程](./deploy.md)。
 :::
 
-当前仅实现 `GET /health`，其余路径一律 404——webhook / 消息中继是后续阶段的工作。
+当前已实现：`GET /health`（版本自检）、`/setwebhook/<ADMIN_SECRET>` 与 `/deletewebhook/<ADMIN_SECRET>`（绑定 / 解绑）、`POST /webhook`（文本双向中继）。本地 `wrangler dev` 无法接收 Telegram 推送（公网不可达），真机联调需部署后绑定 webhook，见[部署流程](./deploy.md)。
 
 ## 命令速查
 

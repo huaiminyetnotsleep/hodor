@@ -55,18 +55,17 @@ bot 身份（bot_id）不变，所有数据继续有效：
 
 ## 健康自检与版本
 
-`GET /health` 是部署完整性自检端点，逐项检查：
+`GET /health` 返回存活状态与版本号：
 
-| 检查项 | 内容 |
-| --- | --- |
-| 环境变量 | 必填变量已配置且格式合法 |
-| 数据库 | `HODOR_DB` 绑定可用、六张表已建 |
-| Webhook 绑定 | `getWebhookInfo` 确认 webhook 已指向本 Worker 的 `/webhook` |
+```json
+{"status":"ok","version":"1.1.0"}
+```
 
-- 全部通过：`{"status":"ok","version":"x.y.z"}`
-- 有未通过项：`{"status":"error","version":"x.y.z","failed":["...逐项失败原因..."]}`
+部署后或每次更新后建议访问一次，确认服务存活并核对版本号。
 
-自检不回显任何密钥值，可随时放心访问。部署后或每次更新后建议访问一次，确认全部通过并核对版本号。
+::: warning 完整自检尚未实现
+逐项检查环境变量、数据库六表、Webhook 指向的完整自检（`{"status":"error","failed":[...]}` 形态）规划在 [T07 / 阶段 7](/todo/index.md)。当前排查部署问题可用：`/setwebhook/<ADMIN_SECRET>`（缺 token / secret 会明确报出变量名）、`wrangler tail`（实时日志）、D1 Console（数据核对）。
+:::
 
 - **部署与更新**：push 到 main 即自动部署新版本
 
@@ -129,11 +128,16 @@ DELETE FROM users;
 
 ## 故障排查
 
+::: info 适用范围
+标 ★ 的为当前阶段（阶段 2）已适用；其余涉及的功能（验证码、管理命令等）在对应阶段交付后生效。
+:::
+
 | 现象 | 排查 |
 | --- | --- |
-| bot 完全无响应 | ① `GET /health` 查看哪项自检未通过（webhook 未绑定 / 变量缺失 / 建表未完成）；② dashboard 实时日志看是否有 401——secret 头不符说明 `TELEGRAM_WEBHOOK_SECRET` 与注册时不一致，重新 setwebhook |
-| 验证码收不到 | 用户是否已被 ban；日志中 sendMessage 是否报 403（用户已停用 / 拉黑 bot） |
-| 消息转发了但没建 topic，或 topic 操作失败 | bot 在群里缺少「管理话题」权限 |
-| `/purgemsg` 执行失败 | bot 缺少「删除消息」权限 |
-| 提示「找不到对应用户」 | topic 是僵尸（数据已被手动清理）：按提示手动关闭或删除该 topic |
-| 突然全部请求 429 | CF 免费套餐每日 10 万请求上限用尽（每条消息约消耗 1 次 CF 请求 + 若干 Telegram API 出站调用）；确认人机验证已开启、调低 `MAX_MESSAGES_PER_MINUTE`，或升级付费计划 |
+| ★ bot 完全无响应 | ① 先确认 webhook 已绑定：访问 `/setwebhook/<ADMIN_SECRET>` 回显身份即已绑定（`GET /health` 的完整自检 T07 在阶段 7）；② `npx wrangler tail hodor` 实时日志看请求是否到达、有无 401——secret 头不符说明 `TELEGRAM_WEBHOOK_SECRET` 与注册时不一致，重新 setwebhook；③ 日志无请求 = Telegram 侧未推送，检查 webhook 绑定 |
+| ★ 消息进群但为空 / 报 sendMessage 400 | `wrangler tail` 看具体 API 报错文案；若为「message to copy not found」类，参考 T21 运行时说明（[TODO](/todo/p1.md)） |
+| 验证码收不到（阶段 4 起） | 用户是否已被 ban；日志中 sendMessage 是否报 403（用户已停用 / 拉黑 bot） |
+| 消息转发了但没建 topic，或 topic 操作失败 | ★ bot 在群里缺少「管理话题」权限 |
+| `/purgemsg` 执行失败（阶段 6 起） | bot 缺少「删除消息」权限 |
+| 提示「找不到对应用户」（阶段 3 起） | topic 是僵尸（数据已被手动清理）：按提示手动关闭或删除该 topic |
+| 突然全部请求 429 | CF 免费套餐每日 10 万请求上限用尽（每条消息约消耗 1 次 CF 请求 + 若干 Telegram API 出站调用）；确认人机验证已开启（阶段 4 起）、调低 `MAX_MESSAGES_PER_MINUTE`，或升级付费计划 |

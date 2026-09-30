@@ -80,7 +80,7 @@ update 到达
  │      → 标记未验证 + 发新验证码，丢弃
  │ ⑦ 确保 topic：查 topics 表；无则 createForumTopic + 置顶用户信息；
  │      deluser 过的用户 → 重开原 topic
- │ ⑧ copyMessage 原样转发到 topic，messages 表落库 → 返回 200
+ │ ⑧ sendMessage 中继文本到 topic（阶段 3 起扩展媒体）→ 返回 200
 ```
 
 ### 出站（群组 topic → 用户）
@@ -92,7 +92,7 @@ update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
  │ ③ 以 / 开头？ → 按管理命令处理（命令表见功能介绍）
  │ ④ 普通消息：thread_id 反查 topics → user
  │      查无用户（僵尸 topic）→ 在 topic 内提示管理员手动处理
- │ ⑤ copyMessage 私聊送达，messages 表落库 → 返回 200
+ │ ⑤ sendMessage 私聊送达（messages 账本 T25 落库）→ 返回 200
 ```
 
 ## 验证状态机
@@ -152,7 +152,7 @@ src/
 
 | 决策 | 理由 |
 | --- | --- |
-| 媒体 file_id 直传，不落盘 | `copyMessage` 直接引用即可转发任何类型；零存储成本、零 R2 依赖，部署门槛最低。代价是 Telegram 服务端为唯一存储（可接受，不做本地留存） |
+| 媒体 file_id 直传，不落盘 | `sendPhoto`/`sendVideo` 等按 file_id 原样发送任何类型（T22，阶段 3）；零存储成本、零 R2 依赖，部署门槛最低。代价是 Telegram 服务端为唯一存储（可接受，不做本地留存） |
 | token 永不进 URL | URL 会留在浏览器历史、CF 访问日志等处，泄漏即被接管 bot。管理端点用独立的 `ADMIN_SECRET` 鉴权，token 只从 env 读取 |
 | 一人一 topic，deluser 后复用 | 管理员在同一个 topic 看到该用户完整历史；群组不堆积僵尸 topic；省去「新建 topic 重名」和墓碑表的复杂度 |
 | 全表带 bot_id | v1 单 bot，但数据模型天然支持多 bot：未来按 bot 独立 webhook 路径接入时只改接入层，不动数据 |
@@ -171,4 +171,4 @@ hodor 的设计借鉴了以下开源项目：
 | --- | --- |
 | [iawooo/ctt](https://github.com/iawooo/ctt) | 数学题验证码 + 答案按钮、分钟级限频超限重验、D1 + topic 映射的整体形态 |
 | [SideCloudGroup/BetterForward](https://github.com/SideCloudGroup/BetterForward) | topic 置顶用户信息、管理命令设计（ban / 高危标记 / 清理会话） |
-| [wozulong/open-wegram-bot](https://github.com/wozulong/open-wegram-bot) | copyMessage 无状态转发、webhook `secret_token` 鉴权思路 |
+| [wozulong/open-wegram-bot](https://github.com/wozulong/open-wegram-bot) | 无状态转发思路、webhook `secret_token` 鉴权 |
