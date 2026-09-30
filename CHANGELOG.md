@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.1.0...v1.2.0) (2026-09-30)
+
+
+### Features
+
+* stage 3 chat experience — media relay, welcome, pin, ledger, unbound notice (T22-T26) ([9d728d3](https://github.com/huaiminyetnotsleep/hodor/commit/9d728d33120faaa2b0413b1d5caf9d6eb706af00))
+
 ## [1.1.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.0.0...v1.1.0) (2026-09-30)
 
 
