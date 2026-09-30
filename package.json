@@ -1,6 +1,6 @@
 {
   "name": "hodor",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Telegram forum-topics 客服消息中继 Bot，Cloudflare Workers + D1",
   "type": "module",
