@@ -49,7 +49,7 @@ UNIQUE `(bot_id, user_id)` **和** UNIQUE `(bot_id, thread_id)` 双向唯一：
 | `thread_id` | INTEGER | topic 的 `message_thread_id`，与 bot_id 联合唯一 |
 | `title` | TEXT | 话题名，取用户昵称（`first_name`，回退 `@username` / 用户 ID） |
 | `status` | TEXT | `open` / `closed`（`/deluser` 后 closed，用户重新 start 时 reopen） |
-| `pinned_msg_id` | INTEGER | 置顶的用户信息消息 ID（risk / unrisk / deluser 后编辑更新） |
+| `pinned_msg_id` | INTEGER | 置顶的用户信息消息 ID（建档置顶时写入；昵称变更自动刷新，risk / unrisk / deluser 后编辑更新） |
 | `note` | TEXT | 管理员备注（`/note` 写入、`/unnote` 清空，展示于置顶信息）；随 topic 终身保留，deluser 后重开仍在 |
 | `created_at` / `closed_at` | TEXT | |
 
@@ -68,7 +68,7 @@ UNIQUE `(bot_id, user_id)` **和** UNIQUE `(bot_id, thread_id)` 双向唯一：
 | `direction` | TEXT | `in`（用户 → 群）/ `out`（群 → 用户） |
 | `group_msg_id` | INTEGER | 群内消息 ID（`/purgemsg` 用） |
 | `private_msg_id` | INTEGER | 私聊侧消息 ID |
-| `content_type` | TEXT | text / photo / video / document / … |
+| `content_type` | TEXT | text / photo / video / voice / audio / document / sticker / animation |
 | `created_at` | TEXT | |
 
 索引：`(thread_id, created_at)`、`(user_id, created_at)`。

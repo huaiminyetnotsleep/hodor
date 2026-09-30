@@ -73,14 +73,15 @@
 update 到达
  │ ① 校验 secret 头
  │ ② processed_updates 幂等去重（重复推送直接 200）
- │ ③ 用户不存在 → 建档（首条消息无论是否 /start 都视为开始，发欢迎语 + 验证码）
- │ ④ 已 ban？ → 回复「你已被禁言」（每用户每分钟 ≤1 次），丢弃
- │ ⑤ 未验证？ → 重发验证码（每用户每分钟 ≤1 次），丢弃
- │ ⑥ 限频：60 秒固定窗口计数 ≥ MAX_MESSAGES_PER_MINUTE？
- │      → 标记未验证 + 发新验证码，丢弃
- │ ⑦ 确保 topic：查 topics 表；无则 createForumTopic + 置顶用户信息；
- │      deluser 过的用户 → 重开原 topic
- │ ⑧ sendMessage 中继文本到 topic（阶段 3 起扩展媒体）→ 返回 200
+ │ ③ 内容抽取：文本 + 7 类媒体；支持集之外 → 安全忽略 200
+ │ ④ 用户不存在 → 建档（首条消息无论类型、是否 /start 都视为开始）
+ │ ⑤ 确保 topic：查 topics 表；无则 createForumTopic + 置顶用户信息
+ │      （置顶消息 ID 落库，昵称变更自动刷新）；deluser 过的用户 → 重开
+ │ ⑥ 欢迎语：新用户或 /start 触发，每用户每分钟 ≤1 次（原子频控）；
+ │      /start 到此结束——入口命令不中继、不落账本
+ │ ⑦ per-type send 中继到 topic（sendPhoto 等 7 类媒体 + sendMessage
+ │      文本）→ 成功后写 messages 账本（双端消息 ID）→ 返回 200
+ │ （阶段 4 起在 ④ 与 ⑤ 之间插入：ban 检查 → 验证拦截 → 分钟限频）
 ```
 
 ### 出站（群组 topic → 用户）
@@ -89,13 +90,16 @@ update 到达
 update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
  │ ① 幂等去重
  │ ② 发言者 ∈ ADMIN_IDS？否 → 静默忽略
- │ ③ 以 / 开头？ → 按管理命令处理（命令表见功能介绍）
- │ ④ 普通消息：thread_id 反查 topics → user
- │      查无用户（僵尸 topic）→ 在 topic 内提示管理员手动处理
- │ ⑤ sendMessage 私聊送达（messages 账本 T25 落库）→ 返回 200
+ │ ③ 内容抽取（支持集之外安全忽略）
+ │ ④ thread_id 反查 topics → user
+ │      查无用户或 topic 已关闭 → 在该 topic 内提示「找不到对应用户」（T26）
+ │ ⑤ per-type send 私聊送达（不带 thread）→ 成功后写 messages 账本 → 返回 200
+ │ （阶段 4 起在 ③ 处插入：以 / 开头 → 按管理命令处理）
 ```
 
 ## 验证状态机
+
+> 本节为阶段 4 的设计目标，当前未交付——置顶信息显示「验证状态：未启用」，消息不经验证直接中继。
 
 ```
           首条消息 / 重新 start
@@ -139,9 +143,11 @@ src/
   index.ts          # fetch 入口（路由层分发）
   routes/           # webhook / setwebhook / health 各端点
   pipeline/
-    inbound.ts      # 入站管线：用户私聊 → topic
-    outbound.ts     # 出站管线：topic → 用户
-    commands.ts     # 命令管线：管理命令处理
+    inbound.ts      # 入站管线：建档 → topic → 欢迎 → 中继 → 账本
+    outbound.ts     # 出站管线：反查绑定 → 中继 → 账本 / 无绑定提示
+    content.ts      # 内容抽取（文本 + 7 类媒体）与 per-type 中继分发
+    commands.ts     # 命令管线：管理命令处理（阶段 4）
+  copy.ts           # 用户可见文案唯一集中点（欢迎语 / 置顶信息 / 提示）
   store/            # users / topics / messages / settings 按表分模块
   telegram/         # client.ts：API 调用与错误分类的唯一出口
 ```
@@ -152,7 +158,7 @@ src/
 
 | 决策 | 理由 |
 | --- | --- |
-| 媒体 file_id 直传，不落盘 | `sendPhoto`/`sendVideo` 等按 file_id 原样发送任何类型（T22，阶段 3）；零存储成本、零 R2 依赖，部署门槛最低。代价是 Telegram 服务端为唯一存储（可接受，不做本地留存） |
+| 媒体 file_id 直传，不落盘 | `sendPhoto`/`sendVideo` 等按 file_id 原样发送（T22 已交付：7 类媒体 + 文本）；零存储成本、零 R2 依赖，部署门槛最低。代价是 Telegram 服务端为唯一存储（可接受，不做本地留存） |
 | token 永不进 URL | URL 会留在浏览器历史、CF 访问日志等处，泄漏即被接管 bot。管理端点用独立的 `ADMIN_SECRET` 鉴权，token 只从 env 读取 |
 | 一人一 topic，deluser 后复用 | 管理员在同一个 topic 看到该用户完整历史；群组不堆积僵尸 topic；省去「新建 topic 重名」和墓碑表的复杂度 |
 | 全表带 bot_id | v1 单 bot，但数据模型天然支持多 bot：未来按 bot 独立 webhook 路径接入时只改接入层，不动数据 |
