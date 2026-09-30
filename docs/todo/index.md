@@ -27,18 +27,18 @@
 
 ### Webhook 接入与可靠性
 
-- [ ] **T13** `/setwebhook/<ADMIN_SECRET>`：从 env 读取 token，注册 secret_token，写入 bot 身份并回显；管理鉴权失败统一 401。
-- [ ] **T14** `/deletewebhook/<ADMIN_SECRET>`：鉴权后解绑，错误密钥不能操作。
-- [ ] **T15** `POST /webhook` secret 头校验，私聊 / 指定群组 topic 分流，忽略不支持的 update 与其他群组消息。
-- [ ] **T16** `processed_updates` 幂等去重与并发处理控制，成功后才记录完成，明确部分成功窗口的行为。
-- [ ] **T17** 失败非 200 触发 Telegram 重推，attempts 与 `MAX_ATTEMPTS` 防毒丸，失败可定位且日志不泄漏密钥。
+- [x] **T13** `/setwebhook/<ADMIN_SECRET>`：从 env 读取 token，注册 secret_token，写入 bot 身份并回显；管理鉴权失败统一 401。
+- [x] **T14** `/deletewebhook/<ADMIN_SECRET>`：鉴权后解绑，错误密钥不能操作。
+- [x] **T15** `POST /webhook` secret 头校验，私聊 / 指定群组 topic 分流，忽略不支持的 update 与其他群组消息。
+- [x] **T16** `processed_updates` 幂等去重与并发处理控制，成功后才记录完成，明确部分成功窗口的行为。
+- [x] **T17** 失败非 200 触发 Telegram 重推，attempts 与 `MAX_ATTEMPTS` 防毒丸，失败可定位且日志不泄漏密钥。
 - [ ] **T18** Telegram API 429 按 retry_after 原地重试一次，超过执行预算时受控失败，不无限等待或重试。
 
 ### 用户与双向聊天
 
-- [ ] **T19** 首条私聊文本直接建档，无需强制先发 `/start`。
-- [ ] **T20** 持久化用户 ↔ topic 双向映射，复用原 topic，处理并发首次联系；名称取昵称，回退 @username / 用户 ID。
-- [ ] **T21** 文本双向 `copyMessage` 中继；出站校验群组、thread 与 `ADMIN_IDS`，管理员直接发言可送达，非管理员静默忽略。
+- [x] **T19** 首条私聊文本直接建档，无需强制先发 `/start`。
+- [x] **T20** 持久化用户 ↔ topic 双向映射，复用原 topic，处理并发首次联系；名称取昵称，回退 @username / 用户 ID。
+- [x] **T21** 文本双向 `copyMessage` 中继；出站校验群组、thread 与 `ADMIN_IDS`，管理员直接发言可送达，非管理员静默忽略。
 - [ ] **T22** 图片、视频、语音、文件、贴纸、动图等可复制消息双向直传，不下载、不落盘；明确不可复制类型的处理。
 - [ ] **T23** 首次欢迎语与 `/start` 每用户每分钟一次频控，文案集中单一模块。
 - [ ] **T24** 用户信息置顶，展示身份、首次聊天时间与当前状态；后续验证、高危、备注变化同步更新。
