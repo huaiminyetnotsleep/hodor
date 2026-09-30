@@ -1,37 +1,48 @@
 /**
- * 入站管线（T19/T20/T21 + T22/T23/T24/T25，design.md「入站管线」canonical order）：
+ * 入站管线（T19/T20/T21 + T22–T25 + 阶段 4 三门 T28/T29/T35）：
  *
- * 1. extractContent → 支持集之外（audio / video_note / …）静默完成，零副作用
+ * 1. extractContent → 支持集之外（audio 之外的音乐类 / video_note / …）静默完成，零副作用
  * 2. from 校验（缺 id → 静默完成）
- * 3. ensureUser → { isNew, displayChanged, firstSeenAt }
- * 4. topic 解析（阶段 2 逻辑不变：open 复用 / closed 重开 / 新建 + 竞态清理）
- *    4a. pinned_msg_id === null（新 topic 或上次置顶未落库）→ 发用户信息并置顶
- *    4b. pinned 且 displayChanged → editMessageText 刷新（best-effort）
- * 5. 欢迎语：isNew 或 isStartCommand → claimNoticeSlot 赢得才发（每用户每分钟 1 次）
- * 6. 中继：relayContent（text → sendMessage；媒体 → per-type send 按 file_id 直传）；
- *    isStartCommand 命中的 /start 变体在本步前**短路**——入口命令非对话内容，
- *    不中继、不写账本（新 topic 出现 + 置顶即首联信号；2026-09-30 真机验收修正）
- * 7. 账本：中继 ok → insertMessage(direction 'in', private=用户原始, group=中继结果)
+ * 3. ensureUser → { isNew, displayChanged, firstSeenAt } + 治理快照
+ *    （isBanned / isVerified / verifyAnswer / verifyMsgId）
+ * ①封禁门 isBanned → 拦截 + claimNoticeSlot 赢得才发 BAN_NOTICE（T30 频控）；
+ *    封禁用户零验证 / 限频逻辑、零 topic 副作用、零账本
+ * ②验证门 !isVerified → 欢迎语（isNew / isStart，slot 门控——阶段 3 语义）+
+ *    验证题（首联包 isNew 不占 slot 与欢迎成对；存量 / pending 重出 slot
+ *    门控——赢才出换题防死锁，输静默）；本条丢弃（/start 亦如此）
+ * ③限频门 countMessageInWindow 超限 → markUnverified + 置顶降级 ❌（best-effort）
+ *    + slot 赢得才发「含限频数字 + 新题 + 按钮」合并消息（单 push）；本条丢弃
+ * ④通过三门 → 阶段 3 链原样：
+ *    topic 解析（open 复用 / closed 重开 / 新建 + 竞态清理）
+ *      4a. pinned_msg_id === null → 发用户信息并置顶（验证行恒 ✅——三门后必已验证）
+ *      4b. pinned 且 displayChanged → editMessageText 刷新（best-effort）
+ *    欢迎语（仅 isStart 可达：新用户一律先落验证门；slot 门控）
+ *    /start 短路（入口命令非对话内容，不中继不写账本）
+ *    中继 relayContent → 账本 insertMessage
  *
- * 顺序动机：置顶 / 欢迎语都排在中继**之前**——它们的 retryable 失败抛出后重推，
- * 中继尚未发生，不会造成用户消息重复；把重复发送窗口压缩到只剩「中继成功后
- * 账本写失败」一处（阶段 2 定稿的 at-least-once 代价，绝不提前标记 processed 掩盖）。
+ * 门序固定：封禁 → 验证 → 限频（封禁不消耗验证 / 限频逻辑；未验证消息不进
+ * 限频计数）。三门在建档之后、topic 之前；被任一门拦截 = 零 topic 副作用、
+ * 零账本，按成功处理（webhook markProcessed + 200，不积压补发——答题前被
+ * 丢弃的消息不回溯，T28）。
  *
- * 逐步失败语义（design.md §二表格，binding）：
- * | 步骤           | retryable                    | permanent                          |
- * | 4a 置顶 send   | 抛（重推重走 4a，不重建 topic）| warn 跳过，**不写** pinned_msg_id |
- * | 4a pin         | 抛（同上；极端窗口遗留未置顶  | warn，信息消息已在，**仍写**       |
- * |                |  的旧信息消息，接受并记日志）  | pinned_msg_id 供后续 edit 刷新     |
- * | 4b 刷新置顶    | warn 跳过（best-effort）      | 同左                               |
- * | 5 欢迎语       | 抛（slot 已占，欢迎语可能丢失，| warn 跳过                          |
- * |                |  60s 后再 start 可再触发）     |                                    |
- * | 6 中继         | 抛（→ 重推；部分成功窗口=阶段2）| warn 跳过=丢弃，**不写账本**       |
- * | 7 账本         | 抛（→ 重推；可能重发一次中继） | —（D1 错误统一按 retryable 抛）    |
+ * 逐步失败语义（design.md §四 + 阶段 3 表格，binding）：
+ * | 步骤                | retryable                    | permanent                          |
+ * | ①禁言提示            | 抛（slot 已耗，宁丢一条）      | warn 吞                            |
+ * | ②欢迎语 / 验证题      | 抛（同上——重推出题，旧题失效） | warn 吞（题不落库）                 |
+ * | ③置顶降级            | warn 跳过（best-effort）      | 同左                               |
+ * | ③超限合并消息         | 抛（slot 已耗）               | warn 吞（题不落库）                 |
+ * | 4a 置顶 send         | 抛（重推重走 4a，不重建 topic）| warn 跳过，**不写** pinned_msg_id |
+ * | 4a pin              | 抛（同上）                    | warn，信息消息已在，**仍写**       |
+ * | 4b 刷新置顶          | warn 跳过（best-effort）      | 同左                               |
+ * | ④欢迎语（start 载体） | 抛（slot 已占，可能丢失）      | warn 跳过                          |
+ * | ④中继               | 抛（→ 重推）                  | warn 跳过=丢弃，**不写账本**       |
+ * | ④账本               | 抛（→ 重推；可能重发一次中继） | —（D1 错误统一按 retryable 抛）    |
  *
- * topic 建立 permanent 失败沿用阶段 2 语义：本条按已处理丢弃（不欢迎、不中继）。
+ * ③的置顶降级排在合并消息之前且 best-effort：撤验证后重推只会落回验证门
+ * （②），永远不会再走到③——降级必须在本轮完成，失败也不抛断主流程。
  */
-import { DEFAULT_WELCOME_TEXT, formatPinnedInfo, isStartCommand } from "../copy";
-import { parseSupportChatId, parseWelcomeText } from "../env";
+import { BAN_NOTICE, DEFAULT_WELCOME_TEXT, formatPinnedInfo, isStartCommand } from "../copy";
+import { parseMaxMessagesPerMinute, parseSupportChatId, parseWelcomeText } from "../env";
 import { insertMessage } from "../store/messages";
 import {
   findTopicByUser,
@@ -41,9 +52,15 @@ import {
   setPinnedMsgId,
   type TopicRow,
 } from "../store/topics";
-import { claimNoticeSlot, ensureUser } from "../store/users";
+import {
+  claimNoticeSlot,
+  countMessageInWindow,
+  ensureUser,
+  markUnverified,
+} from "../store/users";
 import { createTelegramClient } from "../telegram/client";
 import type { TelegramClient } from "../telegram/types";
+import { sendVerificationCode } from "./verify";
 import { extractContent, relayContent } from "./content";
 import type { TelegramMessageRef } from "./classify";
 
@@ -56,7 +73,34 @@ function resolveTopicTitle(from: { id: number; first_name?: string; username?: s
 }
 
 /**
- * 处理一条私聊 message：建档 → 确保 topic（+置顶）→ 欢迎语（频控）→ 中继 → 账本。
+ * 欢迎语（T23，claimNoticeSlot 原子频控；T30 起与其他提示共享 slot）。
+ * 验证门（首联 / 未验证 start）与阶段 3 链（已验证 start）共用同一语义：
+ * retryable → 抛（slot 已被占：重推不再补发，宁可丢失也不重复轰炸）；
+ * permanent → warn 跳过。
+ */
+async function maybeSendWelcome(
+  env: Cloudflare.Env,
+  client: TelegramClient,
+  botId: number,
+  userId: number,
+): Promise<void> {
+  if (!(await claimNoticeSlot(env.HODOR_DB, botId, userId))) return;
+  // 文案可用环境变量 WELCOME_TEXT 覆盖（字面 \n 解释为换行），未配置兜底默认
+  const welcomeText = parseWelcomeText(env) ?? DEFAULT_WELCOME_TEXT;
+  const welcome = await client.sendMessage({ chat_id: userId, text: welcomeText });
+  if (!welcome.ok) {
+    if (welcome.kind === "retryable") {
+      throw new Error(welcome.errorMessage ?? "sendMessage retryable");
+    }
+    console.warn(
+      `[inbound] user ${userId}: 欢迎语 permanent，跳过：${welcome.errorMessage ?? "no detail"}`,
+    );
+  }
+}
+
+/**
+ * 处理一条私聊 message：建档 → 三门（封禁 / 验证 / 限频）→ 阶段 3 链
+ * （topic+置顶 → 欢迎语 → 中继 → 账本）。
  * 完成（resolve）= 按成功处理；抛出（reject）= retryable，交 webhook 500 重推。
  */
 export async function handleInbound(
@@ -76,12 +120,80 @@ export async function handleInbound(
   const from = message.from;
   if (!from || typeof from.id !== "number") return;
 
-  // 3. 建档 / 刷新（治理列不动；firstSeenAt 供置顶信息）
+  // 3. 建档 / 刷新（治理列不动；快照驱动三门；firstSeenAt 供置顶信息）
   const userState = await ensureUser(env.HODOR_DB, botId, from);
 
   const client = createTelegramClient(env.TELEGRAM_BOT_TOKEN);
+  const isStart = payload.type === "text" ? isStartCommand(payload.text) : false;
 
-  /* ---------------- 4. topic 解析（阶段 2 逻辑不变） ---------------- */
+  /* ---------------- ① 封禁门（T35）：banned → 拦截 + 频控禁言提示 ---------------- */
+  if (userState.isBanned) {
+    if (await claimNoticeSlot(env.HODOR_DB, botId, from.id)) {
+      const notice = await client.sendMessage({ chat_id: from.id, text: BAN_NOTICE });
+      if (!notice.ok) {
+        if (notice.kind === "retryable") {
+          // slot 已被占：重推不再补发（宁丢一条提示，绝不轰炸）
+          throw new Error(notice.errorMessage ?? "sendMessage retryable");
+        }
+        console.warn(
+          `[inbound] user ${from.id}: 禁言提示 permanent，跳过：${notice.errorMessage ?? "no detail"}`,
+        );
+      }
+    }
+    return;
+  }
+
+  /* ---------------- ② 验证门（T27/T28）：未验证 → 欢迎语 + 验证题，本条丢弃 ---------------- */
+  if (!userState.isVerified) {
+    // 欢迎语：isNew（首联包前半）或 isStart —— 阶段 3 语义不变（slot 门控）
+    if (userState.isNew || isStart) {
+      await maybeSendWelcome(env, client, botId, from.id);
+    }
+    // 出题策略：isNew 首联包不占 slot（与欢迎语成对发出）；存量未验证（无题 /
+    // 有 pending）一律 slot 门控重出**新题**——赢才出（重发节流，T30），输静默
+    if (userState.isNew || (await claimNoticeSlot(env.HODOR_DB, botId, from.id))) {
+      await sendVerificationCode(env, botId, from.id, { type: "question" });
+    }
+    // 丢弃：不建 topic、不置顶、不中继、不写账本（/start 亦如此）；被丢弃的
+    // 消息不积压补发——通过验证后的新消息才进入正常管线
+    return;
+  }
+
+  /* ---------------- ③ 限频门（T29）：固定窗口，超限 → 撤验证重验，本条丢弃 ---------------- */
+  const limit = parseMaxMessagesPerMinute(env);
+  if (!(await countMessageInWindow(env.HODOR_DB, botId, from.id, limit))) {
+    await markUnverified(env.HODOR_DB, botId, from.id);
+    // 置顶降级 ❌（best-effort，两种失败都 warn）：撤验证后重推只会落回验证门，
+    // 不会再走到本门——降级必须本轮完成；无 topic / 未置顶则跳过
+    const topic = await findTopicByUser(env.HODOR_DB, botId, from.id);
+    if (topic && topic.pinned_msg_id !== null) {
+      const downgraded = await client.editMessageText({
+        chat_id: supportChatId,
+        message_id: topic.pinned_msg_id,
+        text: formatPinnedInfo({
+          id: from.id,
+          first_name: from.first_name,
+          last_name: from.last_name,
+          username: from.username,
+          firstSeenAt: userState.firstSeenAt,
+          isVerified: false,
+        }),
+      });
+      if (!downgraded.ok) {
+        console.warn(
+          `[inbound] user ${from.id}: 置顶降级 ❌ 未验证失败（best-effort 跳过）：${downgraded.errorMessage ?? "no detail"}`,
+        );
+      }
+    }
+    // 合并消息（提示含 limit 数字 + 新题 + 按钮，单 push）——slot 赢得才发，
+    // 输则静默（持续刷消息不产生持续回复；重验入口由 60s 后的下一条消息提供）
+    if (await claimNoticeSlot(env.HODOR_DB, botId, from.id)) {
+      await sendVerificationCode(env, botId, from.id, { type: "overflow", limit });
+    }
+    return;
+  }
+
+  /* ---------------- ④ 阶段 3 链（三门全过；以下逻辑不变） ---------------- */
   const topic = await resolveTopic(env, client, {
     botId,
     userId: from.id,
@@ -99,6 +211,8 @@ export async function handleInbound(
       last_name: from.last_name,
       username: from.username,
       firstSeenAt: userState.firstSeenAt,
+      // 验证门已过——新置顶的验证行恒为真值 ✅（存量置顶由答题 / 降级路径刷新）
+      isVerified: true,
     });
 
   /* ---------------- 4a / 4b：用户信息置顶（T24） ---------------- */
@@ -124,24 +238,9 @@ export async function handleInbound(
     }
   }
 
-  /* ---------------- 5. 欢迎语（T23，claimNoticeSlot 原子频控） ---------------- */
-  const isStart = payload.type === "text" ? isStartCommand(payload.text) : false;
-  if (userState.isNew || isStart) {
-    if (await claimNoticeSlot(env.HODOR_DB, botId, from.id)) {
-      // 文案可用环境变量 WELCOME_TEXT 覆盖（字面 \n 解释为换行），未配置兜底默认
-      const welcomeText = parseWelcomeText(env) ?? DEFAULT_WELCOME_TEXT;
-      const welcome = await client.sendMessage({ chat_id: from.id, text: welcomeText });
-      if (!welcome.ok) {
-        if (welcome.kind === "retryable") {
-          // slot 已被占：重推不再补发（欢迎语可能丢失，60s 后再 start 可再触发；
-          // 宁可丢失也不重复轰炸）
-          throw new Error(welcome.errorMessage ?? "sendMessage retryable");
-        }
-        console.warn(
-          `[inbound] user ${from.id}: 欢迎语 permanent，跳过：${welcome.errorMessage ?? "no detail"}`,
-        );
-      }
-    }
+  /* ---------------- 5. 欢迎语（T23；仅 isStart 可达——新用户一律先落验证门） ---------------- */
+  if (isStart) {
+    await maybeSendWelcome(env, client, botId, from.id);
   }
 
   /* ---------------- 6. 中继（/start 短路；其余 per-type send 干净渲染） ---------------- */

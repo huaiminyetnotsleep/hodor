@@ -1,23 +1,24 @@
 /**
- * 入站管线集成（T19–T25，design.md「入站管线」canonical order 逐字执行）：
- * 首条消息（文本/媒体）建档 + 建 topic + 置顶（恰一条）+ 欢迎 + 账本全链、
- * 复用不重建、closed 重开不重发置顶、昵称变更 editMessageText 刷新、
- * /start 频控（60s 窗口欢迎恰 1 次、topic 不新建）与 /start 短路
- * （入口命令：不中继、不写账本——2026-09-30 真机验收修正）、
- * 支持集之外先于一切副作用静默完成、
- * 失败语义（置顶/欢迎 retryable 抛出且中继不重复；中继 permanent 不写账本）、
- * 并发首联竞态败方清理（删新 thread、用胜方行）。
+ * 入站管线集成（T19–T25 + 阶段 4 三门 T27/T28/T29/T35）：
+ * 已验证用户全链（建档 + 建 topic + 置顶 ✅ + 中继 + 账本）、复用不重建、
+ * closed 重开不重发置顶、昵称变更 editMessageText 刷新、/start 频控与短路、
+ * 支持集之外先于一切副作用静默完成、失败语义（置顶/欢迎 retryable 抛出且
+ * 中继不重复；中继 permanent 不写账本）、并发首联竞态败方清理；
+ * 阶段 4 新增：新用户首联包（欢迎 + 验证题成对）、未验证拦截（零 topic /
+ * 零账本，/start 亦如此）、pending 重出 slot 节流、封禁门（先于验证与限频）、
+ * 限频门（超限合并消息含 limit 数字 + 置顶降级 ❌ + 跨窗口恢复）。
  *
  * 每个用例独立 userId（文件内 DB 共享）；出站 Telegram 调用全部经
  * telegramFetchStub 拦截（含异步响应器：竞态用例需要在请求中途写 D1），无真实网络。
  *
- * 阶段 3 调整说明：阶段 2 的「非文本静默」用例改用 video_note（photo 及
- * audio 已属支持集，会真实中继；audio 于 2026-09-30 纳入）——原断言意图
- * （支持集之外零副作用）不变；
- * 各阶段 2 用例的 sendMessage 计数按新全链（置顶信息 + 欢迎语 + 中继）更新，
- * 中继本身「恰一次且带 thread」的原始断言意图全部保留。
- * 真机验收修正（2026-09-30）：/start 不再中继进 topic / 不写账本，「start 照常
- * 中继」相关断言全部翻转（意图：topic 不被 start 刷屏，欢迎 / topic / 置顶不变）。
+ * 阶段 4 调整说明（前置条件显式化，原断言意图全部保留）：
+ * - 阶段 3 的全链 / topic / 中继 / 账本用例：三门交付后这些链路仅**已验证**
+ *   用户可达——各用例先 seedVerifiedUser（is_verified=1）再触发，原「首条消息
+ *   即全链」意图由「通过验证后的首条消息全链」承载；
+ * - 新用户首条消息的欢迎语断言移入「首联包」用例（欢迎 + 验证题成对、无 topic）；
+ * - 全链 sendMessage 计数按移除欢迎语后的链路更新（置顶 + 中继 = 2）；
+ * - 置顶验证行按两态契约断言（已验证链路恒 ✅、超限降级 ❌）；
+ * - 真机验收修正（2026-09-30，沿用）：/start 不中继、不写账本。
  */
 import { applyD1Migrations, env } from "cloudflare:test";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -25,6 +26,7 @@ import { DEFAULT_WELCOME_TEXT, formatPinnedInfo } from "../src/copy";
 import { handleInbound } from "../src/pipeline/inbound";
 import type { TelegramMessageRef } from "../src/pipeline/classify";
 import { upsertBot } from "../src/store/bots";
+import { ensureUser } from "../src/store/users";
 import { stubTelegramFetch, type TelegramFetchStub, type StubbedCall } from "./helpers/telegramFetchStub";
 
 const BOT_ID = 42;
@@ -57,6 +59,35 @@ function privateContentMessage(
     ...content,
   } as TelegramMessageRef;
 }
+
+/** 直播种子的已验证用户（阶段 4 前置：消息要走到 topic/中继/账本必须先过验证门） */
+async function seedVerifiedUser(
+  from: { id: number; first_name?: string; last_name?: string; username?: string },
+): Promise<void> {
+  await ensureUser(env.HODOR_DB, BOT_ID, from);
+  await env.HODOR_DB.prepare(
+    "UPDATE users SET is_verified = 1, verified_at = ? WHERE bot_id = ? AND user_id = ?",
+  )
+    .bind(new Date().toISOString(), BOT_ID, from.id)
+    .run();
+}
+
+/** 治理列读取（三门断言用） */
+interface GovRow {
+  is_banned: number;
+  is_verified: number;
+  verify_answer: number | null;
+  verify_msg_id: number | null;
+  rate_window_start: string | null;
+  rate_count: number;
+}
+const readGov = (userId: number) =>
+  env.HODOR_DB.prepare(
+    `SELECT is_banned, is_verified, verify_answer, verify_msg_id, rate_window_start, rate_count
+     FROM users WHERE bot_id = ? AND user_id = ?`,
+  )
+    .bind(BOT_ID, userId)
+    .first<GovRow>();
 
 interface UserRow {
   first_name: string;
@@ -116,6 +147,14 @@ function welcomeCalls(
   });
 }
 
+/** 某用户私聊收到的验证题推送（chat_id = 用户 ID 且携带 inline 键盘） */
+function questionCalls(stub: TelegramFetchStub, userId: number): StubbedCall[] {
+  return stub.callsOf("sendMessage").filter((call) => {
+    const body = call.body as Record<string, unknown>;
+    return body.chat_id === userId && body.reply_markup !== undefined;
+  });
+}
+
 /** 落进客服群 topic 的中继调用（chat_id = 客服群 且 text 匹配） */
 function relayCalls(stub: TelegramFetchStub, text: string): StubbedCall[] {
   return stub.callsOf("sendMessage").filter((call) => {
@@ -130,7 +169,25 @@ function defaultPinStubs(stub: TelegramFetchStub): void {
   stub.always("editMessageText", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 }
 
-describe("inbound: 建档、topic 生命周期与全链（置顶 / 欢迎语 / 账本）", () => {
+/** 限频 env 覆盖（其余绑定与 vitest.config.ts 注入值一致） */
+function envWithRateLimit(limit: number): Cloudflare.Env {
+  return {
+    HODOR_DB: env.HODOR_DB,
+    TELEGRAM_BOT_TOKEN: env.TELEGRAM_BOT_TOKEN,
+    SUPPORT_CHAT_ID: env.SUPPORT_CHAT_ID,
+    MAX_MESSAGES_PER_MINUTE: String(limit),
+  } as unknown as Cloudflare.Env;
+}
+
+/** 验证题按钮载荷提取（"v:<n>" → n） */
+function optionValues(call: StubbedCall): number[] {
+  const markup = (call.body as Record<string, unknown>).reply_markup as {
+    inline_keyboard: { callback_data: string }[][];
+  };
+  return markup.inline_keyboard[0].map((button) => Number(button.callback_data.slice(2)));
+}
+
+describe("inbound: 已验证用户全链（置顶 ✅ / 中继 / 账本；阶段 3 回归）", () => {
   let stub: TelegramFetchStub;
   beforeEach(() => {
     stub = stubTelegramFetch();
@@ -140,18 +197,15 @@ describe("inbound: 建档、topic 生命周期与全链（置顶 / 欢迎语 / �
     stub.restore();
   });
 
-  it("首条文本全链：建档 + 建 topic + 置顶（恰一条）+ 欢迎语 + 中继 + 账本，顺序 pin→welcome→relay", async () => {
+  it("通过验证后的首条消息全链：建档已就绪 + 建 topic + 置顶（恰一条，验证行 ✅）+ 中继 + 账本，顺序 pin→relay", async () => {
     stub.always("createForumTopic", {
       status: 200,
       json: { ok: true, result: { message_thread_id: 100 } },
     });
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 500 } } });
 
-    await handleInbound(
-      env,
-      BOT_ID,
-      privateMessage({ id: 7101, first_name: "Alice", last_name: "L", username: "alice_hd" }),
-    );
+    await seedVerifiedUser({ id: 7101, first_name: "Alice", last_name: "L", username: "alice_hd" });
+    await handleInbound(env, BOT_ID, privateMessage({ id: 7101, first_name: "Alice", last_name: "L", username: "alice_hd" }));
 
     // users 行：昵称缓存 + active + 双时间戳
     const user = await readUser(7101);
@@ -171,8 +225,8 @@ describe("inbound: 建档、topic 生命周期与全链（置顶 / 欢迎语 / �
       pinned_msg_id: 500,
     });
     expect(stub.countOf("createForumTopic")).toBe(1);
-    // sendMessage 全链恰 3 次，顺序即 canonical order：置顶信息 → 欢迎语 → 中继
-    expect(stub.countOf("sendMessage")).toBe(3);
+    // 已验证存量用户（非 start）无欢迎语：sendMessage 恰 2 次，pin→relay
+    expect(stub.countOf("sendMessage")).toBe(2);
     expect(stub.callsOf("sendMessage")[0].body).toEqual({
       chat_id: SUPPORT_CHAT_ID,
       text: formatPinnedInfo({
@@ -181,11 +235,11 @@ describe("inbound: 建档、topic 生命周期与全链（置顶 / 欢迎语 / �
         last_name: "L",
         username: "alice_hd",
         firstSeenAt: user!.first_seen_at,
+        isVerified: true,
       }),
       message_thread_id: 100,
     });
-    expect(stub.callsOf("sendMessage")[1].body).toEqual({ chat_id: 7101, text: DEFAULT_WELCOME_TEXT });
-    expect(stub.callsOf("sendMessage")[2].body).toEqual({
+    expect(stub.callsOf("sendMessage")[1].body).toEqual({
       chat_id: SUPPORT_CHAT_ID,
       text: "你好",
       message_thread_id: 100,
@@ -211,18 +265,15 @@ describe("inbound: 建档、topic 生命周期与全链（置顶 / 欢迎语 / �
     });
   });
 
-  it("第二条文本：不重建 topic、欢迎语不重复；昵称变更 → editMessageText 刷新置顶；first_seen_at 不动", async () => {
+  it("第二条文本：不重建 topic、欢迎语不触发；昵称变更 → editMessageText 刷新置顶；first_seen_at 不动", async () => {
     stub.on("createForumTopic", () => ({
       status: 200,
       json: { ok: true, result: { message_thread_id: 200 } },
     }));
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 501 } } });
 
-    await handleInbound(
-      env,
-      BOT_ID,
-      privateMessage({ id: 7102, first_name: "旧名", username: "old" }, "第一条", 20),
-    );
+    await seedVerifiedUser({ id: 7102, first_name: "旧名", username: "old" });
+    await handleInbound(env, BOT_ID, privateMessage({ id: 7102, first_name: "旧名", username: "old" }, "第一条", 20));
     // 手工倒填 first_seen_at，验证后续 ensureUser 不会覆盖创建侧列
     await env.HODOR_DB.prepare(
       "UPDATE users SET first_seen_at = '2020-01-01T00:00:00.000Z' WHERE bot_id = ? AND user_id = ?",
@@ -230,16 +281,12 @@ describe("inbound: 建档、topic 生命周期与全链（置顶 / 欢迎语 / �
       .bind(BOT_ID, 7102)
       .run();
 
-    await handleInbound(
-      env,
-      BOT_ID,
-      privateMessage({ id: 7102, first_name: "新名", username: "new" }, "第二条", 21),
-    );
+    await handleInbound(env, BOT_ID, privateMessage({ id: 7102, first_name: "新名", username: "new" }, "第二条", 21));
 
     expect(stub.countOf("createForumTopic")).toBe(1);
     expect(stub.countOf("pinChatMessage")).toBe(1); // 置顶不重复
-    // 欢迎语只在首条（isNew）发送，第二条普通文本不再发
-    expect(welcomeCalls(stub, 7102)).toHaveLength(1);
+    // 已验证存量用户（非 start）零欢迎语（阶段 4：欢迎语只属于首联包 / start）
+    expect(welcomeCalls(stub, 7102)).toHaveLength(0);
     // 两条中继都落在同一 thread（区分于置顶信息：按 text 过滤）
     expect(relayCalls(stub, "第一条")).toHaveLength(1);
     expect(relayCalls(stub, "第二条")).toHaveLength(1);
@@ -249,7 +296,7 @@ describe("inbound: 建档、topic 生命周期与全链（置顶 / 欢迎语 / �
         message_thread_id: 200,
       });
     }
-    // 昵称变更触发 4b：editMessageText 刷新为最新昵称（firstSeenAt 用库内建档时间）
+    // 昵称变更触发 4b：editMessageText 刷新为最新昵称（firstSeenAt 用库内建档时间；验证行 ✅）
     expect(stub.countOf("editMessageText")).toBe(1);
     expect(stub.callsOf("editMessageText")[0].body).toEqual({
       chat_id: SUPPORT_CHAT_ID,
@@ -259,6 +306,7 @@ describe("inbound: 建档、topic 生命周期与全链（置顶 / 欢迎语 / �
         first_name: "新名",
         username: "new",
         firstSeenAt: "2020-01-01T00:00:00.000Z",
+        isVerified: true,
       }),
     });
     // 昵称缓存已刷新；first_seen_at 保持首行值；last_seen_at 晚于 first_seen_at
@@ -290,6 +338,7 @@ describe("inbound: 建档、topic 生命周期与全链（置顶 / 欢迎语 / �
     });
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 502 } } });
 
+    await seedVerifiedUser({ id: 7103, first_name: "Carol" });
     await handleInbound(env, BOT_ID, privateMessage({ id: 7103, first_name: "Carol" }, "第一条", 30));
     await env.HODOR_DB.prepare(
       "UPDATE topics SET status = 'closed', closed_at = '2025-01-01T00:00:00.000Z' WHERE bot_id = ? AND user_id = ?",
@@ -309,8 +358,8 @@ describe("inbound: 建档、topic 生命周期与全链（置顶 / 欢迎语 / �
     expect(stub.countOf("createForumTopic")).toBe(1);
     expect(stub.countOf("pinChatMessage")).toBe(1); // 恰一条置顶（不重发）
     expect(relayCalls(stub, "又来了")[0].body).toMatchObject({ message_thread_id: 300 });
-    // 欢迎语仍只在首条
-    expect(welcomeCalls(stub, 7103)).toHaveLength(1);
+    // 欢迎语在已验证存量用户上不触发
+    expect(welcomeCalls(stub, 7103)).toHaveLength(0);
   });
 
   it("title 三级回退：first_name 空白 → @username；两者皆无 → ID_<user_id>", async () => {
@@ -320,13 +369,16 @@ describe("inbound: 建档、topic 生命周期与全链（置顶 / 欢迎语 / �
     }));
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 
+    await seedVerifiedUser({ id: 7104, username: "bob_hd" });
     await handleInbound(env, BOT_ID, privateMessage({ id: 7104, username: "bob_hd" }));
     expect((await readTopic(7104))!.title).toBe("@bob_hd");
 
+    await seedVerifiedUser({ id: 7105 });
     await handleInbound(env, BOT_ID, privateMessage({ id: 7105 }));
     expect((await readTopic(7105))!.title).toBe("ID_7105");
 
     // first_name 全空白同样回退到 @username
+    await seedVerifiedUser({ id: 7106, first_name: "   ", username: "ws_user" });
     await handleInbound(env, BOT_ID, privateMessage({ id: 7106, first_name: "   ", username: "ws_user" }));
     expect((await readTopic(7106))!.title).toBe("@ws_user");
   });
@@ -342,7 +394,7 @@ describe("inbound: 媒体入站（T22）", () => {
     stub.restore();
   });
 
-  it("7 类媒体逐类：对应 sendX 恰一次（thread + file_id + caption，无多余键），首条媒体全链生效", async () => {
+  it("7 类媒体逐类：对应 sendX 恰一次（thread + file_id + caption，无多余键），已验证用户首条媒体全链生效", async () => {
     // thread 逐次递增：UNIQUE (bot_id, thread_id) 不允许多用户共用同一 thread
     stub.on("createForumTopic", (i) => ({
       status: 200,
@@ -416,12 +468,10 @@ describe("inbound: 媒体入站（T22）", () => {
     ];
 
     for (const [index, c] of cases.entries()) {
+      const from = { id: c.userId, first_name: `M${c.userId}` };
+      await seedVerifiedUser(from);
       const threadId = 700 + index;
-      await handleInbound(
-        env,
-        BOT_ID,
-        privateContentMessage({ id: c.userId, first_name: `M${c.userId}` }, c.content, 15),
-      );
+      await handleInbound(env, BOT_ID, privateContentMessage(from, c.content, 15));
 
       // 对应 sendX 恰一次，精确键集：chat + thread + file_id(+caption)
       expect(stub.countOf(c.method), `method ${c.method}`).toBe(1);
@@ -430,12 +480,12 @@ describe("inbound: 媒体入站（T22）", () => {
         message_thread_id: threadId,
         ...c.wire,
       });
-      // 首条媒体与文本同权：建档 + 建 topic + 置顶 + 欢迎 + 账本全链
+      // 已验证用户首条媒体与文本同权：建档 + 建 topic + 置顶 + 账本全链（无欢迎语）
       expect(await readUser(c.userId), `user ${c.userId}`).not.toBeNull();
       const topic = await readTopic(c.userId);
       expect(topic!.thread_id).toBe(threadId);
       expect(topic!.pinned_msg_id).toBe(901);
-      expect(welcomeCalls(stub, c.userId), `welcome ${c.userId}`).toHaveLength(1);
+      expect(welcomeCalls(stub, c.userId), `welcome ${c.userId}`).toHaveLength(0);
       expect(stub.countOf("pinChatMessage"), `pin ${c.userId}`).toBe(index + 1);
       const messages = await readMessages(c.userId);
       expect(messages).toHaveLength(1);
@@ -451,7 +501,7 @@ describe("inbound: 媒体入站（T22）", () => {
   });
 });
 
-describe("inbound: /start 频控（T23）", () => {
+describe("inbound: /start 频控（T23；已验证用户）", () => {
   let stub: TelegramFetchStub;
   beforeEach(() => {
     stub = stubTelegramFetch();
@@ -468,6 +518,7 @@ describe("inbound: /start 频控（T23）", () => {
     });
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 
+    await seedVerifiedUser({ id: 7121, first_name: "Start" });
     await handleInbound(env, BOT_ID, privateMessage({ id: 7121, first_name: "Start" }, "/start", 1));
     await handleInbound(env, BOT_ID, privateMessage({ id: 7121, first_name: "Start" }, "/start@hodor_bot", 2));
     await handleInbound(env, BOT_ID, privateMessage({ id: 7121, first_name: "Start" }, "/start payload", 3));
@@ -502,22 +553,24 @@ describe("inbound: /start 频控（T23）", () => {
     }));
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 
-    // 已存在用户：普通文本 / 前缀巧合（/startups）都不再触发欢迎
+    // 已验证用户：普通文本 / 前缀巧合（/startups）都不触发欢迎
+    await seedVerifiedUser({ id: 7122, first_name: "N" });
     await handleInbound(env, BOT_ID, privateMessage({ id: 7122, first_name: "N" }, "普通消息", 5));
     await handleInbound(env, BOT_ID, privateMessage({ id: 7122, first_name: "N" }, "/startups", 6));
-    expect(welcomeCalls(stub, 7122)).toHaveLength(1); // 仅首条 isNew 触发
+    expect(welcomeCalls(stub, 7122)).toHaveLength(0);
     expect(stub.countOf("createForumTopic")).toBe(1);
 
-    // 已存在用户 60s 后再 start：slot 重新可赢
+    // 另一已验证用户 60s 后再 start：slot 重新可赢（窗口过期再触发）
+    await seedVerifiedUser({ id: 7123, first_name: "W" });
     await handleInbound(env, BOT_ID, privateMessage({ id: 7123, first_name: "W" }, "普通消息", 7));
-    expect(welcomeCalls(stub, 7123)).toHaveLength(1); // isNew 触发
+    expect(welcomeCalls(stub, 7123)).toHaveLength(0); // 普通文本不触发
     await env.HODOR_DB.prepare(
       "UPDATE users SET last_notice_at = '2020-01-01T00:00:00.000Z' WHERE bot_id = ? AND user_id = ?",
     )
       .bind(BOT_ID, 7123)
       .run();
     await handleInbound(env, BOT_ID, privateMessage({ id: 7123, first_name: "W" }, "/start", 8));
-    expect(welcomeCalls(stub, 7123)).toHaveLength(2); // 窗口过期后再赢
+    expect(welcomeCalls(stub, 7123)).toHaveLength(1); // 窗口过期后再赢
     expect(stub.countOf("createForumTopic")).toBe(2); // 两个用户各一个 topic，无新建
     expect(relayCalls(stub, "/start")).toHaveLength(0); // start 不中继（普通文本照常）
     expect(relayCalls(stub, "普通消息").length).toBeGreaterThanOrEqual(1);
@@ -556,22 +609,23 @@ describe("inbound: 阶段边界与 TelegramResult 消费", () => {
     expect(await readMessages(7107)).toHaveLength(0);
   });
 
-  it("中继 retryable（HTTP 503）→ 抛出（→ webhook 500 重推）；置顶/欢迎已完成、账本零行、topic 供重推复用", async () => {
+  it("中继 retryable（HTTP 503）→ 抛出（→ webhook 500 重推）；置顶已完成、账本零行、topic 供重推复用", async () => {
     stub.always("createForumTopic", {
       status: 200,
       json: { ok: true, result: { message_thread_id: 500 } },
     });
-    // sendMessage 按调用序：[0] 置顶信息 ok、[1] 欢迎语 ok、[2] 中继 503
+    // sendMessage 按调用序：[0] 置顶信息 ok、[1] 中继 503（已验证非 start：无欢迎语）
     stub.on("sendMessage", (i) =>
-      i <= 1
+      i === 0
         ? { status: 200, json: { ok: true, result: { message_id: 1000 + i } } }
         : { status: 503, json: { ok: false, description: "upstream boom" } },
     );
 
+    await seedVerifiedUser({ id: 7108, first_name: "Dan" });
     await expect(
       handleInbound(env, BOT_ID, privateMessage({ id: 7108, first_name: "Dan" })),
     ).rejects.toThrow(/sendMessage/);
-    expect(stub.countOf("sendMessage")).toBe(3);
+    expect(stub.countOf("sendMessage")).toBe(2);
     // 建档与建 topic 已完成：重推时直接复用，不会二次 createForumTopic
     expect((await readTopic(7108))!.thread_id).toBe(500);
     expect((await readTopic(7108))!.pinned_msg_id).toBe(1000);
@@ -585,7 +639,7 @@ describe("inbound: 阶段边界与 TelegramResult 消费", () => {
       json: { ok: true, result: { message_thread_id: 501 } },
     });
     stub.on("sendMessage", (i) =>
-      i <= 1
+      i === 0
         ? { status: 200, json: { ok: true, result: { message_id: 1 } } }
         : {
             status: 400,
@@ -593,10 +647,11 @@ describe("inbound: 阶段边界与 TelegramResult 消费", () => {
           },
     );
 
+    await seedVerifiedUser({ id: 7109, first_name: "Eve" });
     await expect(
       handleInbound(env, BOT_ID, privateMessage({ id: 7109, first_name: "Eve" })),
     ).resolves.toBeUndefined();
-    expect(stub.countOf("sendMessage")).toBe(3);
+    expect(stub.countOf("sendMessage")).toBe(2);
     expect(await readMessages(7109)).toHaveLength(0);
   });
 
@@ -607,6 +662,7 @@ describe("inbound: 阶段边界与 TelegramResult 消费", () => {
     });
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 
+    await seedVerifiedUser({ id: 7111, first_name: "Frank" });
     await expect(
       handleInbound(env, BOT_ID, privateMessage({ id: 7111, first_name: "Frank" })),
     ).resolves.toBeUndefined();
@@ -638,17 +694,17 @@ describe("inbound: 置顶与欢迎语的失败语义（顺序保证：中继不�
         : { status: 200, json: { ok: true, result: { message_id: 800 } } },
     );
 
+    await seedVerifiedUser({ id: 7124, first_name: "PinRetry" });
     const message = privateMessage({ id: 7124, first_name: "PinRetry" }, "你好", 40);
     await expect(handleInbound(env, BOT_ID, message)).rejects.toThrow(/sendMessage/);
     expect(stub.countOf("sendMessage")).toBe(1); // 只有置顶信息一次（失败）
     expect(relayCalls(stub, "你好")).toHaveLength(0); // 中继未发生
-    expect(welcomeCalls(stub, 7124)).toHaveLength(0); // 失败点在欢迎语之前
+    expect(welcomeCalls(stub, 7124)).toHaveLength(0); // 已验证非 start：无欢迎语
     // topic 已建、pinned_msg_id 未落（重推重走 4a 的判定依据）
     expect((await readTopic(7124))!.pinned_msg_id).toBeNull();
     expect(await readMessages(7124)).toHaveLength(0);
 
-    // 重推：补置顶 → 中继恰一次。欢迎语不补发——isNew 已失真且非 start
-    //（已接受语义：仅 /start 可对存量用户重触发）
+    // 重推：补置顶 → 中继恰一次
     await expect(handleInbound(env, BOT_ID, message)).resolves.toBeUndefined();
     expect(stub.countOf("createForumTopic")).toBe(1); // 不重建 topic
     expect(stub.countOf("sendMessage")).toBe(3); // 置顶信息(失败) + 置顶信息 + 中继
@@ -671,6 +727,7 @@ describe("inbound: 置顶与欢迎语的失败语义（顺序保证：中继不�
         : { status: 200, json: { ok: true, result: { message_id: 900 } } },
     );
 
+    await seedVerifiedUser({ id: 7125, first_name: "WelcomeRetry" });
     const start = privateMessage({ id: 7125, first_name: "WelcomeRetry" }, "/start", 41);
     await expect(handleInbound(env, BOT_ID, start)).rejects.toThrow(/sendMessage/);
     expect(stub.countOf("sendMessage")).toBe(2); // 置顶信息 + 欢迎语（失败）
@@ -688,18 +745,19 @@ describe("inbound: 置顶与欢迎语的失败语义（顺序保证：中继不�
     expect(await readMessages(7125)).toHaveLength(0); // 不写账本
   });
 
-  it("置顶信息 send permanent → warn 跳过（不落 pinned_msg_id），欢迎/中继照常；下一条消息补置顶", async () => {
+  it("置顶信息 send permanent → warn 跳过（不落 pinned_msg_id），中继照常；下一条消息补置顶", async () => {
     stub.always("createForumTopic", {
       status: 200,
       json: { ok: true, result: { message_thread_id: 722 } },
     });
-    // 调用序：#1 [0..2] 全 400（置顶/欢迎/中继均 permanent）；#2 [3] 置顶信息 / [4] 欢迎跳过 / [5] 中继
+    // 调用序：#1 [0] 置顶 400、[1] 中继 400（均 permanent 被吞）；#2 [2] 置顶 ok / [3] 中继 ok
     stub.on("sendMessage", (i) =>
-      i < 3
+      i < 2
         ? { status: 400, json: { ok: false, error_code: 400, description: "Bad Request" } }
         : { status: 200, json: { ok: true, result: { message_id: 950 } } },
     );
 
+    await seedVerifiedUser({ id: 7126, first_name: "PinPerm" });
     await expect(
       handleInbound(env, BOT_ID, privateMessage({ id: 7126, first_name: "PinPerm" }, "第一条", 50)),
     ).resolves.toBeUndefined();
@@ -711,17 +769,16 @@ describe("inbound: 置顶与欢迎语的失败语义（顺序保证：中继不�
     await expect(
       handleInbound(env, BOT_ID, privateMessage({ id: 7126, first_name: "PinPerm" }, "第二条", 51)),
     ).resolves.toBeUndefined();
-    // pinned_msg_id 仍 null → 重走 4a 补置顶；欢迎不再尝试（isNew 失真 + 无 start）；
-    // #1 里欢迎语已尝试过一次（permanent 被吞），此处计数即全量
+    // pinned_msg_id 仍 null → 重走 4a 补置顶
     expect(stub.countOf("pinChatMessage")).toBe(1);
     expect((await readTopic(7126))!.pinned_msg_id).toBe(950);
-    expect(welcomeCalls(stub, 7126)).toHaveLength(1);
+    expect(welcomeCalls(stub, 7126)).toHaveLength(0); // 已验证非 start：无欢迎语
     const messages = await readMessages(7126);
     expect(messages).toHaveLength(1);
     expect(messages[0]).toMatchObject({ direction: "in", group_msg_id: 950, private_msg_id: 51 });
   });
 
-  it("pin permanent（403）→ warn，信息消息已在仍落 pinned_msg_id；流程继续（欢迎 + 中继 + 账本）", async () => {
+  it("pin permanent（403）→ warn，信息消息已在仍落 pinned_msg_id；流程继续（中继 + 账本）", async () => {
     stub.always("createForumTopic", {
       status: 200,
       json: { ok: true, result: { message_thread_id: 723 } },
@@ -732,11 +789,12 @@ describe("inbound: 置顶与欢迎语的失败语义（顺序保证：中继不�
       json: { ok: false, error_code: 403, description: "Forbidden: not enough rights" },
     });
 
+    await seedVerifiedUser({ id: 7127, first_name: "PinFail" });
     await expect(
       handleInbound(env, BOT_ID, privateMessage({ id: 7127, first_name: "PinFail" })),
     ).resolves.toBeUndefined();
     expect((await readTopic(7127))!.pinned_msg_id).toBe(960);
-    expect(welcomeCalls(stub, 7127)).toHaveLength(1);
+    expect(welcomeCalls(stub, 7127)).toHaveLength(0);
     expect(relayCalls(stub, "你好")).toHaveLength(1);
     expect(await readMessages(7127)).toHaveLength(1);
   });
@@ -752,6 +810,7 @@ describe("inbound: 置顶与欢迎语的失败语义（顺序保证：中继不�
       json: { ok: false, error_code: 403, description: "Forbidden" },
     });
 
+    await seedVerifiedUser({ id: 7128, first_name: "旧名" });
     await handleInbound(env, BOT_ID, privateMessage({ id: 7128, first_name: "旧名" }, "第一条", 60));
     await expect(
       handleInbound(env, BOT_ID, privateMessage({ id: 7128, first_name: "新名" }, "第二条", 61)),
@@ -777,15 +836,16 @@ describe("inbound: 并发首联竞态（败方清理）", () => {
     // 然后本方 createForumTopic 才返回新 thread 999 → insertTopic 唯一冲突
     stub.on("createForumTopic", async () => {
       await env.HODOR_DB.prepare(
-        "INSERT INTO topics (bot_id, user_id, thread_id, title, created_at) VALUES (?, ?, 555, '胜方', ?)",
+        "INSERT INTO topics (bot_id, user_id, thread_id, title, created_at) VALUES (?, 7110, 555, '胜方', ?)",
       )
-        .bind(BOT_ID, 7110, new Date().toISOString())
+        .bind(BOT_ID, new Date().toISOString())
         .run();
       return { status: 200, json: { ok: true, result: { message_thread_id: 999 } } };
     });
     stub.always("deleteForumTopic", { status: 200, json: { ok: true, result: true } });
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 
+    await seedVerifiedUser({ id: 7110, first_name: "Grace" });
     await handleInbound(env, BOT_ID, privateMessage({ id: 7110, first_name: "Grace" }, "竞态首联", 40));
 
     // 败方清理：删的是自己刚建的新 thread 999
@@ -839,6 +899,8 @@ describe("inbound: 欢迎语文案可配置（WELCOME_TEXT，验收前增量）"
     }));
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 
+    // /start 载体（已验证用户：欢迎语仅 start 可达）
+    await seedVerifiedUser({ id: 7130, first_name: "Custom" });
     await handleInbound(
       envWithWelcome("定制欢迎语第一行\\n定制欢迎语第二行"),
       BOT_ID,
@@ -873,10 +935,11 @@ describe("inbound: 欢迎语文案可配置（WELCOME_TEXT，验收前增量）"
     }));
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 
+    await seedVerifiedUser({ id: 7131, first_name: "Default" });
     await handleInbound(
       envWithWelcome(""),
       BOT_ID,
-      privateMessage({ id: 7131, first_name: "Default" }),
+      privateMessage({ id: 7131, first_name: "Default" }, "/start", 92),
     );
 
     // 空串 → null → DEFAULT_WELCOME_TEXT（helper 默认比对内置文案）；
@@ -885,5 +948,356 @@ describe("inbound: 欢迎语文案可配置（WELCOME_TEXT，验收前增量）"
     expect(
       stub.callsOf("sendMessage").filter((call) => (call.body as Record<string, unknown>).text === DEFAULT_WELCOME_TEXT),
     ).toHaveLength(1);
+  });
+});
+
+describe("inbound: 新用户首联包与验证门（T27/T28）", () => {
+  let stub: TelegramFetchStub;
+  beforeEach(() => {
+    stub = stubTelegramFetch();
+    defaultPinStubs(stub);
+  });
+  afterEach(() => {
+    stub.restore();
+  });
+
+  it("新用户首条消息 → 首联包：欢迎语 + 验证题恰各一条（欢迎先发）、题面带 4 按钮；零 topic / 零置顶 / 零中继 / 零账本", async () => {
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 501 } } });
+
+    await handleInbound(env, BOT_ID, privateMessage({ id: 7140, first_name: "Newbie" }, "你好", 10));
+
+    // 首联包：欢迎语 [0] + 验证题 [1]（成对、各恰一条、欢迎在前）
+    const toUser = stub
+      .callsOf("sendMessage")
+      .filter((call) => (call.body as Record<string, unknown>).chat_id === 7140);
+    expect(toUser).toHaveLength(2);
+    expect(toUser[0].body).toEqual({ chat_id: 7140, text: DEFAULT_WELCOME_TEXT });
+    const questionBody = toUser[1].body as Record<string, unknown>;
+    expect((questionBody.text as string)).toMatch(
+      /^为确认你是真人，请回答下面的算术题：\n[1-9] [-+] [1-9] = \?$/,
+    );
+    expect(optionValues(toUser[1])).toHaveLength(4);
+    expect(new Set(optionValues(toUser[1])).size).toBe(4);
+
+    // 验证门拦截 = 零 topic 副作用、零账本
+    expect(stub.countOf("createForumTopic")).toBe(0);
+    expect(stub.countOf("pinChatMessage")).toBe(0);
+    expect(stub.countOf("editMessageText")).toBe(0);
+    expect(await readTopic(7140)).toBeNull();
+    expect(await readMessages(7140)).toHaveLength(0);
+    // DB 流转：is_verified=0 + pending 题落库（answer ∈ 选项，msgId = 题面消息 ID）
+    const gov = await readGov(7140);
+    expect(gov!.is_verified).toBe(0);
+    expect(gov!.verify_msg_id).toBe(501);
+    expect(optionValues(toUser[1])).toContain(gov!.verify_answer);
+  });
+
+  it("未验证 /start → 同样被验证门丢弃：欢迎语 + 验证题照发，但不建 topic、不中继、不写账本", async () => {
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 502 } } });
+
+    await handleInbound(env, BOT_ID, privateMessage({ id: 7141, first_name: "StartGate" }, "/start", 11));
+
+    expect(welcomeCalls(stub, 7141)).toHaveLength(1); // isStart 触发欢迎（slot）
+    expect(questionCalls(stub, 7141)).toHaveLength(1); // isNew 首联包后半
+    expect(stub.countOf("createForumTopic")).toBe(0);
+    expect(relayCalls(stub, "/start")).toHaveLength(0);
+    expect(await readMessages(7141)).toHaveLength(0);
+  });
+
+  it("存量未验证（无 pending 题）→ 新题（slot 赢得才出）；不欢迎、不建 topic", async () => {
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 503 } } });
+
+    // 阶段 3 遗留用户：建档即未验证、从未出题（verify_msg_id NULL）
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: 7142, first_name: "Legacy" });
+    await handleInbound(env, BOT_ID, privateMessage({ id: 7142, first_name: "Legacy" }, "在吗", 12));
+
+    expect(welcomeCalls(stub, 7142)).toHaveLength(0); // 非 isNew / 非 start：无欢迎
+    expect(questionCalls(stub, 7142)).toHaveLength(1); // slot（NULL）赢 → 新题
+    expect(stub.countOf("createForumTopic")).toBe(0);
+    expect((await readGov(7142))!.verify_msg_id).toBe(503);
+  });
+
+  it("有 pending 题 + slot 被占 → 静默（持续刷消息不产生持续回复）；slot 窗口过期后再发 → 重出**新题**（换题防死锁）", async () => {
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 504 } } });
+
+    // 预置：未验证 + pending 题 + notice slot 刚被占（60s 内）
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: 7143, first_name: "Pending" });
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET verify_answer = 3, verify_msg_id = 111, last_notice_at = ? WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(new Date().toISOString(), BOT_ID, 7143)
+      .run();
+
+    await handleInbound(env, BOT_ID, privateMessage({ id: 7143, first_name: "Pending" }, "刷一条", 13));
+    expect(questionCalls(stub, 7143)).toHaveLength(0); // slot 输 → 静默
+    expect(welcomeCalls(stub, 7143)).toHaveLength(0);
+    expect(stub.countOf("createForumTopic")).toBe(0);
+    // 治理列不被触碰（静默即零副作用）
+    expect(await readGov(7143)).toMatchObject({ is_verified: 0, verify_answer: 3, verify_msg_id: 111 });
+
+    // 窗口过期 → slot 可赢 → 重出新题（verify_msg_id / answer 均换新）
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET last_notice_at = '2020-01-01T00:00:00.000Z' WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, 7143)
+      .run();
+    await handleInbound(env, BOT_ID, privateMessage({ id: 7143, first_name: "Pending" }, "再刷", 14));
+    const questions = questionCalls(stub, 7143);
+    expect(questions).toHaveLength(1);
+    const gov = await readGov(7143);
+    expect(gov!.verify_msg_id).toBe(504); // 新题面消息（≠ 111）
+    expect(optionValues(questions[0])).toContain(gov!.verify_answer);
+  });
+
+  it("门序：验证门先于限频门——未验证消息不进限频计数（rate_* 原样）", async () => {
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 505 } } });
+
+    // 未验证 + 限频列预置在窗口上限边缘：若误走限频门，rate_count 会变 20
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: 7144, first_name: "Order" });
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET rate_window_start = ?, rate_count = 19 WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(new Date().toISOString(), BOT_ID, 7144)
+      .run();
+
+    await handleInbound(env, BOT_ID, privateMessage({ id: 7144, first_name: "Order" }, "验证优先", 15));
+
+    expect(questionCalls(stub, 7144)).toHaveLength(1); // 验证门出题
+    expect(await readGov(7144)).toMatchObject({ rate_count: 19, rate_window_start: expect.any(String) });
+  });
+});
+
+describe("inbound: 封禁门（T35）", () => {
+  let stub: TelegramFetchStub;
+  beforeEach(() => {
+    stub = stubTelegramFetch();
+    defaultPinStubs(stub);
+  });
+  afterEach(() => {
+    stub.restore();
+  });
+
+  it("封禁用户消息 → 拦截 + 禁言提示（slot 赢得恰 1 条）；零验证题、零 topic、零中继、零账本", async () => {
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 601 } } });
+
+    // 封禁 + 未验证 + pending 题（若门序错误会先出题 / 先计数）
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: 7145, first_name: "Banned" });
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET is_banned = 1, verify_answer = 3, verify_msg_id = 111, rate_window_start = '2020-01-01T00:00:00.000Z', rate_count = 1 WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, 7145)
+      .run();
+
+    await handleInbound(env, BOT_ID, privateMessage({ id: 7145, first_name: "Banned" }, "让我进群", 20));
+
+    // 唯一一条 bot→用户消息 = 禁言提示
+    const toUser = stub
+      .callsOf("sendMessage")
+      .filter((call) => (call.body as Record<string, unknown>).chat_id === 7145);
+    expect(toUser).toHaveLength(1);
+    expect(toUser[0].body).toEqual({ chat_id: 7145, text: "你已被禁言，消息无法送达客服。如有疑问请通过其他方式联系。" });
+    expect(questionCalls(stub, 7145)).toHaveLength(0); // 封禁门先于验证门：零验证逻辑
+    expect(stub.countOf("createForumTopic")).toBe(0);
+    expect(await readTopic(7145)).toBeNull();
+    expect(await readMessages(7145)).toHaveLength(0);
+    // 验证 / 限频列均不被触碰（门序：封禁最先）
+    expect(await readGov(7145)).toMatchObject({
+      is_banned: 1,
+      is_verified: 0,
+      verify_answer: 3,
+      verify_msg_id: 111,
+      rate_count: 1,
+    });
+
+    // 60s 内连发：slot 被占 → 完全静默（不轰炸）
+    await handleInbound(env, BOT_ID, privateMessage({ id: 7145, first_name: "Banned" }, "再发", 21));
+    expect(stub.countOf("sendMessage")).toBe(1);
+  });
+
+  it("封禁门先于一切：已验证用户被封禁 → 同样只收禁言提示，不中继、不建 topic", async () => {
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 602 } } });
+
+    await seedVerifiedUser({ id: 7146, first_name: "BannedV" });
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET is_banned = 1 WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, 7146)
+      .run();
+
+    await handleInbound(env, BOT_ID, privateMessage({ id: 7146, first_name: "BannedV" }, "我是验证过的", 22));
+
+    expect(stub.countOf("sendMessage")).toBe(1); // 只有禁言提示
+    expect(await readTopic(7146)).toBeNull();
+    expect(await readMessages(7146)).toHaveLength(0);
+  });
+
+  it("禁言提示 retryable → 抛（slot 已耗，宁丢一条）；permanent → warn 吞", async () => {
+    stub.always("sendMessage", { status: 503, json: { ok: false, description: "upstream boom" } });
+
+    await seedVerifiedUser({ id: 7147, first_name: "BanRetry" });
+    await env.HODOR_DB.prepare("UPDATE users SET is_banned = 1 WHERE bot_id = ? AND user_id = ?")
+      .bind(BOT_ID, 7147)
+      .run();
+    await expect(
+      handleInbound(env, BOT_ID, privateMessage({ id: 7147, first_name: "BanRetry" }, "hi", 23)),
+    ).rejects.toThrow(/sendMessage/);
+
+    stub.always("sendMessage", {
+      status: 403,
+      json: { ok: false, error_code: 403, description: "Forbidden: bot was blocked" },
+    });
+    await expect(
+      handleInbound(env, BOT_ID, privateMessage({ id: 7147, first_name: "BanRetry" }, "again", 24)),
+    ).resolves.toBeUndefined();
+  });
+});
+
+describe("inbound: 限频门（T29 固定窗口）", () => {
+  let stub: TelegramFetchStub;
+  beforeEach(() => {
+    stub = stubTelegramFetch();
+    defaultPinStubs(stub);
+  });
+  afterEach(() => {
+    stub.restore();
+  });
+
+  /** 播种：已验证用户 + 已置顶 topic（限频链路不再依赖建 topic） */
+  async function seedVerifiedWithTopic(
+    userId: number,
+    threadId: number,
+    pinnedMsgId: number,
+  ): Promise<void> {
+    await seedVerifiedUser({ id: userId, first_name: `R${userId}` });
+    await env.HODOR_DB.prepare(
+      `INSERT INTO topics (bot_id, user_id, thread_id, title, pinned_msg_id) VALUES (?, ?, ?, 'seed', ?)`,
+    )
+      .bind(BOT_ID, userId, threadId, pinnedMsgId)
+      .run();
+  }
+
+  it("超限（limit=3）：第 1..3 条中继，第 4 条拦截——撤验证 + 合并消息（含「3」+ 新题按钮）+ 置顶降级 ❌ + 第 4 条无账本行", async () => {
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 610 } } });
+    await seedVerifiedWithTopic(7150, 320, 555);
+
+    const rateEnv = envWithRateLimit(3);
+    await handleInbound(rateEnv, BOT_ID, privateMessage({ id: 7150, first_name: "R7150" }, "快1", 30));
+    await handleInbound(rateEnv, BOT_ID, privateMessage({ id: 7150, first_name: "R7150" }, "快2", 31));
+    await handleInbound(rateEnv, BOT_ID, privateMessage({ id: 7150, first_name: "R7150" }, "快3", 32));
+    for (const text of ["快1", "快2", "快3"]) {
+      expect(relayCalls(stub, text)).toHaveLength(1);
+      expect(relayCalls(stub, text)[0].body).toMatchObject({ message_thread_id: 320 });
+    }
+
+    // 第 4 条：拦截 + 撤验证 + 置顶降级 + 合并消息
+    await handleInbound(rateEnv, BOT_ID, privateMessage({ id: 7150, first_name: "R7150" }, "快4", 33));
+    expect(relayCalls(stub, "快4")).toHaveLength(0); // 本条未中继
+    const gov = await readGov(7150);
+    expect(gov!.is_verified).toBe(0); // 超限即撤验证（≠ 封禁）
+    expect(gov!.verify_msg_id).toBe(610); // 新题已发并落库
+    expect(gov!.rate_count).toBe(3); // 计数停在上限
+    // 合并消息：单条 push，提示含限频数字 + 题面 + 4 按钮
+    const questions = questionCalls(stub, 7150);
+    expect(questions).toHaveLength(1);
+    const questionText = (questions[0].body as Record<string, unknown>).text as string;
+    expect(questionText).toContain("每分钟最多 3 条");
+    expect(questionText).toMatch(/[1-9] [-+] [1-9] = \?$/);
+    expect(optionValues(questions[0])).toHaveLength(4);
+    expect(optionValues(questions[0])).toContain(gov!.verify_answer);
+    // 置顶降级 ❌：edit 既有置顶（best-effort 但默认桩成功）
+    expect(stub.countOf("editMessageText")).toBe(1);
+    expect(stub.callsOf("editMessageText")[0].body).toEqual({
+      chat_id: SUPPORT_CHAT_ID,
+      message_id: 555,
+      text: formatPinnedInfo({
+        id: 7150,
+        first_name: "R7150",
+        firstSeenAt: (await readUser(7150))!.first_seen_at,
+        isVerified: false,
+      }),
+    });
+    // 账本只有前 3 条（第 4 条被拦截不写行）
+    expect(await readMessages(7150)).toHaveLength(3);
+
+    // 60s 内再发（现为未验证 + slot 被合并消息占）→ 静默
+    await handleInbound(rateEnv, BOT_ID, privateMessage({ id: 7150, first_name: "R7150" }, "快5", 34));
+    expect(stub.callsOf("sendMessage").length).toBe(3 + 1); // 3 中继 + 1 合并消息，无新增
+  });
+
+  it("跨窗口恢复：rate_window_start ≥ 60s 前且计数已满 → 窗口重置第 1 条放行（超限 ≠ 封禁，验证态保留）", async () => {
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 611 } } });
+    await seedVerifiedWithTopic(7151, 321, 556);
+    // 上一窗口残留：计数已满但窗口已过期
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET rate_window_start = ?, rate_count = 3 WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(new Date(Date.now() - 61_000).toISOString(), BOT_ID, 7151)
+      .run();
+
+    await handleInbound(env, BOT_ID, privateMessage({ id: 7151, first_name: "R7151" }, "新窗口第一条", 35));
+
+    expect(relayCalls(stub, "新窗口第一条")).toHaveLength(1); // 重置放行
+    expect(await readMessages(7151)).toHaveLength(1);
+    const gov = await readGov(7151);
+    expect(gov).toMatchObject({ is_verified: 1, rate_count: 1 }); // 验证态不受窗口影响
+  });
+
+  it("超限且无置顶（pinned NULL）→ 置顶降级跳过（零 edit），合并消息照发", async () => {
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 612 } } });
+    await seedVerifiedUser({ id: 7152, first_name: "NoPin" });
+    await env.HODOR_DB.prepare(
+      "INSERT INTO topics (bot_id, user_id, thread_id, title) VALUES (?, 7152, 322, 'nopin')",
+    )
+      .bind(BOT_ID)
+      .run();
+    // 预置窗口内计数已满（第下一条即超限）
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET rate_window_start = ?, rate_count = 3 WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(new Date().toISOString(), BOT_ID, 7152)
+      .run();
+
+    await handleInbound(envWithRateLimit(3), BOT_ID, privateMessage({ id: 7152, first_name: "NoPin" }, "超限无置顶", 36));
+
+    expect(stub.countOf("editMessageText")).toBe(0); // 无置顶可降级
+    expect(questionCalls(stub, 7152)).toHaveLength(1); // 合并消息照发
+    expect(relayCalls(stub, "超限无置顶")).toHaveLength(0);
+  });
+
+  it("限频提示 retryable → 抛（slot 已耗）；permanent → warn 吞且不落库题目", async () => {
+    // 用户 A（retryable）：撤验证与置顶降级先于合并消息完成，题目不落库
+    stub.always("sendMessage", {
+      status: 503,
+      json: { ok: false, description: "upstream boom" },
+    });
+    await seedVerifiedWithTopic(7153, 323, 557);
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET rate_window_start = ?, rate_count = 3 WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(new Date().toISOString(), BOT_ID, 7153)
+      .run();
+
+    const rateEnv = envWithRateLimit(3);
+    await expect(
+      handleInbound(rateEnv, BOT_ID, privateMessage({ id: 7153, first_name: "R7153" }, "boom", 37)),
+    ).rejects.toThrow(/sendMessage/);
+    // 撤验证与置顶降级已完成（先于合并消息）；题目未落库（先送达后落库）
+    expect((await readGov(7153))!.is_verified).toBe(0);
+
+    // 用户 B（permanent）：合并消息发送 403 → warn 吞（题不落库），静默完成
+    stub.always("sendMessage", {
+      status: 403,
+      json: { ok: false, error_code: 403, description: "Forbidden: bot was blocked" },
+    });
+    await seedVerifiedWithTopic(7154, 324, 558);
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET rate_window_start = ?, rate_count = 3 WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(new Date().toISOString(), BOT_ID, 7154)
+      .run();
+    await expect(
+      handleInbound(rateEnv, BOT_ID, privateMessage({ id: 7154, first_name: "R7154" }, "perm", 38)),
+    ).resolves.toBeUndefined();
+    expect((await readGov(7154))!.verify_msg_id).toBeNull(); // permanent：题不落库
   });
 });

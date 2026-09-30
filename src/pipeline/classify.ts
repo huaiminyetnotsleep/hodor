@@ -1,18 +1,20 @@
 /**
- * update 分流（T15）：纯函数，无 IO、无副作用。
+ * update 分流（T15 + T27 callback 分流）：纯函数，无 IO、无副作用。
  *
  * 输入是 webhook 解析出的 JSON（不可信），所以一切字段先做运行时形态校验，
  * 任何不完整 / 非预期形态一律 'ignore'（安全忽略，零副作用）。
  *
  * 规则（design.md「出站管线/入站管线」）：
- * - 无 message（edited_message / callback_query / channel_post 等）→ ignore
+ * - callback_query 存在 → 私聊题面回调形态（id / from.id / message.message_id /
+ *   message.chat.type === 'private' 全合法）→ callback；群内回调 / 畸形 → ignore
+ * - 无 message 且无 callback_query（edited_message / channel_post 等）→ ignore
  * - chat.type === 'private' → inbound（用户私聊）
  * - chat.id === SUPPORT_CHAT_ID 且带 message_thread_id → outbound（topic 内发言）
  * - chat.id === SUPPORT_CHAT_ID 且无 thread（General / 非 topic）→ ignore
  * - 其他 chat → ignore
  */
 
-export type UpdateClassification = "inbound" | "outbound" | "ignore";
+export type UpdateClassification = "inbound" | "outbound" | "callback" | "ignore";
 
 /** update.message.from 的最小子集（入站建档 / 出站管理员判定用） */
 export interface TelegramFromRef {
@@ -50,6 +52,24 @@ export interface TelegramMessageRef {
 export interface TelegramUpdateRef {
   update_id: number;
   message?: TelegramMessageRef;
+  /** 私聊题面按钮回调（T27 验证答题）；分流形态校验见 classifyUpdate */
+  callback_query?: TelegramCallbackQueryRef;
+}
+
+/**
+ * callback_query 的最小子集（T27）：
+ * id 供 answerCallbackQuery；message 供归属判定（verify_msg_id 对比）与
+ * 题面编辑定位；data 为按钮载荷（"v:<值>"，绝不含答案以外的信息）。
+ */
+export interface TelegramCallbackQueryRef {
+  id: string;
+  from: TelegramFromRef;
+  /** 题面消息引用（可选：极老客户端可能不带 → classify 判 ignore） */
+  message?: {
+    message_id: number;
+    chat: { id: number; type: string };
+  };
+  data?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -74,8 +94,28 @@ export function classifyUpdate(
   if (supportChatId === null) return "ignore";
 
   if (!isRecord(update)) return "ignore";
+
+  // callback_query 分流（T27）：先于 message 判定——两者理论上互斥，
+  // 但畸形信封同时携带时优先按回调形态裁决（不回落到中继路径）
+  const callbackQuery = update.callback_query;
+  if (isRecord(callbackQuery)) {
+    // id 供 answerCallbackQuery 单次消费：非字符串（缺失 / 数字等）→ ignore。
+    // 不校验会把畸形 id 送到 Telegram 吃 400 permanent——虽 fail-safe，
+    // 但形态防护应在分流层收口（与其他字段一致，trellis-check P2#1）
+    if (typeof callbackQuery.id !== "string") return "ignore";
+    const cbFrom = callbackQuery.from;
+    if (!isRecord(cbFrom) || typeof cbFrom.id !== "number") return "ignore";
+    const cbMessage = callbackQuery.message;
+    if (!isRecord(cbMessage) || typeof cbMessage.message_id !== "number") return "ignore";
+    const cbChat = cbMessage.chat;
+    if (!isRecord(cbChat) || typeof cbChat.id !== "number" || cbChat.type !== "private") {
+      return "ignore";
+    }
+    return "callback";
+  }
+
   const message = update.message;
-  // edited_message / callback_query 等都不走 .message —— 统一 ignore
+  // edited_message 等都不走 .message —— 统一 ignore
   if (!isRecord(message)) return "ignore";
   const chat = message.chat;
   if (!isRecord(chat) || typeof chat.id !== "number" || typeof chat.type !== "string") {

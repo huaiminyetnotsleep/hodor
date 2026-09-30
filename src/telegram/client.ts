@@ -21,11 +21,13 @@
  * 因此网络错误只回传方法名，不透传异常 message。
  */
 import type {
+  AnswerCallbackQueryParams,
   CopyMessageParams,
   CopyMessageResult,
   CreateForumTopicParams,
   CreateForumTopicResult,
   DeleteForumTopicParams,
+  DeleteMyCommandsParams,
   EditMessageTextParams,
   ForwardMessageParams,
   ForwardMessageResult,
@@ -40,6 +42,7 @@ import type {
   SendVoiceParams,
   SendMessageParams,
   SendMessageResult,
+  SetMyCommandsParams,
   SetWebhookParams,
   TelegramBotUser,
   TelegramClient,
@@ -225,5 +228,22 @@ export function createTelegramClient(token: string): TelegramClient {
       request<boolean>("pinChatMessage", { ...params, disable_notification: true }),
     editMessageText: (params: EditMessageTextParams) =>
       request<MessageIdResult>("editMessageText", { ...params }),
+    // T27 答题 toast：callbackQueryId 蛇形映射为 callback_query_id；
+    // text 为 undefined 时 JSON 序列化自然剔除（与其余可选参数同款语义）
+    answerCallbackQuery: (params: AnswerCallbackQueryParams) =>
+      request<boolean>("answerCallbackQuery", {
+        callback_query_id: params.callbackQueryId,
+        text: params.text,
+      }),
+    // T34 验收增量：命令菜单注册 / 对称清理。commands 的键名（command /
+    // description）即 API 字段名，scope 对象蛇形原样直传；scope 为
+    // undefined 时 JSON 序列化自然剔除（= default 全局作用域）
+    setMyCommands: (params: SetMyCommandsParams) =>
+      request<boolean>("setMyCommands", {
+        commands: params.commands,
+        scope: params.scope,
+      }),
+    deleteMyCommands: (params: DeleteMyCommandsParams) =>
+      request<boolean>("deleteMyCommands", { scope: params.scope }),
   };
 }

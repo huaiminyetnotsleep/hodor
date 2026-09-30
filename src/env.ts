@@ -51,6 +51,19 @@ export function parseMaxAttempts(env: Cloudflare.Env): number {
 }
 
 /**
+ * 解析 MAX_MESSAGES_PER_MINUTE：入站限频的每用户每分钟上限（T29 固定窗口）。
+ *
+ * 缺失 / 非法 / 非正整数 → 20（docs/guide/deploy.md 缺省值；与 parseMaxAttempts
+ * 同款「先解析、不轻信输入」模式，超限文案里的数字即来源于此）。
+ */
+export function parseMaxMessagesPerMinute(env: Cloudflare.Env): number {
+  const raw = env.MAX_MESSAGES_PER_MINUTE?.trim();
+  if (!raw) return 20;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 ? value : 20;
+}
+
+/**
  * 解析 WELCOME_TEXT：自定义欢迎语文案（选填）。
  *
  * 缺失 / trim 后为空 → null（调用方兜底默认文案，见 src/copy.ts——

@@ -1,8 +1,11 @@
 /**
- * POST /webhook（T15 / T16 / T17）：Telegram update 唯一入口。
+ * POST /webhook（T15 / T16 / T17 + T27 callback 派发）：Telegram update 唯一入口。
  *
- * 路由层保持极薄（架构分层约定）：只做「鉴权 → 解析 → 认领 → 派发」的编排，
- * 业务全部在 pipeline，数据全部在 store，Telegram 调用全部在 client。
+ * 路由层保持极薄（架构分层约定）：只做「鉴权 → 解析 → 认领 → 分流 → 派发」的
+ * 编排，业务全部在 pipeline，数据全部在 store，Telegram 调用全部在 client。
+ * classify 三分流：inbound（私聊 message）/ callback（私聊题面按钮）/
+ * outbound（客服群 topic 内 message）；callback 同样携带 update_id——
+ * 幂等认领 / 毒丸状态机与其余分流完全共用。
  *
  * | 环节 | 结果 | 响应 |
  * |------|------|------|
@@ -20,9 +23,10 @@
  * 绝不输出 token / 任何 secret。
  */
 import { parseMaxAttempts, parseSupportChatId, timingSafeEqualStrings } from "../env";
-import { classifyUpdate, type TelegramMessageRef } from "../pipeline/classify";
+import { classifyUpdate, type TelegramCallbackQueryRef, type TelegramMessageRef } from "../pipeline/classify";
 import { handleInbound } from "../pipeline/inbound";
 import { handleOutbound } from "../pipeline/outbound";
+import { handleVerifyCallback } from "../pipeline/verify";
 import { getSingleBotId } from "../store/bots";
 import { claimUpdate, markFailed, markProcessed } from "../store/processedUpdates";
 
@@ -101,31 +105,40 @@ export async function handleWebhook(
     return ok();
   }
 
-  /* ---------------- ⑤ 分流派发（classify fail-closed：env 畸形时全 ignore） ---------------- */
+  /* ---------------- ⑤ 三路派发（classify fail-closed：env 畸形时全 ignore） ---------------- */
   const kind = classifyUpdate(update, parseSupportChatId(env));
   if (kind === "ignore") {
     await markProcessed(env.HODOR_DB, botId, updateId);
     return ok();
   }
 
-  // classify 已做运行时形态校验（message 为含合法 chat 的对象）；此处仅收窄类型
-  const message = update.message as TelegramMessageRef | undefined;
-  if (!message) {
-    // 防御式兜底（正常不可达）：按毒丸 200，不让畸形信封触发重推
-    console.warn(`[webhook] update ${updateId}: classify=${kind} 但 message 缺失`);
-    await markProcessed(env.HODOR_DB, botId, updateId);
-    return ok();
-  }
-
+  // classify 已做运行时形态校验；此处仅收窄类型（缺字段 = 不可达的防御式兜底，
+  // warn 后按毒丸 200 处理，不让畸形信封触发重推）
   try {
-    if (kind === "inbound") await handleInbound(env, botId, message);
-    else await handleOutbound(env, botId, message);
+    if (kind === "callback") {
+      const callbackQuery = update.callback_query as TelegramCallbackQueryRef | undefined;
+      if (callbackQuery) {
+        await handleVerifyCallback(env, botId, callbackQuery);
+      } else {
+        console.warn(`[webhook] update ${updateId}: classify=callback 但 callback_query 缺失`);
+      }
+    } else {
+      const message = update.message as TelegramMessageRef | undefined;
+      if (!message) {
+        console.warn(`[webhook] update ${updateId}: classify=${kind} 但 message 缺失`);
+      } else if (kind === "inbound") {
+        await handleInbound(env, botId, message);
+      } else {
+        await handleOutbound(env, botId, message);
+      }
+    }
   } catch (error) {
     // retryable：保持 processing 返回 500，交由 Telegram 重推 + 状态机接管。
     // 部分成功窗口（design.md 已知代价）：若失败前 sendMessage 实际已送达，
     // 60s 过期接管后会重发一次——at-least-once 的代价，绝不提前标记
     // processed 掩盖失败而丢消息（p1.md 警示；行为由
-    // test/webhook-route.test.ts「部分成功窗口」用例固化）。
+    // test/webhook-route.test.ts「部分成功窗口」用例固化）。callback 分支
+    // 同理：答题链 retryable 抛出 → 重推收敛到「题目已失效」分支（幂等）。
     const detail = error instanceof Error ? error.message : String(error);
     console.error(`[webhook] update ${updateId} (${kind}) 处理失败，等待重推：${detail}`);
     return temporaryFailure();

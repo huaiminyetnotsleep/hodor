@@ -13,7 +13,7 @@
  */
 import { applyD1Migrations, env } from "cloudflare:test";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { UNBOUND_TOPIC_NOTICE } from "../src/copy";
+import { NOT_ADMIN_COMMAND_NOTICE, UNBOUND_TOPIC_NOTICE } from "../src/copy";
 import { handleOutbound } from "../src/pipeline/outbound";
 import type { TelegramMessageRef } from "../src/pipeline/classify";
 import { upsertBot } from "../src/store/bots";
@@ -129,6 +129,22 @@ describe("outbound: 文本中继与账本", () => {
 
     expect(stub.countOf("sendMessage")).toBe(0);
     expect(await readMessagesByUser(7202)).toHaveLength(0);
+  });
+
+  it("非管理员 / 命令（真机验收增量）→ 回「仅管理员可用」提示恰发该 thread；零中继、零账本", async () => {
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    await seedTopic(7207, 607);
+
+    await handleOutbound(env, BOT_ID, supportThreadMessage(999999999, 607, "/ban", 63));
+
+    // 唯一一条 sendMessage = 提示发回该 thread（精确键集），无用户私聊调用
+    expect(stub.countOf("sendMessage")).toBe(1);
+    expect(stub.callsOf("sendMessage")[0].body).toEqual({
+      chat_id: SUPPORT_CHAT_ID,
+      text: NOT_ADMIN_COMMAND_NOTICE,
+      message_thread_id: 607,
+    });
+    expect(await readMessagesByUser(7207)).toHaveLength(0);
   });
 });
 

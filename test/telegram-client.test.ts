@@ -462,3 +462,105 @@ describe("telegram client: T22/T24 新方法（全部经 request()，零分类�
     expectNoTokenLeak(error);
   });
 });
+
+describe("telegram client: T27 阶段 4 新增（reply_markup + answerCallbackQuery）", () => {
+  let stub: TelegramFetchStub;
+  let client: ReturnType<typeof createTelegramClient>;
+  beforeEach(() => {
+    stub = stubTelegramFetch();
+    client = createTelegramClient(TOKEN);
+  });
+  afterEach(() => {
+    stub.restore();
+  });
+
+  it("sendMessage 携带 reply_markup：inline_keyboard 蛇形结构原样透传（精确键集）", async () => {
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 6 } } });
+    const result = await client.sendMessage({
+      chat_id: 7001,
+      text: "为确认你是真人，请回答：\n3 + 5 = ?",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "7", callback_data: "v:7" },
+          { text: "9", callback_data: "v:9" },
+          { text: "2", callback_data: "v:2" },
+          { text: "12", callback_data: "v:12" },
+        ]],
+      },
+    });
+    expect(result).toEqual({ ok: true, result: { message_id: 6 } });
+    expect(stub.callsOf("sendMessage")[0].body).toEqual({
+      chat_id: 7001,
+      text: "为确认你是真人，请回答：\n3 + 5 = ?",
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "7", callback_data: "v:7" },
+          { text: "9", callback_data: "v:9" },
+          { text: "2", callback_data: "v:2" },
+          { text: "12", callback_data: "v:12" },
+        ]],
+      },
+    });
+  });
+
+  it("sendMessage 不带 reply_markup：键集零多余（既有中继路径不受影响）", async () => {
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 7 } } });
+    await client.sendMessage({ chat_id: -1001234567890, text: "中继正文", message_thread_id: 9 });
+    expect(stub.callsOf("sendMessage")[0].body).toEqual({
+      chat_id: -1001234567890,
+      text: "中继正文",
+      message_thread_id: 9,
+    });
+  });
+
+  it("editMessageText 携带 reply_markup：答错重出（同消息换新按钮）透传", async () => {
+    stub.always("editMessageText", { status: 200, json: { ok: true, result: { message_id: 6 } } });
+    const result = await client.editMessageText({
+      chat_id: 7001,
+      message_id: 6,
+      text: "回答错误，请再试一次。",
+      reply_markup: { inline_keyboard: [[{ text: "4", callback_data: "v:4" }]] },
+    });
+    expect(result).toEqual({ ok: true, result: { message_id: 6 } });
+    expect(stub.callsOf("editMessageText")[0].body).toEqual({
+      chat_id: 7001,
+      message_id: 6,
+      text: "回答错误，请再试一次。",
+      reply_markup: { inline_keyboard: [[{ text: "4", callback_data: "v:4" }]] },
+    });
+  });
+
+  it("answerCallbackQuery：callbackQueryId 蛇形映射 + text 透传", async () => {
+    stub.always("answerCallbackQuery", { status: 200, json: { ok: true, result: true } });
+    const result = await client.answerCallbackQuery({
+      callbackQueryId: "cb-abc-1",
+      text: "验证通过！",
+    });
+    expect(result).toEqual({ ok: true, result: true });
+    expect(stub.callsOf("answerCallbackQuery")[0].body).toEqual({
+      callback_query_id: "cb-abc-1",
+      text: "验证通过！",
+    });
+  });
+
+  it("answerCallbackQuery 不带 text：键集中无 text（只终止加载态）", async () => {
+    stub.always("answerCallbackQuery", { status: 200, json: { ok: true, result: true } });
+    await client.answerCallbackQuery({ callbackQueryId: "cb-abc-2" });
+    expect(stub.callsOf("answerCallbackQuery")[0].body).toEqual({
+      callback_query_id: "cb-abc-2",
+    });
+  });
+
+  it("分类矩阵对 answerCallbackQuery 同样成立：403 → permanent 且 errorCode 按数字码透传", async () => {
+    stub.always("answerCallbackQuery", {
+      status: 403,
+      json: { ok: false, error_code: 403, description: "Forbidden: query is too old" },
+    });
+    const error = asError(
+      await client.answerCallbackQuery({ callbackQueryId: "cb-old", text: "x" }),
+    );
+    expect(error.kind).toBe("permanent");
+    expect(error.errorCode).toBe(403);
+    expectNoTokenLeak(error);
+  });
+});

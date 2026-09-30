@@ -1,12 +1,28 @@
 /**
- * users 表 store（T23 改造）：ensureUser 三态返回（新建 / 展示变更 / 纯活跃
- * 刷新——治理列与 first_seen_at 永不动）+ claimNoticeSlot 原子频控
- * （首取赢、60s 内再取输、窗口过后可再赢、行不存在 → 输）。
+ * users 表 store（T23 改造 + 阶段 4 门控原语）：ensureUser 三态返回与治理快照
+ * （新建 / 展示变更 / 纯活跃刷新——治理列与 first_seen_at 永不被 ensureUser 改写）
+ * + claimNoticeSlot 原子频控（首取赢、60s 内再取输、窗口过后可再赢、行不存在 → 输）
+ * + 验证态原语（setPendingVerification / markVerified 0→1 转换与幂等 / markUnverified
+ * 清字段）+ setBanned + countMessageInWindow 固定窗口（首条 / 第 N 条 / 第 N+1 条
+ * 拦截 / 跨窗口重置 / 并发序列语义）。
  * 文件级隔离 D1，自播种自断言。
+ *
+ * 阶段 4 调整说明：ensureUser 返回值扩治理快照（isBanned / isVerified /
+ * verifyAnswer / verifyMsgId + 展示列），既有 toEqual 断言按新形状更新——
+ * 「三态返回 + 治理列不动」的原断言意图保留并按快照真值收紧。
  */
 import { applyD1Migrations, env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
-import { claimNoticeSlot, ensureUser } from "../src/store/users";
+import {
+  claimNoticeSlot,
+  countMessageInWindow,
+  ensureUser,
+  getGovernanceSnapshot,
+  markUnverified,
+  markVerified,
+  setBanned,
+  setPendingVerification,
+} from "../src/store/users";
 
 const BOT_ID = 42;
 const USER_ID = 7501;
@@ -18,6 +34,11 @@ interface UserRow {
   status: string;
   is_banned: number;
   is_verified: number;
+  verified_at: string | null;
+  verify_answer: number | null;
+  verify_msg_id: number | null;
+  rate_window_start: string | null;
+  rate_count: number;
   last_notice_at: string | null;
   first_seen_at: string;
   last_seen_at: string;
@@ -25,7 +46,10 @@ interface UserRow {
 
 const readUser = () =>
   env.HODOR_DB.prepare(
-    "SELECT first_name, last_name, username, status, is_banned, is_verified, last_notice_at, first_seen_at, last_seen_at FROM users WHERE bot_id = ? AND user_id = ?",
+    `SELECT first_name, last_name, username, status, is_banned, is_verified, verified_at,
+       verify_answer, verify_msg_id, rate_window_start, rate_count, last_notice_at,
+       first_seen_at, last_seen_at
+     FROM users WHERE bot_id = ? AND user_id = ?`,
   )
     .bind(BOT_ID, USER_ID)
     .first<UserRow>();
@@ -34,8 +58,8 @@ beforeAll(async () => {
   await applyD1Migrations(env.HODOR_DB, env.TEST_MIGRATIONS);
 });
 
-describe("store: ensureUser 三态返回", () => {
-  it("无行 → INSERT：{ isNew: true, displayChanged: false }，firstSeenAt 与库一致，治理列走默认值", async () => {
+describe("store: ensureUser 三态返回 + 治理快照", () => {
+  it("无行 → INSERT：{ isNew: true, displayChanged: false }，快照为建档默认值，firstSeenAt 与库一致", async () => {
     const result = await ensureUser(env.HODOR_DB, BOT_ID, {
       id: USER_ID,
       first_name: "Alice",
@@ -44,6 +68,14 @@ describe("store: ensureUser 三态返回", () => {
     });
     expect(result.isNew).toBe(true);
     expect(result.displayChanged).toBe(false);
+    // 治理快照 = 建档默认：未封禁 / 未验证 / 无题 + 展示列回读
+    expect(result.isBanned).toBe(false);
+    expect(result.isVerified).toBe(false);
+    expect(result.verifyAnswer).toBeNull();
+    expect(result.verifyMsgId).toBeNull();
+    expect(result.firstName).toBe("Alice");
+    expect(result.lastName).toBe("L");
+    expect(result.username).toBe("alice_hd");
 
     const row = await readUser();
     expect(row).toMatchObject({
@@ -76,6 +108,13 @@ describe("store: ensureUser 三态返回", () => {
       isNew: false,
       displayChanged: true,
       firstSeenAt: "2020-01-01T00:00:00.000Z",
+      isBanned: false,
+      isVerified: false,
+      verifyAnswer: null,
+      verifyMsgId: null,
+      firstName: "新名",
+      lastName: "",
+      username: "new_hd",
     });
 
     const row = await readUser();
@@ -96,20 +135,18 @@ describe("store: ensureUser 三态返回", () => {
       first_name: "新名",
       username: "new_hd",
     });
-    expect(result).toEqual({
-      isNew: false,
-      displayChanged: false,
-      firstSeenAt: before!.first_seen_at,
-    });
+    expect(result.isNew).toBe(false);
+    expect(result.displayChanged).toBe(false);
+    expect(result.firstSeenAt).toBe(before!.first_seen_at);
 
     const row = await readUser();
     expect(row!.last_seen_at > before!.last_seen_at).toBe(true);
     expect(row!.first_name).toBe("新名");
   });
 
-  it("治理列在更新分支永不动：预置 is_banned=1 后刷新展示字段，is_banned 保持", async () => {
+  it("治理列在更新分支永不动：预置 is_banned=1 / pending 题后刷新展示字段，快照回读真值且库内保持", async () => {
     await env.HODOR_DB.prepare(
-      "UPDATE users SET is_banned = 1, status = 'active' WHERE bot_id = ? AND user_id = ?",
+      "UPDATE users SET is_banned = 1, status = 'active', verify_answer = 7, verify_msg_id = 4242 WHERE bot_id = ? AND user_id = ?",
     )
       .bind(BOT_ID, USER_ID)
       .run();
@@ -119,10 +156,25 @@ describe("store: ensureUser 三态返回", () => {
       first_name: "又改名",
     });
     expect(result.displayChanged).toBe(true);
+    // 快照回读库内治理真值（门序判定的数据来源）
+    expect(result.isBanned).toBe(true);
+    expect(result.verifyAnswer).toBe(7);
+    expect(result.verifyMsgId).toBe(4242);
 
     const row = await readUser();
     expect(row!.is_banned).toBe(1);
+    expect(row!.verify_answer).toBe(7);
+    expect(row!.verify_msg_id).toBe(4242);
     expect(row!.status).toBe("active");
+  });
+
+  it("getGovernanceSnapshot：回读治理与展示列；行不存在 → null", async () => {
+    const snapshot = await getGovernanceSnapshot(env.HODOR_DB, BOT_ID, USER_ID);
+    expect(snapshot).not.toBeNull();
+    expect(snapshot!.isBanned).toBe(true);
+    expect(snapshot!.verifyMsgId).toBe(4242);
+    expect(snapshot!.firstName).toBe("又改名");
+    expect(await getGovernanceSnapshot(env.HODOR_DB, BOT_ID, 999999999)).toBeNull();
   });
 });
 
@@ -153,5 +205,124 @@ describe("store: claimNoticeSlot 原子频控", () => {
       .bind(BOT_ID, SLOT_USER)
       .run();
     expect(await claimNoticeSlot(env.HODOR_DB, BOT_ID, SLOT_USER)).toBe(false);
+  });
+});
+
+describe("store: 验证态原语（T27/T29）", () => {
+  const VERIFY_USER = 7503;
+
+  beforeAll(async () => {
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: VERIFY_USER, first_name: "Verify" });
+  });
+
+  const readVerifyRow = () =>
+    env.HODOR_DB.prepare(
+      "SELECT is_verified, verified_at, verify_answer, verify_msg_id FROM users WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, VERIFY_USER)
+      .first<{ is_verified: number; verified_at: string | null; verify_answer: number | null; verify_msg_id: number | null }>();
+
+  const readBanFlag = () =>
+    env.HODOR_DB.prepare("SELECT is_banned FROM users WHERE bot_id = ? AND user_id = ?")
+      .bind(BOT_ID, VERIFY_USER)
+      .first<{ is_banned: number }>();
+
+  it("setPendingVerification：写题目字段（answer + 题面 msgId，供判卷与归属判定）", async () => {
+    await setPendingVerification(env.HODOR_DB, BOT_ID, VERIFY_USER, { answer: 7, msgId: 4242 });
+    expect(await readVerifyRow()).toEqual({
+      is_verified: 0,
+      verified_at: null,
+      verify_answer: 7,
+      verify_msg_id: 4242,
+    });
+  });
+
+  it("markVerified：0→1 转换返回 true，verified_at 落值、题目字段清空；重复调用返回 false（幂等重放可辨）", async () => {
+    expect(await markVerified(env.HODOR_DB, BOT_ID, VERIFY_USER)).toBe(true);
+    const row = await readVerifyRow();
+    expect(row!.is_verified).toBe(1);
+    expect(row!.verified_at).not.toBeNull();
+    expect(row!.verify_answer).toBeNull();
+    expect(row!.verify_msg_id).toBeNull();
+
+    // 重放（并发第二次 / 已清空后的重推）：WHERE is_verified=0 不再命中
+    expect(await markVerified(env.HODOR_DB, BOT_ID, VERIFY_USER)).toBe(false);
+    expect((await readVerifyRow())!.verified_at).not.toBeNull();
+  });
+
+  it("markUnverified：撤验证 + 清 verified_at 与题目字段（超限重验 / 阶段 6 deluser 复用）", async () => {
+    await setPendingVerification(env.HODOR_DB, BOT_ID, VERIFY_USER, { answer: 9, msgId: 5000 });
+    await markUnverified(env.HODOR_DB, BOT_ID, VERIFY_USER);
+    expect(await readVerifyRow()).toEqual({
+      is_verified: 0,
+      verified_at: null,
+      verify_answer: null,
+      verify_msg_id: null,
+    });
+  });
+
+  it("setBanned：封禁 / 解禁切换（/ban /unban 的唯一写入口）", async () => {
+    await setBanned(env.HODOR_DB, BOT_ID, VERIFY_USER, true);
+    expect((await readBanFlag())!.is_banned).toBe(1);
+    await setBanned(env.HODOR_DB, BOT_ID, VERIFY_USER, false);
+    expect((await readBanFlag())!.is_banned).toBe(0);
+  });
+});
+
+describe("store: countMessageInWindow 固定窗口（T29）", () => {
+  const RATE_USER = 7504;
+  const LIMIT = 3;
+
+  beforeAll(async () => {
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: RATE_USER, first_name: "Rate" });
+  });
+
+  const readRateRow = () =>
+    env.HODOR_DB.prepare(
+      "SELECT rate_window_start, rate_count FROM users WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, RATE_USER)
+      .first<{ rate_window_start: string | null; rate_count: number }>();
+
+  it("首条：NULL 窗口 → 重置并计数 1，放行；窗口内第 2..N 条放行且计数递增；第 N+1 条拦截且计数不动", async () => {
+    // 窗口内序列语义（串行调用即真实投递序列；单语句原子性保证并发下同收敛）
+    expect(await countMessageInWindow(env.HODOR_DB, BOT_ID, RATE_USER, LIMIT)).toBe(true);
+    let row = await readRateRow();
+    expect(row!.rate_count).toBe(1);
+    expect(row!.rate_window_start).not.toBeNull();
+
+    expect(await countMessageInWindow(env.HODOR_DB, BOT_ID, RATE_USER, LIMIT)).toBe(true);
+    expect(await countMessageInWindow(env.HODOR_DB, BOT_ID, RATE_USER, LIMIT)).toBe(true);
+    expect((await readRateRow())!.rate_count).toBe(3);
+
+    // 第 N+1 条（limit=3 的第 4 条）：changes=0 → 拦截，计数停在 3
+    expect(await countMessageInWindow(env.HODOR_DB, BOT_ID, RATE_USER, LIMIT)).toBe(false);
+    expect(await countMessageInWindow(env.HODOR_DB, BOT_ID, RATE_USER, LIMIT)).toBe(false);
+    expect((await readRateRow())!.rate_count).toBe(3);
+  });
+
+  it("跨窗口（rate_window_start ≥ 60s 前）→ 重置为 1 并恢复放行", async () => {
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET rate_window_start = ?, rate_count = ? WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(new Date(Date.now() - 61_000).toISOString(), LIMIT, BOT_ID, RATE_USER)
+      .run();
+
+    expect(await countMessageInWindow(env.HODOR_DB, BOT_ID, RATE_USER, LIMIT)).toBe(true);
+    const row = await readRateRow();
+    expect(row!.rate_count).toBe(1);
+    expect(row!.rate_window_start! > new Date(Date.now() - 61_000).toISOString()).toBe(true);
+  });
+
+  it("未来窗口（时钟偏移防御）：不重置、照常计数至上限后拦截", async () => {
+    // 预置未来窗口起点 + 计数 2（= limit-1）：首条放行至 3，随后拦截且窗口不被未来值卡死重置
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET rate_window_start = ?, rate_count = ? WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(new Date(Date.now() + 60_000).toISOString(), LIMIT - 1, BOT_ID, RATE_USER)
+      .run();
+    expect(await countMessageInWindow(env.HODOR_DB, BOT_ID, RATE_USER, LIMIT)).toBe(true);
+    expect((await readRateRow())!.rate_count).toBe(LIMIT);
+    expect(await countMessageInWindow(env.HODOR_DB, BOT_ID, RATE_USER, LIMIT)).toBe(false);
   });
 });

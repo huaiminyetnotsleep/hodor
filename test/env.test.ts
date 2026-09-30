@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseAdminIds,
   parseMaxAttempts,
+  parseMaxMessagesPerMinute,
   parseSupportChatId,
   parseWelcomeText,
   timingSafeEqualStrings,
@@ -92,6 +93,26 @@ describe("parseMaxAttempts", () => {
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: "0" }))).toBe(3);
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: "-2" }))).toBe(3);
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: "2.5" }))).toBe(3);
+  });
+});
+
+describe("parseMaxMessagesPerMinute", () => {
+  it("合法正整数 → 原值", () => {
+    expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: "3" }))).toBe(3);
+    expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: "1" }))).toBe(1);
+    expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: " 20 " }))).toBe(20);
+  });
+
+  it("缺失 / 空串 → 缺省 20（对齐 docs/guide/deploy.md 变量表）", () => {
+    expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: undefined }))).toBe(20);
+    expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: "" }))).toBe(20);
+  });
+
+  it("非法 / 非正整数 → 缺省 20（先解析，不轻信输入——超限文案数字来源于此）", () => {
+    expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: "abc" }))).toBe(20);
+    expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: "0" }))).toBe(20);
+    expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: "-5" }))).toBe(20);
+    expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: "2.5" }))).toBe(20);
   });
 });
 

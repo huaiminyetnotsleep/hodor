@@ -68,6 +68,20 @@ export interface CopyMessageResult {
   message_id: number;
 }
 
+/** inline 键盘按钮：text 为按钮展示，callback_data 为点击回传载荷（验证题 "v:<值>"） */
+export interface InlineKeyboardButton {
+  text: string;
+  callback_data: string;
+}
+
+/**
+ * reply_markup 最小子集：inline 键盘（T27 验证题选项按钮）。
+ * 纯透传字段（可选）——既有调用不携带时零影响。
+ */
+export interface InlineKeyboardMarkup {
+  inline_keyboard: InlineKeyboardButton[][];
+}
+
 /** sendMessage 入参：阶段 2 文本中继的实际通道 */
 export interface SendMessageParams {
   chat_id: number;
@@ -75,6 +89,8 @@ export interface SendMessageParams {
   text: string;
   /** 入站带 thread（送达客服群 topic）；出站私聊不传 */
   message_thread_id?: number;
+  /** inline 键盘（T27 验证题按钮）；中继等既有路径不传 */
+  reply_markup?: InlineKeyboardMarkup;
 }
 
 /** sendMessage 出参：新消息 ID */
@@ -186,11 +202,49 @@ export interface PinChatMessageParams {
   message_id: number;
 }
 
-/** editMessageText 入参：T24 昵称变更刷新置顶信息用 */
+/** editMessageText 入参：T24 昵称变更刷新置顶信息 / T27 验证题重出与通过提示用 */
 export interface EditMessageTextParams {
   chat_id: number;
   message_id: number;
   text: string;
+  /** inline 键盘（T27 答错重出新题的按钮）；刷新置顶等既有路径不传 */
+  reply_markup?: InlineKeyboardMarkup;
+}
+
+/**
+ * answerCallbackQuery 入参（T27）：终止客户端按钮加载态 + 可选 toast 提示。
+ * callbackQueryId 即 update.callback_query.id（Telegram 单次消费）。
+ */
+export interface AnswerCallbackQueryParams {
+  callbackQueryId: string;
+  /** 弹给用户的短提示（答对 / 答错 / 题目失效）；缺省只终止加载态 */
+  text?: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* T34 验收增量：命令菜单（setMyCommands / deleteMyCommands）           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * BotCommandScope 最小子集（HTTP 直传对象，蛇形键原样）：本仓库恒用
+ * `{ type: "chat", chat_id: SUPPORT_CHAT_ID }` 把命令菜单限定在客服群——
+ * 绝不污染用户私聊的命令菜单。
+ */
+export interface BotCommandScopeRef {
+  type: string;
+  chat_id?: number;
+}
+
+/** setMyCommands 入参：commands 键名即 Telegram API 字段名（command 无斜杠小写） */
+export interface SetMyCommandsParams {
+  commands: { command: string; description: string }[];
+  /** 作用域（缺省 = default 全局作用域；本仓库恒携带 chat scope） */
+  scope?: BotCommandScopeRef;
+}
+
+/** deleteMyCommands 入参：与注册对称，同 scope 清理 */
+export interface DeleteMyCommandsParams {
+  scope?: BotCommandScopeRef;
 }
 
 /** client 工厂返回的方法集（全部经 request() 分类，无一旁路） */
@@ -216,4 +270,9 @@ export interface TelegramClient {
   sendAnimation(params: SendAnimationParams): Promise<TelegramResult<MessageIdResult>>;
   pinChatMessage(params: PinChatMessageParams): Promise<TelegramResult<boolean>>;
   editMessageText(params: EditMessageTextParams): Promise<TelegramResult<MessageIdResult>>;
+  answerCallbackQuery(
+    params: AnswerCallbackQueryParams,
+  ): Promise<TelegramResult<boolean>>;
+  setMyCommands(params: SetMyCommandsParams): Promise<TelegramResult<boolean>>;
+  deleteMyCommands(params: DeleteMyCommandsParams): Promise<TelegramResult<boolean>>;
 }

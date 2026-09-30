@@ -31,6 +31,11 @@ export default defineConfig(async () => {
         // 阶段 3 起入站欢迎语读取该变量：钉死为空 → 各用例统一走默认文案
         // 兜底分支；自定义文案分支用构造 env 对象覆盖（env.test.ts 同模式）
         WELCOME_TEXT: "",
+        // 阶段 4 限频上限（T29）：钉死默认值 20——真机 E2E 前会把 .dev.vars /
+        // 远端临时调成 3，不钉死则该值经 .dev.vars 泄漏进 worker env，
+        // 让依赖缺省 20 的路径静默漂移（构造 env 覆盖的用例不受影响，
+        // trellis-check P2#4）
+        MAX_MESSAGES_PER_MINUTE: "20",
       },
     },
   };

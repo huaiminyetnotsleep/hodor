@@ -10,6 +10,10 @@
  * 隔离 D1（.trellis/spec/backend/testing.md），本文件的破坏不影响其他文件；
  * 单独成文件正因 DROP 会污染同文件的其他用例。
  *
+ * 阶段 4 前置播种（2026-09-30）：三门交付后中继 / 账本仅已验证用户可达——
+ * 本用例的用户 7400 在 beforeAll 直插 is_verified=1（等同先走完验证门），
+ * 使消息直达「置顶 → 中继 → 账本」链；断言与账本失败契约不变。
+ *
  * 经 SELF.fetch 走完整 worker 入口（鉴权 → 认领 → inbound 全链），
  * Telegram 出站经 telegramFetchStub 拦截，无真实网络。
  */
@@ -24,6 +28,13 @@ const SUPPORT_CHAT_ID = -1001234567890;
 beforeAll(async () => {
   await applyD1Migrations(env.HODOR_DB, env.TEST_MIGRATIONS);
   await upsertBot(env.HODOR_DB, { botId: BOT_ID, username: "hodor_bot", displayName: "hodor" });
+  // 阶段 4 播种：已验证用户（文件头说明）——先于 DROP TABLE messages
+  await env.HODOR_DB.prepare(
+    `INSERT INTO users (bot_id, user_id, first_name, username, is_verified, verified_at, first_seen_at, last_seen_at)
+     VALUES (?, 7400, 'Ledger', 'ledger_hd', 1, '2026-09-01T10:00:00.000Z', '2026-09-01T10:00:00.000Z', '2026-09-01T10:00:00.000Z')`,
+  )
+    .bind(BOT_ID)
+    .run();
   // 唯一故障注入点：messages 表不可写（该次 insertMessage 必抛）
   await env.HODOR_DB.prepare("DROP TABLE messages").run();
 });
@@ -64,7 +75,8 @@ describe("webhook: 中继成功后账本写失败（部分成功窗口的账本�
     });
     expect(res.status).toBe(500);
 
-    // 中继确实已送达（全链到账本前一步全成功：置顶 + 欢迎 + 中继恰各一次）
+    // 中继确实已送达（到账本前一步全成功：置顶 + 中继恰各一次——已验证
+    // 存量用户非 start 无欢迎语，见文件头阶段 4 播种说明）
     const relay = stub
       .callsOf("sendMessage")
       .filter((call) => (call.body as Record<string, unknown>).text === "账本写失败的这条");

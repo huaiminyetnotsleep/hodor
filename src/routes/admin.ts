@@ -1,5 +1,6 @@
 /**
- * 管理端点（T13 / T14）：GET /setwebhook/<ADMIN_SECRET>、GET /deletewebhook/<ADMIN_SECRET>。
+ * 管理端点（T13 / T14 + T34 验收增量命令菜单）：GET /setwebhook/<ADMIN_SECRET>、
+ * GET /deletewebhook/<ADMIN_SECRET>。
  *
  * 鉴权约定（docs/guide/architecture.md）：路径段密钥比较用常量时间
  * （timingSafeEqualStrings），所有失败（env 缺 secret / 密钥不正确）统一
@@ -8,11 +9,17 @@
  * 错误回显：Telegram 调用失败（permanent / retryable）一律 502 + 已消毒概要
  * （分类层只回传方法名 / 状态 / 信封 description，绝不含 token）；
  * 管理端点是人看的，无重投递机制，retryable 附提示即可。
+ *
+ * 命令菜单（T34 验收增量，best-effort）：setwebhook 成功后把
+ * ADMIN_COMMAND_MENU 注册到客服群 scope（setMyCommands）；deletewebhook
+ * 对称清理（deleteMyCommands）。失败仅 warn + 回显注明，绝不影响
+ * webhook 绑定结果；env 无 SUPPORT_CHAT_ID → 跳过注册。
  */
-import { timingSafeEqualStrings } from "../env";
+import { ADMIN_COMMAND_MENU } from "../copy";
+import { parseSupportChatId, timingSafeEqualStrings } from "../env";
 import { upsertBot } from "../store/bots";
 import { createTelegramClient } from "../telegram/client";
-import type { TelegramBotUser, TelegramError } from "../telegram/types";
+import type { TelegramBotUser, TelegramClient, TelegramError } from "../telegram/types";
 
 /** 统一 401 文案（JSON body，与架构文档「无效的管理密钥」一致） */
 function unauthorized(): Response {
@@ -54,7 +61,8 @@ function botPayload(bot: TelegramBotUser) {
 /**
  * GET /setwebhook/<ADMIN_SECRET>
  * 校验密钥 → setWebhook(origin+/webhook, secret_token, allowed_updates)
- * → getMe → upsertBot → 回显 bot 身份与 webhook url（不回显任何密钥）。
+ * → getMe → upsertBot → 注册命令菜单（客服群 scope，best-effort）
+ * → 回显 bot 身份与 webhook url（不回显任何密钥）。
  */
 export async function handleSetWebhook(
   request: Request,
@@ -89,16 +97,47 @@ export async function handleSetWebhook(
     displayName: me.result.first_name ?? "",
   });
 
+  /* ---------------- 命令菜单注册（T34 验收增量，best-effort） ---------------- */
+  const commands = await registerCommandMenu(client, env);
+
   return Response.json({
     status: "ok",
     bot: botPayload(me.result),
     webhook: { url: webhookUrl },
+    commands,
   });
 }
 
 /**
+ * 把 ADMIN_COMMAND_MENU 注册到客服群 scope。回显三态：
+ * - "registered"：注册成功（客服群输入框可点选命令）；
+ * - "skipped"：SUPPORT_CHAT_ID 无效（无从定位客服群，绝不落到全局 scope）；
+ * - "failed:<已消毒摘要>"：注册失败——best-effort，不影响 webhook 绑定结果。
+ */
+async function registerCommandMenu(
+  client: TelegramClient,
+  env: Cloudflare.Env,
+): Promise<string> {
+  const supportChatId = parseSupportChatId(env);
+  if (supportChatId === null) return "skipped";
+
+  const menu = await client.setMyCommands({
+    commands: [...ADMIN_COMMAND_MENU],
+    // scope 限定客服群（type "chat"）：绝不污染用户私聊的命令菜单
+    scope: { type: "chat", chat_id: supportChatId },
+  });
+  if (menu.ok) return "registered";
+
+  console.warn(
+    `[admin] setMyCommands 注册失败（不影响 webhook 绑定）：${menu.errorMessage ?? "no detail"}`,
+  );
+  return `failed:${menu.errorMessage ?? "no detail"}`;
+}
+
+/**
  * GET /deletewebhook/<ADMIN_SECRET>
- * 校验密钥 → deleteWebhook 解绑 → 200 {"status":"ok"}。
+ * 校验密钥 → deleteWebhook 解绑 → 清理命令菜单（同 scope，best-effort）
+ * → 200 {"status":"ok"}。
  */
 export async function handleDeleteWebhook(
   env: Cloudflare.Env,
@@ -111,6 +150,20 @@ export async function handleDeleteWebhook(
   const client = createTelegramClient(env.TELEGRAM_BOT_TOKEN);
   const result = await client.deleteWebhook();
   if (!result.ok) return telegramFailure("deleteWebhook", result);
+
+  // 命令菜单对称清理（T34 验收增量，best-effort）：与注册同一 scope；
+  // webhook 已解绑，菜单清理失败只影响点选体验——warn 即可，不改变 200
+  const supportChatId = parseSupportChatId(env);
+  if (supportChatId !== null) {
+    const cleanup = await client.deleteMyCommands({
+      scope: { type: "chat", chat_id: supportChatId },
+    });
+    if (!cleanup.ok) {
+      console.warn(
+        `[admin] deleteMyCommands 清理失败（best-effort）：${cleanup.errorMessage ?? "no detail"}`,
+      );
+    }
+  }
   return Response.json({ status: "ok" });
 }
 
