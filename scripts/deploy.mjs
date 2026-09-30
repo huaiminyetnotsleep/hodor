@@ -29,6 +29,11 @@
 // .bin/wrangler 是指向 wrangler/bin/wrangler.js 的符号链接，node 可直接执行）。
 // 注意：.bin 直启假定类 Unix 平台（macOS / Linux，含 Workers Builds）。
 //
+// 数据库名称解析：wrangler d1 list --json（账号级列表，按名称匹配）。绝不使用
+// `d1 info <name>`——info 会先经 cwd 的 wrangler 配置解析名称，而本仓库配置
+// 声明了占位 database_id，info 实际按占位 uuid 调 API，稳定 404（code 7404），
+// 这是 2026-09-30 Workers Builds 生产事故的根因。
+//
 // 纯函数（JSONC 剥注释解析 / database_id 原地替换 / postinstall 门控判定）在
 // scripts/lib/config.mjs，版本模块纯渲染/校验在 scripts/lib/version.mjs——两者
 // 均可被 workerd 沙箱内的测试导入；本文件只做进程与文件编排，不被测试导入。
@@ -40,6 +45,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   PLACEHOLDER_DATABASE_ID,
+  isAuthFailure,
   parseWranglerConfig,
   replaceJsoncString,
   shouldRunInstallHook,
@@ -68,12 +74,8 @@ const WRANGLER_BIN = path.join(REPO_ROOT, "node_modules", ".bin", "wrangler");
 
 const UUID_PATTERN =
   /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
-// 认证/权限类失败特征（对 wrangler 报错文本做分类用）
-const AUTH_FAILURE_PATTERN =
-  /authentic|unauthori[sz]ed|not authorized|forbidden|\b403\b|api token|oauth token|not logged in|wrangler login/i;
-// 数据库不存在特征
-const NOT_FOUND_PATTERN =
-  /not found|couldn'?t find|could not find|does ?n[o']t exist|no such/i;
+// 认证/权限类失败分类已抽为 scripts/lib/config.mjs 的 isAuthFailure 纯函数
+// （有单测，含 7404 不算认证失败的回归护栏）。
 // 未知参数特征（个别 wrangler 版本的子命令不支持 --json）
 const UNKNOWN_FLAG_PATTERN =
   /unknown (?:argument|option|flag)|unexpected argument|unrecognized/i;
@@ -103,6 +105,12 @@ function printUsage() {
                      其余环境（本地 npm install、GitHub Actions npm ci 等）打印
                      一行提示后零副作用跳过
   --help, -h         显示本帮助
+
+数据库解析顺序（各模式一致）：
+  D1_DATABASE_ID 环境变量 → wrangler d1 list（账号级列表按名称查找，
+  存在则复用）→ wrangler d1 create（不存在则创建）。
+  名称查找走账号级列表，不经 d1 info（其会先读配置里的占位
+  database_id，必然 404）。
 
 环境变量：
   D1_DATABASE_ID     可选。直接指定数据库 uuid，跳过 wrangler 查询/创建
@@ -263,45 +271,120 @@ function printPermissionGuidance(command, code) {
 }
 
 /**
- * 查询数据库 uuid。
+ * 解析 `wrangler d1 list --json` 的输出为规范化条目数组。
+ *
+ * 输出形状（wrangler 4.144.0 dist 源码确认，`d1 list --help` 列出 --json）：
+ * 顶层是裸 JSON 数组，每项含 name 与 uuid。防御性兼容两种形态：
+ * `{ "results": [...] }` 包装（wrangler 部分 JSON 输出的形状）与条目内以
+ * id 命名 uuid 的写法。整体 parse 失败时退化到截取最外层 [] / {} 片段再试
+ * （--json 时 wrangler 已抑制横幅，此处仅对混入杂项文本的极端情况兜底）。
+ *
+ * @param {string} stdout
+ * @returns {Array<{ name: string, uuid: string }> | null} 规范化条目；无法
+ *   解析出合法 JSON 结构时返回 null（由调用方按致命错误处理）
+ */
+function parseDatabaseListOutput(stdout) {
+  const trimmed = stdout.trim();
+  if (trimmed === "") {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    // 兜底：先试最外层数组片段，再试最外层对象片段
+    for (const [open, close] of [
+      ["[", "]"],
+      ["{", "}"],
+    ]) {
+      const start = trimmed.indexOf(open);
+      const end = trimmed.lastIndexOf(close);
+      if (start !== -1 && end > start) {
+        try {
+          parsed = JSON.parse(trimmed.slice(start, end + 1));
+          break;
+        } catch {
+          // 换下一种定界符再试
+        }
+      }
+    }
+  }
+  if (parsed === undefined) {
+    return null;
+  }
+  const entries = Array.isArray(parsed)
+    ? parsed
+    : parsed !== null && typeof parsed === "object" && Array.isArray(parsed.results)
+      ? parsed.results
+      : null;
+  if (entries === null) {
+    return null;
+  }
+  const normalized = [];
+  for (const entry of entries) {
+    if (entry === null || typeof entry !== "object") {
+      continue;
+    }
+    const name = typeof entry.name === "string" ? entry.name : null;
+    const uuid =
+      typeof entry.uuid === "string"
+        ? entry.uuid
+        : typeof entry.id === "string"
+          ? entry.id
+          : null;
+    if (name === null || uuid === null || !UUID_PATTERN.test(uuid)) {
+      continue;
+    }
+    normalized.push({ name, uuid });
+  }
+  return normalized;
+}
+
+/**
+ * 在账号全量数据库列表中按名称查找 uuid。
+ *
+ * 为什么是 `d1 list` 而不是 `d1 info`：info 会先经 cwd 的 wrangler 配置解析
+ * 名称，而本仓库配置声明了占位 database_id → info 实际按占位 uuid 调 API，
+ * 稳定 404（code 7404）。这是 2026-09-30 Workers Builds 生产事故的根因，
+ * 名称查找必须走账号级列表、不得经过 d1 info。
+ *
+ * 分页说明（wrangler 4.144.0 `d1 list --help` + dist 源码确认）：CLI 未暴露
+ * --page / --per-page 旗标；wrangler 内部以 per_page=10 逐页拉取直到返回短页，
+ * 单次 `d1 list --json` 即返回全量列表——因此这里不做、也不需要翻页循环。
+ * 若未来版本把分页暴露为 CLI 旗标并默认截断结果，需要按「页满且未命中则
+ * 翻页」补循环；当前版本不适用。
  *
  * @param {string} databaseName
- * @returns {Promise<string | null>} uuid；数据库不存在返回 null；
- *   认证/权限类失败或其他非「不存在」错误直接中止进程。
+ * @returns {Promise<string | null>} uuid；账号中不存在该名称返回 null；
+ *   认证/权限类失败或其他错误直接中止进程。
  */
-async function queryDatabaseUuid(databaseName) {
-  let info = await runWrangler(["d1", "info", databaseName, "--json"], {
+async function lookupDatabaseUuidByName(databaseName) {
+  const listing = await runWrangler(["d1", "list", "--json"], {
     captureStdout: true,
     teeStderr: true,
   });
-  if (info.code !== 0 && UNKNOWN_FLAG_PATTERN.test(info.stdout + info.stderr)) {
-    // wrangler 版本差异：d1 info 不认 --json → 去掉该参数重试，表格输出走正则提取
-    info = await runWrangler(["d1", "info", databaseName], {
-      captureStdout: true,
-      teeStderr: true,
-    });
+  if (listing.code !== 0) {
+    // 失败分类：认证/权限形态（isAuthFailure）→ token 配置引导；其余一切失败
+    // （含 7404 等）→ 通用提示 + 退出码。wrangler 原始报错已实时透传，不回显
+    // 也不猜测原因——旧逻辑把未知失败含糊归为「疑似认证或权限不足」，误导排障。
+    if (isAuthFailure(listing.stderr + listing.stdout)) {
+      printPermissionGuidance("d1 list", listing.code);
+    } else {
+      console.error(
+        `[provision] wrangler d1 list 失败（退出码 ${listing.code}），已中止。`,
+      );
+    }
+    process.exit(1);
   }
-  if (info.code === 0) {
-    const uuid =
-      extractUuidFromJsonOutput(info.stdout) ?? extractUuidByRegex(info.stdout);
-    if (uuid !== null) {
-      return uuid;
-    }
-    if (NOT_FOUND_PATTERN.test(info.stdout + info.stderr)) {
-      return null; // 个别版本对缺失库也可能退出 0：按不存在处理
-    }
+  const entries = parseDatabaseListOutput(listing.stdout);
+  if (entries === null) {
     console.error(
-      "[provision] wrangler d1 info 退出码 0，但无法从输出中解析出 uuid，已中止。",
+      "[provision] wrangler d1 list 退出码 0，但无法从输出中解析出数据库列表，已中止。",
     );
     process.exit(1);
   }
-  const output = info.stdout + info.stderr;
-  if (AUTH_FAILURE_PATTERN.test(output) || !NOT_FOUND_PATTERN.test(output)) {
-    // 非零退出且不是「数据库不存在」：按认证/权限类失败处理
-    printPermissionGuidance(`d1 info ${databaseName}`, info.code);
-    process.exit(1);
-  }
-  return null; // 数据库不存在
+  const hit = entries.find((entry) => entry.name === databaseName);
+  return hit !== undefined ? hit.uuid : null;
 }
 
 /**
@@ -339,15 +422,15 @@ async function createDatabase(databaseName) {
   }
 
   const output = created.stdout + created.stderr;
-  // 并发竞态：另一个构建先创建了同名库 → 回查 info 复用，不重复建库
+  // 并发竞态：另一个构建先创建了同名库 → 重新 d1 list 取 uuid 复用，不重复建库
   if (ALREADY_EXISTS_PATTERN.test(output)) {
-    const uuid = await queryDatabaseUuid(databaseName);
+    const uuid = await lookupDatabaseUuidByName(databaseName);
     if (uuid !== null) {
       log("provision", `数据库 ${databaseName} 已被并发创建，复用 ${uuid}`);
       return uuid;
     }
   }
-  if (AUTH_FAILURE_PATTERN.test(output)) {
+  if (isAuthFailure(output)) {
     printPermissionGuidance(`d1 create ${databaseName}`, created.code);
   } else {
     console.error(
@@ -391,9 +474,11 @@ function readSourceConfig() {
 /**
  * 解析目标数据库 uuid。
  *
- * 顺序：D1_DATABASE_ID 环境变量（逃生口，跳过一切查询）→ wrangler d1 info
- * （存在则复用）→ wrangler d1 create（不存在则创建）。名称是唯一事实源：
- * 即便配置里已是非占位 id，仍按名称重新解析。
+ * 顺序：D1_DATABASE_ID 环境变量（逃生口，跳过一切查询）→ wrangler d1 list
+ * （账号级列表按名称查找，存在则复用）→ wrangler d1 create（不存在则创建）。
+ * 名称是唯一事实源：即便配置里已是非占位 id，仍按名称重新解析。名称查找绝不
+ * 经过 d1 info（会先读配置里的占位 database_id 导致 7404，见
+ * lookupDatabaseUuidByName 注释）。
  *
  * @param {string} databaseName
  * @returns {Promise<{ uuid: string, source: "env" | "existing" | "created" }>}
@@ -404,14 +489,14 @@ async function resolveDatabaseId(databaseName) {
     if (!UUID_PATTERN.test(fromEnv)) {
       console.error(`[provision] D1_DATABASE_ID 不是合法的 uuid：${fromEnv}`);
       console.error(
-        "[provision] 请填入 wrangler d1 info 输出中的数据库 uuid，或移除该变量改用自动解析。",
+        "[provision] 请填入 wrangler d1 list 输出中的数据库 uuid，或移除该变量改用自动解析。",
       );
       process.exit(1);
     }
     return { uuid: fromEnv, source: "env" };
   }
 
-  const existing = await queryDatabaseUuid(databaseName);
+  const existing = await lookupDatabaseUuidByName(databaseName);
   if (existing !== null) {
     return { uuid: existing, source: "existing" };
   }
@@ -571,7 +656,7 @@ async function deployWorker() {
  *
  * 放行后的执行顺序（任一步失败 exit 1 → npm install 失败 → 构建中止 → 不部署）：
  *   1. 解析/创建数据库 uuid（与本地模式共用 resolveDatabaseId：含
- *      D1_DATABASE_ID 逃生口、uuid 校验、d1 info → d1 create、权限引导）；
+ *      D1_DATABASE_ID 逃生口、uuid 校验、d1 list → d1 create、权限引导）；
  *   2. 就地注入：把真实 id 写入仓库路径的 wrangler.jsonc（withDatabaseId 做
  *      原文区间替换，注释逐字保留；重复执行幂等）。这是「本地模式仓库配置
  *      一字不改」不变的唯一豁免场景——Workers Builds 工作区是一次性克隆，

@@ -8,6 +8,13 @@
 export declare const PLACEHOLDER_DATABASE_ID: string;
 
 /**
+ * 判断 wrangler 报错文本是否属于认证/权限类失败（匹配 403 / authentication /
+ * not authorized / (api|oauth)[_]token 等形态）。7404 / not found 等「资源
+ * 不存在」不属于认证失败。
+ */
+export declare function isAuthFailure(text: string): boolean;
+
+/**
  * 剥离 JSONC 文本中的行注释与块注释，返回可被 JSON.parse 直接解析的文本。
  * 字符串字面量（含其内部的注释形序列）逐字保留。
  */

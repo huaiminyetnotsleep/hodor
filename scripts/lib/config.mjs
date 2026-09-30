@@ -16,6 +16,26 @@
  */
 export const PLACEHOLDER_DATABASE_ID = "00000000-0000-0000-0000-000000000000";
 
+// 认证/权限类失败特征（isAuthFailure 对 wrangler 报错文本做分类用）。
+// 「api token / oauth token」同时匹配下划线变体（CLOUDFLARE_API_TOKEN）。
+const AUTH_FAILURE_PATTERN =
+  /authentic|unauthori[sz]ed|not authorized|forbidden|\b403\b|api[ _]token|oauth[ _]token|not logged in|wrangler login/i;
+
+/**
+ * 判断一段 wrangler 报错文本是否属于认证/权限类失败。
+ *
+ * 匹配 403 / authentication / not authorized / (api|oauth)[_]token 等形态；
+ * 7404 / not found 等「资源不存在」不属于认证失败——2026-09-30 生产事故的
+ * 教训：`d1 info` 按配置占位 uuid 查询返回 7404，曾被旧分类逻辑含糊地归为
+ * 「疑似认证或权限不足」，误导排障方向。分类必须只认认证形态本身。
+ *
+ * @param {string} text wrangler 输出文本（stdout/stderr 合并）
+ * @returns {boolean} 是否认证/权限类失败
+ */
+export function isAuthFailure(text) {
+  return typeof text === "string" && AUTH_FAILURE_PATTERN.test(text);
+}
+
 /**
  * 剥离 JSONC 文本中的行注释与块注释，返回可被 JSON.parse 直接解析的文本。
  *
@@ -325,7 +345,7 @@ export function replaceJsoncString(text, keyPath, value) {
  * .wrangler/ 下的临时 resolved 配置。
  *
  * @param {string} text wrangler 配置原文
- * @param {string} uuid 数据库 uuid（来自 wrangler d1 info / d1 create 或 D1_DATABASE_ID）
+ * @param {string} uuid 数据库 uuid（来自 wrangler d1 list / d1 create 或 D1_DATABASE_ID）
  * @returns {string} 替换后的配置文本
  * @throws {Error} 配置缺少 d1_databases[0].database_id，或其值不是字符串字面量
  */

@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PLACEHOLDER_DATABASE_ID,
+  isAuthFailure,
   parseWranglerConfig,
   replaceJsoncString,
   shouldRunInstallHook,
@@ -153,6 +154,39 @@ describe("replaceJsoncString（deploy.mjs 借此把 resolved 配置内的相对�
     const parsed = parseWranglerConfig(replaced);
     expect(parsed.d1_databases[0].migrations_dir).toBe("/repo/migrations");
     expect(parsed.d1_databases[0].database_id).toBe(PLACEHOLDER_DATABASE_ID);
+  });
+});
+
+// wrangler 失败文本分类：deploy.mjs 据此区分「认证/权限引导」与「通用失败」。
+// 2026-09-30 生产事故回归护栏：d1 info 按占位 uuid 查询返回 7404，曾被含糊
+// 归为「疑似认证或权限不足」——「不存在」绝不能命中认证分类。
+describe("isAuthFailure（wrangler 失败文本分类）", () => {
+  it("403 / authentication / not authorized 等认证形态 → true", () => {
+    expect(isAuthFailure("You are not authorized to access this resource")).toBe(true);
+    expect(isAuthFailure("Authentication required. Please run `wrangler login`.")).toBe(true);
+    expect(isAuthFailure("A request failed with status code 403 (Forbidden)")).toBe(true);
+    expect(isAuthFailure("failed: 403")).toBe(true);
+    expect(isAuthFailure("provide a valid API token via CLOUDFLARE_API_TOKEN")).toBe(true);
+  });
+
+  it("7404 数据库不存在（本事故原始报错形态）→ false，不得误判为认证失败", () => {
+    const incidentError = [
+      "✘ [ERROR] A request to the Cloudflare API (/accounts/abc/d1/database/00000000-0000-0000-0000-000000000000) failed.",
+      "  The database 00000000-0000-0000-0000-000000000000 could not be found [code: 7404]",
+    ].join("\n");
+    expect(isAuthFailure(incidentError)).toBe(false);
+    expect(isAuthFailure("could not be found [code: 7404]")).toBe(false);
+    expect(isAuthFailure("not found")).toBe(false);
+  });
+
+  it("空字符串 → false", () => {
+    expect(isAuthFailure("")).toBe(false);
+  });
+
+  it("普通网络错误文本 → false", () => {
+    expect(isAuthFailure("fetch failed: unable to connect to api.cloudflare.com")).toBe(false);
+    expect(isAuthFailure("socket hang up ECONNRESET")).toBe(false);
+    expect(isAuthFailure("network timeout while listing databases")).toBe(false);
   });
 });
 
