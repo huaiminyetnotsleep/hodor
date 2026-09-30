@@ -12,15 +12,15 @@
 
 ### 工程、部署与发布
 
-- [ ] **T01** TypeScript + wrangler 工程，原生 `fetch`、无运行时框架依赖；基础 `/health` 返回 ok。
-- [ ] **T02** D1 手动创建与 `HODOR_DB` 绑定，配置 `keep_vars`，重复部署不覆盖环境变量。
-- [ ] **T03** 六张表 schema 与迁移步骤，保留 `bot_id` 维度，重复迁移不丢数据。
-- [ ] **T04** vitest + vitest-pool-workers 测试基座与数据库冒烟用例。
-- [ ] **T05** Git 集成构建自动创建 D1 并绑定；品牌前缀防冲突，权限不足时提供 API token 配置引导。
-- [ ] **T06** 部署自动执行数据库迁移，覆盖新部署、已有数据升级及迁移失败恢复。
+- [x] **T01** TypeScript + wrangler 工程，原生 `fetch`、无运行时框架依赖；基础 `/health` 返回 ok。
+- [x] **T02** D1 手动创建与 `HODOR_DB` 绑定，配置 `keep_vars`，重复部署不覆盖环境变量。
+- [x] **T03** 六张表 schema 与迁移步骤，保留 `bot_id` 维度，重复迁移不丢数据。
+- [x] **T04** vitest + vitest-pool-workers 测试基座与数据库冒烟用例。
+- [x] **T05** Git 集成构建自动创建 D1 并绑定；品牌前缀防冲突，权限不足时提供 API token 配置引导。
+- [x] **T06** 部署自动执行数据库迁移，覆盖新部署、已有数据升级及迁移失败恢复。
 - [ ] **T07** `/health` 完整自检：环境变量、数据库六表、Webhook 指向本 Worker，不回显密钥。
-- [ ] **T08** 构建脚本从 package.json 注入版本，生成模块 gitignored，`/health` 显示版本号。
-- [ ] **T09** Release Please 限定官方仓库运行，自动维护 Release PR、tag 与 GitHub Release；fork 手动同步更新。
+- [x] **T08** 构建脚本从 package.json 注入版本，生成模块 gitignored，`/health` 显示版本号。
+- [x] **T09** Release Please 限定官方仓库运行，自动维护 Release PR、tag 与 GitHub Release；fork 手动同步更新。
 - [ ] **T10** `scripts/d1-console.sql` 运维查询包，覆盖用户、topic、消息与失败 update 排障。
 - [ ] **T11** 发布集成回归：既有功能、部署、更新、配置保留与数据兼容；功能测试随各阶段完成。
 - [ ] **T12** README 与功能、部署、运维文档同步，按实际实现核验状态，从零部署及更新流程验收。
