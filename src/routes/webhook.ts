@@ -122,11 +122,10 @@ export async function handleWebhook(
     else await handleOutbound(env, botId, message);
   } catch (error) {
     // retryable：保持 processing 返回 500，交由 Telegram 重推 + 状态机接管。
-    // 部分成功窗口（design.md 已知代价）：若失败前中继调用
-    // （入站 forwardMessage / 出站 sendMessage）实际已送达，60s 过期接管后
-    // 会重发一次——at-least-once 的代价，绝不提前标记 processed 掩盖失败
-    // 而丢消息（p1.md 警示；行为由 test/webhook-route.test.ts
-    // 「部分成功窗口」用例固化）。
+    // 部分成功窗口（design.md 已知代价）：若失败前 sendMessage 实际已送达，
+    // 60s 过期接管后会重发一次——at-least-once 的代价，绝不提前标记
+    // processed 掩盖失败而丢消息（p1.md 警示；行为由
+    // test/webhook-route.test.ts「部分成功窗口」用例固化）。
     const detail = error instanceof Error ? error.message : String(error);
     console.error(`[webhook] update ${updateId} (${kind}) 处理失败，等待重推：${detail}`);
     return temporaryFailure();

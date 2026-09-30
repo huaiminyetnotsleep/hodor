@@ -83,12 +83,13 @@ export interface SendMessageResult {
 }
 
 /** forwardMessage 入参：注意参数名是 message_id（不是 copyMessage 的 from_message_id）。
- *  转发头承载原发送者身份（「Forwarded from <user>」）——入站中继的指定通道。 */
+ *  当前管线未调用（2026-09-30 定稿：入站文本用 sendMessage 干净渲染）——
+ *  保留备用，T22 媒体阶段的「带身份」备选；生产实测支持 message_thread_id。 */
 export interface ForwardMessageParams {
   chat_id: number;
   from_chat_id: number;
   message_id: number;
-  /** 入站带 thread（落进客服群对应 topic）；2026-09-30 生产实测支持 */
+  /** 转发落进客服群对应 topic；2026-09-30 生产实测支持 */
   message_thread_id?: number;
 }
 
