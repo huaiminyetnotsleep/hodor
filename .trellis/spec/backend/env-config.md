@@ -120,8 +120,14 @@ declare global {
 - 权限不足(构建 token 无 D1 权限)→ 输出引导:dashboard 建具备 D1 编辑权限的自定义
   token 配到 `CLOUDFLARE_API_TOKEN`,或手动建库后设 `D1_DATABASE_ID`。脚本只记录命令名
   与退出码,不回显任何凭证值。
-- **无 postinstall 钩子**(本地 `npm install` 不触发远端操作);CI 与本地统一走
-  `npm run deploy`,因此 Cloudflare Workers Builds 的构建命令必须是 `npm run deploy`。
+- **postinstall 钩子按 `WORKERS_CI=1` 门控**(2026-09-30 第三次范围变更):Workers Builds
+  官方默认命令(部署 `npx wrangler deploy`、预览 `npx wrangler preview`)零改动可用——
+  构建的 install 步骤触发 `node scripts/deploy.mjs --install-hook`:门控命中时执行
+  解析/建库 → **就地注入**真实 id 到构建工作区的仓库 wrangler.jsonc(一次性克隆,git
+  仓库不受影响;重复执行幂等)→ 版本模块 → 远端迁移(失败 exit 1 → 安装失败 → 构建
+  中止,不部署不兼容代码),随后默认部署命令直接读到已注入的配置。门控未命中(本地、
+  GitHub Actions 等仅 `CI=true` 环境)→ 一行提示、零写入零网络。判定函数
+  `shouldRunInstallHook(env)` 在 `scripts/lib/config.mjs`(纯函数,有单测)。
 
 **原因**:基于 fork 的部署绝不能携带所有者的数据库 id;在配置文件里手工改资源 id 不是
 业界做法(见 README「与业界做法的对照」)。不用 postinstall 是为了避免本地安装产生

@@ -120,6 +120,7 @@
 ### 变更记录
 
 - **2026-09-30**：T05/T06/T08/T09 核心从阶段 7 提前至阶段 1（用户决策：一条命令部署 + push 即构建的发版体验）。T02 的「手动建库」语义由部署脚本自动化取代（`keep_vars` 与绑定契约不变）；阶段 7 保留这些条目的 fork / 升级 / 回归验收面。阶段 1 勾选仍待部署验收证据。
+- **2026-09-30（同日追加）**：自动化兼容 Cloudflare Workers Builds 官方默认命令（`npx wrangler deploy` / `npx wrangler preview`）：建库与迁移挂 postinstall 钩子、按 `WORKERS_CI=1` 门控，fork 用户无需修改任何构建命令。
 
 ## 三、执行与验收原则
 
