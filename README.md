@@ -3,7 +3,7 @@
 Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题，消息不串线。
 设计、部署与运维文档见 [docs/](docs/)（VitePress 站点，`npm run docs:dev` 本地预览）。
 
-**当前进度**：阶段 1–3 已交付并真机验收——webhook 绑定与鉴权、幂等与失败重推、用户建档与 topic 双向映射、文本 + 7 类媒体双向直传、欢迎语（`WELCOME_TEXT` 可配置）与 `/start` 频控、用户信息置顶、双向消息账本、无绑定提示。后续按 [docs/todo](docs/todo/index.md) 的 12 阶段计划推进（阶段 4 安全试运行 → 阶段 7 公开发布）。开发过程由 [Trellis](.trellis/workflow.md) 管理。
+**当前进度**：阶段 1–4 已交付并真机验收——webhook 绑定与鉴权、幂等与失败重推、用户建档与 topic 双向映射、文本 + 7 类媒体双向直传、欢迎语（`WELCOME_TEXT` 可配置）与用户信息置顶、双向消息账本、数学题人机验证与未验证拦截、分钟限频与超限重验、提示频控、`/help` `/ban` `/unban` 基础管理命令、429 有界重试。后续按 [docs/todo](docs/todo/index.md) 的阶段计划推进（阶段 5 日常管理 → 阶段 7 公开发布）。开发过程由 [Trellis](.trellis/workflow.md) 管理。
 
 ## 准备工作（一次性）
 

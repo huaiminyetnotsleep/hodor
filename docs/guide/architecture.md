@@ -75,13 +75,16 @@ update 到达
  │ ② processed_updates 幂等去重（重复推送直接 200）
  │ ③ 内容抽取：文本 + 7 类媒体；支持集之外 → 安全忽略 200
  │ ④ 用户不存在 → 建档（首条消息无论类型、是否 /start 都视为开始）
- │ ⑤ 确保 topic：查 topics 表；无则 createForumTopic + 置顶用户信息
- │      （置顶消息 ID 落库，昵称变更自动刷新）；deluser 过的用户 → 重开
- │ ⑥ 欢迎语：新用户或 /start 触发，每用户每分钟 ≤1 次（原子频控）；
+ │ ⑤ 封禁门：已 ban → 「你已被禁言」提示（每用户每分钟 ≤1 次），丢弃
+ │ ⑥ 验证门：未验证 → 出题 / 重发验证码（提示类每分钟 ≤1 次），丢弃
+ │      （首联 = 欢迎语 + 首题成对发出；答题前零 topic、零中继、零账本）
+ │ ⑦ 限频门：60 秒固定窗口计数 ≥ MAX_MESSAGES_PER_MINUTE？
+ │      → 标记未验证 + 发新验证码（提示含限频数字），丢弃
+ │ ⑧ 确保 topic：查 topics 表；无则 createForumTopic + 置顶用户信息
+ │      （置顶消息 ID 落库，昵称/验证状态变化自动刷新）；deluser 过的用户 → 重开
+ │ ⑨ 欢迎语：新用户或 /start 触发（每用户每分钟 ≤1 次）；
  │      /start 到此结束——入口命令不中继、不落账本
- │ ⑦ per-type send 中继到 topic（sendPhoto 等 7 类媒体 + sendMessage
- │      文本）→ 成功后写 messages 账本（双端消息 ID）→ 返回 200
- │ （阶段 4 起在 ④ 与 ⑤ 之间插入：ban 检查 → 验证拦截 → 分钟限频）
+ │ ⑩ per-type send 中继到 topic → 成功后写 messages 账本（双端消息 ID）→ 返回 200
 ```
 
 ### 出站（群组 topic → 用户）
@@ -89,17 +92,19 @@ update 到达
 ```
 update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
  │ ① 幂等去重
- │ ② 发言者 ∈ ADMIN_IDS？否 → 静默忽略
+ │ ② 发言者 ∈ ADMIN_IDS？
+ │      否 + / 命令 → 「该命令仅客服管理员可用。」提示，结束
+ │      否 + 普通文本 → 静默忽略
  │ ③ 内容抽取（支持集之外安全忽略）
- │ ④ thread_id 反查 topics → user
+ │ ④ 管理员 / 开头 → 命令管线（/help /ban /unban，未知命令提示；不中继不账本）
+ │ ⑤ thread_id 反查 topics → user
  │      查无用户或 topic 已关闭 → 在该 topic 内提示「找不到对应用户」（T26）
- │ ⑤ per-type send 私聊送达（不带 thread）→ 成功后写 messages 账本 → 返回 200
- │ （阶段 4 起在 ③ 处插入：以 / 开头 → 按管理命令处理）
+ │ ⑥ per-type send 私聊送达（不带 thread）→ 成功后写 messages 账本 → 返回 200
 ```
 
 ## 验证状态机
 
-> 本节为阶段 4 的设计目标，当前未交付——置顶信息显示「验证状态：未启用」，消息不经验证直接中继。
+> 阶段 4 已交付：验证默认开启、不可关闭（开关与模式属阶段 5）。置顶信息实时反映 ✅ 已验证 / ❌ 未验证。
 
 ```
           首条消息 / 重新 start
@@ -141,13 +146,14 @@ update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
 ```
 src/
   index.ts          # fetch 入口（路由层分发）
-  routes/           # webhook / setwebhook / health 各端点
+  routes/           # webhook / setwebhook（含命令菜单注册）/ health 各端点
   pipeline/
-    inbound.ts      # 入站管线：建档 → topic → 欢迎 → 中继 → 账本
-    outbound.ts     # 出站管线：反查绑定 → 中继 → 账本 / 无绑定提示
+    inbound.ts      # 入站管线：三门（封禁/验证/限频）→ topic → 中继 → 账本
+    outbound.ts     # 出站管线：命令分流 → 反查绑定 → 中继 → 账本 / 无绑定提示
+    verify.ts       # 验证管线：出题 + 答题回调（归属/失效/重出/置顶刷新）
+    commands.ts     # 命令管线：/help /ban /unban 与未知命令
     content.ts      # 内容抽取（文本 + 7 类媒体）与 per-type 中继分发
-    commands.ts     # 命令管线：管理命令处理（阶段 4）
-  copy.ts           # 用户可见文案唯一集中点（欢迎语 / 置顶信息 / 提示）
+  copy.ts           # 用户可见文案唯一集中点（欢迎语 / 置顶 / 验证 / 命令 / 提示）
   store/            # users / topics / messages / settings 按表分模块
   telegram/         # client.ts：API 调用与错误分类的唯一出口
 ```

@@ -46,8 +46,8 @@ D1 数据库的创建与绑定（变量名 `HODOR_DB`）、数据表迁移全部
 
 1. **自检**：浏览器打开 `https://<worker-url>/health`，应返回 `{"status":"ok","version":"…"}`
 2. **绑定 webhook**：浏览器打开 `https://<worker-url>/setwebhook/<你的 ADMIN_SECRET>`，回显 bot 身份即成功（详见[运维手册](/guide/ops.md)）
-3. **聊天验收**：用 Telegram 账号直接给 bot 发文本（无需 `/start`），消息应出现在群组新建的 topic 中；管理员在该 topic 里回复，用户应收到私聊消息
-4. **说明**：当前阶段（阶段 3）支持文本 + 7 类媒体直传、欢迎语（`WELCOME_TEXT` 可配置）与用户信息置顶；验证码、管理命令等按 [TODO 阶段计划](/todo/index.md)在阶段 4–6 交付
+3. **聊天验收**：用 Telegram 账号直接给 bot 发文本（无需 `/start`）→ 收到欢迎语 + 数学题验证码 → 点对答案 → 群组出现该用户的 topic（置顶含 ✅ 已验证）且消息中继；管理员在 topic 回复，用户私聊收到
+4. **说明**：当前阶段（阶段 4）已交付文本 + 7 类媒体直传、欢迎语（`WELCOME_TEXT` 可配置）、用户信息置顶、数学题验证、分钟限频与 `/help` `/ban` `/unban` 基础命令（setwebhook 时自动注册到客服群命令菜单）；更多管理命令按 [TODO 阶段计划](/todo/index.md)在阶段 5–6 交付
 
 ## 后续如何更新
 

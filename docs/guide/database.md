@@ -33,7 +33,7 @@ UNIQUE `(bot_id, user_id)`
 | `is_verified` / `verified_at` | 0/1, TEXT | 验证状态与通过时间 |
 | `verify_answer` / `verify_msg_id` | INTEGER | 待验证题目的正确答案与验证消息 ID（出题时写入，通过后清空） |
 | `rate_window_start` / `rate_count` | TEXT, INTEGER | 60 秒固定窗口限频计数 |
-| `last_notice_at` | TEXT | 提示类回复（验证码 / 禁言）的限频时间戳，每用户每分钟 1 次 |
+| `last_notice_at` | TEXT | 提示类回复（欢迎语 / 验证码 / 禁言 / 超限提示）的限频时间戳，每用户每分钟 1 次 |
 | `first_seen_at` / `last_seen_at` | TEXT | 首次 / 最近活跃时间 |
 
 ## topics — 用户 ↔ topic 双向映射（核心表）
