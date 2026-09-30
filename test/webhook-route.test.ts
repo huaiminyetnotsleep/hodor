@@ -89,7 +89,7 @@ describe("POST /webhook: 鉴权与解析", () => {
     expect(await wrong.json()).toEqual({ error: "unauthorized" });
 
     expect(await counts()).toEqual(before);
-    expect(stub.countOf("copyMessage")).toBe(0);
+    expect(stub.countOf("sendMessage")).toBe(0);
   });
 
   it("body 非 JSON / 合法 JSON 但无 update_id → 毒丸 200（重推无意义，不吞重试队列）", async () => {
@@ -105,7 +105,7 @@ describe("POST /webhook: 鉴权与解析", () => {
     const processedAfter =
       (await env.HODOR_DB.prepare("SELECT COUNT(*) AS n FROM processed_updates").first<{ n: number }>())?.n ?? 0;
     expect(processedAfter).toBe(processedBefore);
-    expect(stub.countOf("copyMessage")).toBe(0);
+    expect(stub.countOf("sendMessage")).toBe(0);
   });
 
   it("env 缺 TELEGRAM_WEBHOOK_SECRET → 与错误密钥完全同一的 401（handler 直调：SELF bindings 固定）", async () => {
@@ -136,23 +136,23 @@ describe("POST /webhook: 鉴权与解析", () => {
 
     // 两路径都零 DB 写（未认领）零出站
     expect(await readProcessed(9199)).toBeNull();
-    expect(stub.countOf("copyMessage")).toBe(0);
+    expect(stub.countOf("sendMessage")).toBe(0);
   });
 
   it("GET /webhook（方法不符）→ 404，零出站", async () => {
     const res = await SELF.fetch("https://example.com/webhook");
     expect(res.status).toBe(404);
-    expect(stub.countOf("copyMessage")).toBe(0);
+    expect(stub.countOf("sendMessage")).toBe(0);
   });
 
   it("bots 表空（尚未 setwebhook）→ 500，processed_updates 不落行", async () => {
-    stub.always("copyMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
     await env.HODOR_DB.prepare("DELETE FROM bots").run();
 
     const res = await postWebhook(inboundUpdate(9002, 7302));
     expect(res.status).toBe(500);
     expect(await readProcessed(9002)).toBeNull();
-    expect(stub.countOf("copyMessage")).toBe(0);
+    expect(stub.countOf("sendMessage")).toBe(0);
 
     // 自愈：补回 bots 行，后续用例不受影响
     await upsertBot(env.HODOR_DB, { botId: BOT_ID, username: "hodor_bot", displayName: "hodor" });
@@ -168,12 +168,12 @@ describe("POST /webhook: inbound 全链路与幂等认领", () => {
     stub.restore();
   });
 
-  it("合法密钥 + 首条私聊文本 → 200；建档 + 建 topic + copyMessage 恰一次 + processed", async () => {
+  it("合法密钥 + 首条私聊文本 → 200；建档 + 建 topic + sendMessage 恰一次 + processed", async () => {
     stub.always("createForumTopic", {
       status: 200,
       json: { ok: true, result: { message_thread_id: 800 } },
     });
-    stub.always("copyMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 
     const res = await postWebhook(inboundUpdate(9101, 7301));
     expect(res.status).toBe(200);
@@ -194,31 +194,31 @@ describe("POST /webhook: inbound 全链路与幂等认领", () => {
     expect(topic).toEqual({ thread_id: 800, status: "open" });
     expect(await readProcessed(9101)).toEqual({ status: "processed", attempts: 0 });
 
-    // 出站恰一次且带 thread
+    // 中继恰一次且带 thread（精确键集：sendMessage + thread，无 from_* 键）
     expect(stub.countOf("createForumTopic")).toBe(1);
-    expect(stub.countOf("copyMessage")).toBe(1);
-    expect(stub.callsOf("copyMessage")[0].body).toMatchObject({
-      from_chat_id: 7301,
+    expect(stub.countOf("sendMessage")).toBe(1);
+    expect(stub.callsOf("sendMessage")[0].body).toEqual({
       chat_id: SUPPORT_CHAT_ID,
+      text: "hello support",
       message_thread_id: 800,
     });
   });
 
-  it("同一 update_id 重推 → duplicate 200，零新副作用（copyMessage 计数仍为 0）", async () => {
+  it("同一 update_id 重推 → duplicate 200，零新副作用（sendMessage 零新增调用）", async () => {
     stub.always("createForumTopic", {
       status: 200,
       json: { ok: true, result: { message_thread_id: 801 } },
     });
-    stub.always("copyMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 
     const first = await postWebhook(inboundUpdate(9102, 7302));
     expect(first.status).toBe(200);
-    expect(stub.countOf("copyMessage")).toBe(1);
+    expect(stub.countOf("sendMessage")).toBe(1);
 
     const replay = await postWebhook(inboundUpdate(9102, 7302));
     expect(replay.status).toBe(200);
     // 重放不再触发任何 Telegram 调用
-    expect(stub.countOf("copyMessage")).toBe(1);
+    expect(stub.countOf("sendMessage")).toBe(1);
     expect(stub.countOf("createForumTopic")).toBe(1);
     expect(await readProcessed(9102)).toEqual({ status: "processed", attempts: 0 });
   });
@@ -229,23 +229,23 @@ describe("POST /webhook: inbound 全链路与幂等认领", () => {
       json: { ok: true, result: { message_thread_id: 802 } },
     });
     // 中继一直 5xx（retryable）→ 首次处理失败
-    stub.always("copyMessage", { status: 503, json: { ok: false, description: "unavailable" } });
+    stub.always("sendMessage", { status: 503, json: { ok: false, description: "unavailable" } });
 
     const first = await postWebhook(inboundUpdate(9103, 7303));
     expect(first.status).toBe(500);
     // 失败保持 processing（未提前标记，attempts=0），交由重推接管
     expect(await readProcessed(9103)).toEqual({ status: "processing", attempts: 0 });
-    expect(stub.countOf("copyMessage")).toBe(1);
+    expect(stub.countOf("sendMessage")).toBe(1);
 
     // 未过期的在途认领：第二次投递 500 交 Telegram 稍后再推，绝不双发
     const second = await postWebhook(inboundUpdate(9103, 7303));
     expect(second.status).toBe(500);
-    expect(stub.countOf("copyMessage")).toBe(1);
+    expect(stub.countOf("sendMessage")).toBe(1);
     expect(await readProcessed(9103)).toEqual({ status: "processing", attempts: 0 });
   });
 
   it("毒丸路径：过期接管后 attempts 达 MAX_ATTEMPTS → markFailed + 200 跳过，零中继", async () => {
-    stub.always("copyMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
     // 上限从 parseMaxAttempts(env) 动态取（vitest.config.ts 固定注入 "3"），
     // 与 worker 侧计算保持同源，避免配置漂移时用例失真
     const maxAttempts = parseMaxAttempts(env);
@@ -259,7 +259,7 @@ describe("POST /webhook: inbound 全链路与幂等认领", () => {
     const res = await postWebhook(inboundUpdate(9104, 7304));
     expect(res.status).toBe(200);
     expect(await readProcessed(9104)).toEqual({ status: "failed", attempts: maxAttempts });
-    expect(stub.countOf("copyMessage")).toBe(0);
+    expect(stub.countOf("sendMessage")).toBe(0);
 
     // failed 后再重推 → duplicate 直接 200
     const replay = await postWebhook(inboundUpdate(9104, 7304));
@@ -268,7 +268,7 @@ describe("POST /webhook: inbound 全链路与幂等认领", () => {
   });
 
   it("classify=ignore（客服群无 thread）→ 安全忽略 200 + processed，零出站", async () => {
-    stub.always("copyMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
     const generalChatUpdate = {
       update_id: 9105,
       message: {
@@ -283,19 +283,19 @@ describe("POST /webhook: inbound 全链路与幂等认领", () => {
     const res = await postWebhook(generalChatUpdate);
     expect(res.status).toBe(200);
     expect(await readProcessed(9105)).toEqual({ status: "processed", attempts: 0 });
-    expect(stub.countOf("copyMessage")).toBe(0);
+    expect(stub.countOf("sendMessage")).toBe(0);
   });
 
   it("部分成功窗口（PRD T16 / design.md）：已送达未标记 → 过期接管重发一次、复用 topic、最终 processed", async () => {
-    stub.always("copyMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
     stub.always("createForumTopic", {
       status: 200,
       json: { ok: true, result: { message_thread_id: 999 } },
     });
 
     // 模拟「投递 #1」的崩溃现场（design.md 部分成功窗口）：建档与映射行已写、
-    // copyMessage 已送达，但 markProcessed 前崩溃 → 行停在 processing(attempts=0)
-    // 且认领已过期(>60s)。stage-2 入站在 copyMessage 之后没有任何可失败点，
+    // sendMessage 已送达，但 markProcessed 前崩溃 → 行停在 processing(attempts=0)
+    // 且认领已过期(>60s)。stage-2 入站在 sendMessage 之后没有任何可失败点，
     // 故用真实 store 函数预置该状态（ensureUser + insertTopic + 过期 processing 行），
     // 这是该崩溃点最忠实的可达表示——测试固化的正是「绝不提前标记」的代价。
     const userId = 7305;
@@ -311,11 +311,11 @@ describe("POST /webhook: inbound 全链路与幂等认领", () => {
     const res = await postWebhook(inboundUpdate(9106, userId));
     expect(res.status).toBe(200);
 
-    // 窗口兑现：本次重推**重发一次** copyMessage（投递 #1 的送达是预置前提，
+    // 窗口兑现：本次重推**重发一次** sendMessage（投递 #1 的送达是预置前提，
     // 不经过本桩；计数 1 = 重发发生）；createForumTopic 不被调用（topic 复用）
     expect(stub.countOf("createForumTopic")).toBe(0);
-    expect(stub.countOf("copyMessage")).toBe(1);
-    expect(stub.callsOf("copyMessage")[0].body).toMatchObject({ message_thread_id: 880 });
+    expect(stub.countOf("sendMessage")).toBe(1);
+    expect(stub.callsOf("sendMessage")[0].body).toMatchObject({ message_thread_id: 880 });
     // 接管确实发生（新插入会是 attempts=0，此处 1 = 0+1 接管），成功后落 processed
     expect(await readProcessed(9106)).toEqual({ status: "processed", attempts: 1 });
   });

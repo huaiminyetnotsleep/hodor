@@ -5,7 +5,12 @@
  *   → 发言者 ∈ ADMIN_IDS？否 → 静默完成（非管理员发言不中继）
  *   → findUserIdByThread(bot_id, thread_id) → 未命中 / closed → 静默完成
  *     （「找不到对应用户」提示是 T26 / 阶段 3）
- *   → copyMessage(群消息 → 用户私聊，不带 thread)
+ *   → sendMessage(用户私聊, text)（不带 thread）
+ *
+ * 中继用 sendMessage 而非 copyMessage：copyMessage 在生产 bot 上全场景
+ * 400「message to copy not found」（2026-09-30 实测）。出站也不用
+ * forwardMessage——forward 头会向用户泄漏客服群名；sendMessage 干净
+ * 且阶段 2 纯文本无损。copyMessage 保留在 client，T22 / 阶段 3 重审。
  *
  * TelegramResult 消费（error-handling spec）：retryable → 抛（→ webhook 500 重推）；
  * permanent（如 403 bot 被用户拉黑 / 400 毒丸）→ warn + 按已处理跳过，绝不 5xx。
@@ -38,17 +43,16 @@ export async function handleOutbound(
   if (!owner || owner.status !== "open") return;
 
   const client = createTelegramClient(env.TELEGRAM_BOT_TOKEN);
-  const copied = await client.copyMessage({
-    from_chat_id: message.chat.id,
-    from_message_id: message.message_id,
+  const relayed = await client.sendMessage({
     chat_id: owner.user_id,
+    text: message.text,
   });
-  if (!copied.ok) {
-    if (copied.kind === "retryable") {
-      throw new Error(copied.errorMessage ?? "copyMessage retryable");
+  if (!relayed.ok) {
+    if (relayed.kind === "retryable") {
+      throw new Error(relayed.errorMessage ?? "sendMessage retryable");
     }
     console.warn(
-      `[outbound] thread ${threadId} → user ${owner.user_id}: copyMessage permanent，按已处理跳过：${copied.errorMessage ?? "no detail"}`,
+      `[outbound] thread ${threadId} → user ${owner.user_id}: sendMessage permanent，按已处理跳过：${relayed.errorMessage ?? "no detail"}`,
     );
   }
 }

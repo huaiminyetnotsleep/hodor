@@ -2,7 +2,7 @@
  * 入站管线集成（T19/T20/T21，design.md「入站管线」逐字执行）：
  * 首条文本建档 + 建 topic（createForumTopic 恰一次）、复用不重建、
  * closed 重开（status=open, closed_at=NULL）、title 三级回退、
- * 非文本先于一切副作用静默完成、copyMessage retryable 抛 / permanent 吞、
+ * 非文本先于一切副作用静默完成、sendMessage retryable 抛 / permanent 吞、
  * createForumTopic permanent 吞、并发首联竞态败方清理（删新 thread、用胜方行）。
  *
  * 每个用例独立 userId（文件内 DB 共享）；出站 Telegram 调用全部经
@@ -70,12 +70,12 @@ describe("inbound: 建档与 topic 生命周期", () => {
     stub.restore();
   });
 
-  it("首条文本：建档 + createForumTopic 恰一次 + 映射行 + copyMessage 带 thread", async () => {
+  it("首条文本：建档 + createForumTopic 恰一次 + 映射行 + sendMessage 带 thread", async () => {
     stub.always("createForumTopic", {
       status: 200,
       json: { ok: true, result: { message_thread_id: 100 } },
     });
-    stub.always("copyMessage", { status: 200, json: { ok: true, result: { message_id: 500 } } });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 500 } } });
 
     await handleInbound(env, BOT_ID, privateMessage({ id: 7101, first_name: "Alice", last_name: "L", username: "alice_hd" }));
 
@@ -90,11 +90,11 @@ describe("inbound: 建档与 topic 生命周期", () => {
     // topics 行：thread 100、title 取 first_name、open
     expect(await readTopic(7101)).toEqual({ thread_id: 100, title: "Alice", status: "open", closed_at: null });
     expect(stub.countOf("createForumTopic")).toBe(1);
-    expect(stub.countOf("copyMessage")).toBe(1);
-    expect(stub.callsOf("copyMessage")[0].body).toEqual({
-      from_chat_id: 7101,
-      from_message_id: 10,
+    expect(stub.countOf("sendMessage")).toBe(1);
+    // 精确键集：带 thread、带文本，不再有 copy 时代的 from_* 键
+    expect(stub.callsOf("sendMessage")[0].body).toEqual({
       chat_id: SUPPORT_CHAT_ID,
+      text: "你好",
       message_thread_id: 100,
     });
   });
@@ -104,7 +104,7 @@ describe("inbound: 建档与 topic 生命周期", () => {
       status: 200,
       json: { ok: true, result: { message_thread_id: 200 } },
     }));
-    stub.always("copyMessage", { status: 200, json: { ok: true, result: { message_id: 501 } } });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 501 } } });
 
     await handleInbound(env, BOT_ID, privateMessage({ id: 7102, first_name: "旧名", username: "old" }, "第一条", 20));
     // 手工倒填 first_seen_at，验证后续 ensureUser 不会覆盖创建侧列
@@ -117,9 +117,9 @@ describe("inbound: 建档与 topic 生命周期", () => {
     await handleInbound(env, BOT_ID, privateMessage({ id: 7102, first_name: "新名", username: "new" }, "第二条", 21));
 
     expect(stub.countOf("createForumTopic")).toBe(1);
-    expect(stub.countOf("copyMessage")).toBe(2);
+    expect(stub.countOf("sendMessage")).toBe(2);
     // 两次中继都落在同一 thread
-    for (const call of stub.callsOf("copyMessage")) {
+    for (const call of stub.callsOf("sendMessage")) {
       expect(call.body).toMatchObject({ chat_id: SUPPORT_CHAT_ID, message_thread_id: 200 });
     }
     // 昵称缓存已刷新；first_seen_at 保持首行值；last_seen_at 晚于 first_seen_at
@@ -134,7 +134,7 @@ describe("inbound: 建档与 topic 生命周期", () => {
       status: 200,
       json: { ok: true, result: { message_thread_id: 300 } },
     });
-    stub.always("copyMessage", { status: 200, json: { ok: true, result: { message_id: 502 } } });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 502 } } });
 
     await handleInbound(env, BOT_ID, privateMessage({ id: 7103, first_name: "Carol" }, "第一条", 30));
     await env.HODOR_DB.prepare(
@@ -147,7 +147,7 @@ describe("inbound: 建档与 topic 生命周期", () => {
 
     expect(await readTopic(7103)).toEqual({ thread_id: 300, title: "Carol", status: "open", closed_at: null });
     expect(stub.countOf("createForumTopic")).toBe(1);
-    expect(stub.callsOf("copyMessage")[1].body).toMatchObject({ message_thread_id: 300 });
+    expect(stub.callsOf("sendMessage")[1].body).toMatchObject({ message_thread_id: 300 });
   });
 
   it("title 三级回退：first_name 空白 → @username；两者皆无 → ID_<user_id>", async () => {
@@ -155,7 +155,7 @@ describe("inbound: 建档与 topic 生命周期", () => {
       status: 200,
       json: { ok: true, result: { message_thread_id: 400 + i } },
     }));
-    stub.always("copyMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 
     await handleInbound(env, BOT_ID, privateMessage({ id: 7104, username: "bob_hd" }));
     expect((await readTopic(7104))!.title).toBe("@bob_hd");
@@ -180,7 +180,7 @@ describe("inbound: 阶段边界与 TelegramResult 消费", () => {
 
   it("非文本（photo / text 空串）：先于一切副作用静默完成——不建档、不建 topic、不中继", async () => {
     stub.always("createForumTopic", { status: 200, json: { ok: true, result: { message_thread_id: 1 } } });
-    stub.always("copyMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 
     // 真实 photo 消息没有 text 字段（不能走 privateMessage 的默认参数：
     // 显式传 undefined 仍会触发默认值"你好"）
@@ -196,38 +196,38 @@ describe("inbound: 阶段边界与 TelegramResult 消费", () => {
     expect(await readUser(7107)).toBeNull();
     expect(await readTopic(7107)).toBeNull();
     expect(stub.countOf("createForumTopic")).toBe(0);
-    expect(stub.countOf("copyMessage")).toBe(0);
+    expect(stub.countOf("sendMessage")).toBe(0);
   });
 
-  it("copyMessage retryable（HTTP 500）→ 抛出（→ webhook 500 重推）；topic 已建好供重推复用", async () => {
+  it("sendMessage retryable（HTTP 500）→ 抛出（→ webhook 500 重推）；topic 已建好供重推复用", async () => {
     stub.always("createForumTopic", {
       status: 200,
       json: { ok: true, result: { message_thread_id: 500 } },
     });
-    stub.always("copyMessage", { status: 500, json: { ok: false, description: "upstream boom" } });
+    stub.always("sendMessage", { status: 500, json: { ok: false, description: "upstream boom" } });
 
     await expect(
       handleInbound(env, BOT_ID, privateMessage({ id: 7108, first_name: "Dan" })),
-    ).rejects.toThrow(/copyMessage/);
-    expect(stub.countOf("copyMessage")).toBe(1);
+    ).rejects.toThrow(/sendMessage/);
+    expect(stub.countOf("sendMessage")).toBe(1);
     // 建档与建 topic 已完成：重推时直接复用，不会二次 createForumTopic
     expect((await readTopic(7108))!.thread_id).toBe(500);
   });
 
-  it("copyMessage permanent（HTTP 400 毒丸）→ 静默完成不抛（阶段 2：按已处理丢弃）", async () => {
+  it("sendMessage permanent（HTTP 400 毒丸）→ 静默完成不抛（阶段 2：按已处理丢弃）", async () => {
     stub.always("createForumTopic", {
       status: 200,
       json: { ok: true, result: { message_thread_id: 501 } },
     });
-    stub.always("copyMessage", {
+    stub.always("sendMessage", {
       status: 400,
-      json: { ok: false, error_code: 400, description: "Bad Request: message to copy not found" },
+      json: { ok: false, error_code: 400, description: "Bad Request: message text is empty" },
     });
 
     await expect(
       handleInbound(env, BOT_ID, privateMessage({ id: 7109, first_name: "Eve" })),
     ).resolves.toBeUndefined();
-    expect(stub.countOf("copyMessage")).toBe(1);
+    expect(stub.countOf("sendMessage")).toBe(1);
   });
 
   it("createForumTopic permanent（400）→ 静默完成：不落映射行、不中继（消息按已处理丢弃）", async () => {
@@ -235,13 +235,13 @@ describe("inbound: 阶段边界与 TelegramResult 消费", () => {
       status: 400,
       json: { ok: false, error_code: 400, description: "Bad Request: need administrator rights" },
     });
-    stub.always("copyMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 
     await expect(
       handleInbound(env, BOT_ID, privateMessage({ id: 7111, first_name: "Frank" })),
     ).resolves.toBeUndefined();
     expect(await readTopic(7111)).toBeNull();
-    expect(stub.countOf("copyMessage")).toBe(0);
+    expect(stub.countOf("sendMessage")).toBe(0);
   });
 });
 
@@ -266,7 +266,7 @@ describe("inbound: 并发首联竞态（败方清理）", () => {
       return { status: 200, json: { ok: true, result: { message_thread_id: 999 } } };
     });
     stub.always("deleteForumTopic", { status: 200, json: { ok: true, result: true } });
-    stub.always("copyMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
 
     await handleInbound(env, BOT_ID, privateMessage({ id: 7110, first_name: "Grace" }, "竞态首联", 40));
 
@@ -277,7 +277,7 @@ describe("inbound: 并发首联竞态（败方清理）", () => {
       message_thread_id: 999,
     });
     // 中继改用胜方行 thread 555；映射表只有一行（无双有效绑定、无孤儿映射）
-    expect(stub.callsOf("copyMessage")[0].body).toMatchObject({ message_thread_id: 555 });
+    expect(stub.callsOf("sendMessage")[0].body).toMatchObject({ message_thread_id: 555 });
     expect(await readTopic(7110)).toEqual({ thread_id: 555, title: "胜方", status: "open", closed_at: null });
   });
 });

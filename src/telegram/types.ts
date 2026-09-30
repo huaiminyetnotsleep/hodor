@@ -52,7 +52,9 @@ export interface SetWebhookParams {
   allowedUpdates: string[];
 }
 
-/** copyMessage 入参（与 Telegram API 参数一一对应） */
+/** copyMessage 入参（与 Telegram API 参数一一对应）
+ *  （阶段 2 管线已不调用：copyMessage 在生产 bot 上全场景 400
+ *  「message to copy not found」，2026-09-30 实测；T22 / 阶段 3 重审媒体路径） */
 export interface CopyMessageParams {
   from_chat_id: number;
   from_message_id: number;
@@ -63,6 +65,20 @@ export interface CopyMessageParams {
 
 /** copyMessage 出参：新消息 ID */
 export interface CopyMessageResult {
+  message_id: number;
+}
+
+/** sendMessage 入参：阶段 2 文本中继的实际通道 */
+export interface SendMessageParams {
+  chat_id: number;
+  /** 纯文本内容（阶段 2 仅中继 message.text 非空） */
+  text: string;
+  /** 入站带 thread（送达客服群 topic）；出站私聊不传 */
+  message_thread_id?: number;
+}
+
+/** sendMessage 出参：新消息 ID */
+export interface SendMessageResult {
   message_id: number;
 }
 
@@ -89,6 +105,7 @@ export interface TelegramClient {
   setWebhook(params: SetWebhookParams): Promise<TelegramResult<boolean>>;
   deleteWebhook(): Promise<TelegramResult<boolean>>;
   getMe(): Promise<TelegramResult<TelegramBotUser>>;
+  sendMessage(params: SendMessageParams): Promise<TelegramResult<SendMessageResult>>;
   copyMessage(params: CopyMessageParams): Promise<TelegramResult<CopyMessageResult>>;
   createForumTopic(
     params: CreateForumTopicParams,

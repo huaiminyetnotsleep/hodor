@@ -7,7 +7,13 @@
  *                     → 未命中      → createForumTopic(title) → INSERT
  *                        → UNIQUE 冲突（并发首次联系竞态）→ 删除自己刚建的
  *                          → 重查取胜方行（竞态输方清理，不留双有效绑定）
- * copyMessage(user_chat → SUPPORT_CHAT_ID, thread_id)
+ * sendMessage(SUPPORT_CHAT_ID + thread_id, text)
+ *
+ * 中继用 sendMessage 而非 copyMessage：copyMessage 在生产 bot 上全场景
+ * 400「message to copy not found」（2026-09-30 实测排除己方 payload 问题：
+ * 同参数 sendMessage / forwardMessage 均成功）。阶段 2 纯文本，
+ * sendMessage 无损；copyMessage 保留在 client（契约正确），T22 / 阶段 3
+ * 重审媒体路径。
  *
  * 阶段边界：仅中继 message.text 非空；非文本**先于一切副作用**静默完成
  * （首条非文本不建档不建 topic），update 仍按成功处理（markProcessed + 200）。
@@ -39,16 +45,16 @@ function resolveTopicTitle(from: { id: number; first_name?: string; username?: s
 }
 
 /** retryable → 抛（errorMessage 已由 client 消毒）；permanent → warn + 吞（按已处理跳过） */
-function consumeCopyResult(
+function consumeRelayResult(
   userId: number,
   result: { ok: boolean; kind?: "retryable" | "permanent"; errorMessage?: string },
 ): void {
   if (result.ok) return;
   if (result.kind === "retryable") {
-    throw new Error(result.errorMessage ?? "copyMessage retryable");
+    throw new Error(result.errorMessage ?? "sendMessage retryable");
   }
   console.warn(
-    `[inbound] user ${userId}: copyMessage permanent，按已处理跳过（消息被丢弃）：${result.errorMessage ?? "no detail"}`,
+    `[inbound] user ${userId}: sendMessage permanent，按已处理跳过（消息被丢弃）：${result.errorMessage ?? "no detail"}`,
   );
 }
 
@@ -96,14 +102,13 @@ export async function handleInbound(
   // null = createForumTopic permanent（topic 未建），本条已按已处理丢弃
   if (threadId === null) return;
 
-  /* ---------------- 中继 ---------------- */
-  const copied = await client.copyMessage({
-    from_chat_id: message.chat.id,
-    from_message_id: message.message_id,
+  /* ---------------- 中继（sendMessage：copyMessage 生产 bot 全场景 400） ---------------- */
+  const relayed = await client.sendMessage({
     chat_id: supportChatId,
+    text: message.text,
     message_thread_id: threadId,
   });
-  consumeCopyResult(from.id, copied);
+  consumeRelayResult(from.id, relayed);
 }
 
 /** 竞态清理的上下文（createTopic 主流程 + 失败路径共用） */
