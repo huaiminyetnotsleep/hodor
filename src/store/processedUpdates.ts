@@ -53,9 +53,9 @@ export async function claimUpdate(
   //    WHERE 保证只在「非在途」或「在途但已过期」时接管，否则零行返回
   //
   //    部分成功窗口（design.md 明示的已知代价，p1.md 警示的行为固化）：
-  //    copyMessage 已送达但 markProcessed 前崩溃 → 行停在 processing →
-  //    下次重推在 60s 过期接管后会**重发一次** copyMessage。这是
-  //    at-least-once 投递语义下「绝不提前标记」的必然代价——宁可重复送达，
+  //    中继调用（入站 forwardMessage / 出站 sendMessage）已送达但 markProcessed
+  //    前崩溃 → 行停在 processing → 下次重推在 60s 过期接管后会**重发一次**。
+  //    这是 at-least-once 投递语义下「绝不提前标记」的必然代价——宁可重复送达，
   //    绝不提前标记 processed 掩盖失败而丢消息。测试
   //    test/webhook-route.test.ts「部分成功窗口」固化该行为。
   const claimed = await db

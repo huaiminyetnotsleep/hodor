@@ -7,13 +7,15 @@
  *                     → 未命中      → createForumTopic(title) → INSERT
  *                        → UNIQUE 冲突（并发首次联系竞态）→ 删除自己刚建的
  *                          → 重查取胜方行（竞态输方清理，不留双有效绑定）
- * sendMessage(SUPPORT_CHAT_ID + thread_id, text)
+ * forwardMessage(user_chat 消息 → SUPPORT_CHAT_ID + thread_id)
  *
- * 中继用 sendMessage 而非 copyMessage：copyMessage 在生产 bot 上全场景
- * 400「message to copy not found」（2026-09-30 实测排除己方 payload 问题：
- * 同参数 sendMessage / forwardMessage 均成功）。阶段 2 纯文本，
- * sendMessage 无损；copyMessage 保留在 client（契约正确），T22 / 阶段 3
- * 重审媒体路径。
+ * 中继通道的不对称（2026-09-30 生产实测后确定）：
+ * - 入站用 forwardMessage：转发头「Forwarded from <user>」承载用户身份——
+ *   topic 内与群「全部消息」视图均可辨来源，且 T22 媒体阶段同样适用；
+ *   生产实测 forwardMessage 支持 message_thread_id 并正确落入 topic。
+ * - 出站保持 sendMessage（forward 会向用户泄漏客服群名）。
+ * - copyMessage 在生产 bot 上全场景 400「message to copy not found」，
+ *   保留在 client（契约正确），T22 / 阶段 3 重审媒体路径。
  *
  * 阶段边界：仅中继 message.text 非空；非文本**先于一切副作用**静默完成
  * （首条非文本不建档不建 topic），update 仍按成功处理（markProcessed + 200）。
@@ -51,10 +53,10 @@ function consumeRelayResult(
 ): void {
   if (result.ok) return;
   if (result.kind === "retryable") {
-    throw new Error(result.errorMessage ?? "sendMessage retryable");
+    throw new Error(result.errorMessage ?? "forwardMessage retryable");
   }
   console.warn(
-    `[inbound] user ${userId}: sendMessage permanent，按已处理跳过（消息被丢弃）：${result.errorMessage ?? "no detail"}`,
+    `[inbound] user ${userId}: forwardMessage permanent，按已处理跳过（消息被丢弃）：${result.errorMessage ?? "no detail"}`,
   );
 }
 
@@ -102,10 +104,11 @@ export async function handleInbound(
   // null = createForumTopic permanent（topic 未建），本条已按已处理丢弃
   if (threadId === null) return;
 
-  /* ---------------- 中继（sendMessage：copyMessage 生产 bot 全场景 400） ---------------- */
-  const relayed = await client.sendMessage({
+  /* ------- 中继（forwardMessage：转发头承载用户身份；注意参数是 message_id） ------- */
+  const relayed = await client.forwardMessage({
     chat_id: supportChatId,
-    text: message.text,
+    from_chat_id: message.chat.id,
+    message_id: message.message_id,
     message_thread_id: threadId,
   });
   consumeRelayResult(from.id, relayed);

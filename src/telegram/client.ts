@@ -26,6 +26,8 @@ import type {
   CreateForumTopicParams,
   CreateForumTopicResult,
   DeleteForumTopicParams,
+  ForwardMessageParams,
+  ForwardMessageResult,
   SendMessageParams,
   SendMessageResult,
   SetWebhookParams,
@@ -184,6 +186,8 @@ export function createTelegramClient(token: string): TelegramClient {
     getMe: () => request<TelegramBotUser>("getMe", {}),
     sendMessage: (params: SendMessageParams) =>
       request<SendMessageResult>("sendMessage", { ...params }),
+    forwardMessage: (params: ForwardMessageParams) =>
+      request<ForwardMessageResult>("forwardMessage", { ...params }),
     copyMessage: (params: CopyMessageParams) =>
       request<CopyMessageResult>("copyMessage", { ...params }),
     createForumTopic: (params: CreateForumTopicParams) =>

@@ -7,10 +7,11 @@
  *     （「找不到对应用户」提示是 T26 / 阶段 3）
  *   → sendMessage(用户私聊, text)（不带 thread）
  *
- * 中继用 sendMessage 而非 copyMessage：copyMessage 在生产 bot 上全场景
- * 400「message to copy not found」（2026-09-30 实测）。出站也不用
- * forwardMessage——forward 头会向用户泄漏客服群名；sendMessage 干净
- * 且阶段 2 纯文本无损。copyMessage 保留在 client，T22 / 阶段 3 重审。
+ * 中继通道的不对称（2026-09-30 生产实测后确定）：
+ * - 出站用 sendMessage：forward 会经「转发自 …」头向用户**泄漏客服群名**；
+ *   sendMessage 干净且阶段 2 纯文本无损（入站才用 forwardMessage 承载用户身份）。
+ * - copyMessage 在生产 bot 上全场景 400「message to copy not found」，
+ *   保留在 client，T22 / 阶段 3 重审。
  *
  * TelegramResult 消费（error-handling spec）：retryable → 抛（→ webhook 500 重推）；
  * permanent（如 403 bot 被用户拉黑 / 400 毒丸）→ warn + 按已处理跳过，绝不 5xx。

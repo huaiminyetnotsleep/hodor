@@ -82,6 +82,21 @@ export interface SendMessageResult {
   message_id: number;
 }
 
+/** forwardMessage 入参：注意参数名是 message_id（不是 copyMessage 的 from_message_id）。
+ *  转发头承载原发送者身份（「Forwarded from <user>」）——入站中继的指定通道。 */
+export interface ForwardMessageParams {
+  chat_id: number;
+  from_chat_id: number;
+  message_id: number;
+  /** 入站带 thread（落进客服群对应 topic）；2026-09-30 生产实测支持 */
+  message_thread_id?: number;
+}
+
+/** forwardMessage 出参：新消息 ID */
+export interface ForwardMessageResult {
+  message_id: number;
+}
+
 /** createForumTopic 入参 */
 export interface CreateForumTopicParams {
   chat_id: number;
@@ -106,6 +121,9 @@ export interface TelegramClient {
   deleteWebhook(): Promise<TelegramResult<boolean>>;
   getMe(): Promise<TelegramResult<TelegramBotUser>>;
   sendMessage(params: SendMessageParams): Promise<TelegramResult<SendMessageResult>>;
+  forwardMessage(
+    params: ForwardMessageParams,
+  ): Promise<TelegramResult<ForwardMessageResult>>;
   copyMessage(params: CopyMessageParams): Promise<TelegramResult<CopyMessageResult>>;
   createForumTopic(
     params: CreateForumTopicParams,
