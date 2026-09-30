@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.0.0...v1.1.0) (2026-09-30)
+
+
+### Features
+
+* finalize relay form — clean sendMessage both directions ([85a683b](https://github.com/huaiminyetnotsleep/hodor/commit/85a683b69e8a797395685535241bdf4b08646e53))
+* inbound relay via forwardMessage for user identity ([f2b5835](https://github.com/huaiminyetnotsleep/hodor/commit/f2b5835cda703f311aaf227b9eb4d39f20c9223f))
+* stage 2 minimal MVP — bidirectional text relay (T13-T17, T19-T21) ([86cf62f](https://github.com/huaiminyetnotsleep/hodor/commit/86cf62face68726783d02eebb6804b783b647344))
+
+
+### Bug Fixes
+
+* relay via sendMessage after production copyMessage failure ([56fa6af](https://github.com/huaiminyetnotsleep/hodor/commit/56fa6af3a544a9a6453b2776f49a1115819e4a44))
+
 ## 1.0.0 (2026-09-30)
 
 
