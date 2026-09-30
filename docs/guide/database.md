@@ -88,9 +88,9 @@ UNIQUE `(bot_id, update_id)`
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `status` | TEXT | `processed` / `failed` |
-| `attempts` | INTEGER | 失败重推计数，≥ `MAX_ATTEMPTS` 置 `failed` 跳过（防毒丸） |
-| `created_at` | TEXT | |
+| `status` | TEXT | `processing`（认领占位，处理成功后置 `processed`）/ `processed` / `failed` |
+| `attempts` | INTEGER | 失败重推计数，每次认领接管 +1，≥ `MAX_ATTEMPTS` 置 `failed` 跳过（防毒丸） |
+| `created_at` | TEXT | 最近认领时间（每次重试 / 接管刷新）；超过 60 秒的 `processing` 行视为崩溃残留，可被下一次重推接管 |
 
 ## 表间关系
 

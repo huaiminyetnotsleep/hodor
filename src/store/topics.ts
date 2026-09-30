@@ -1,0 +1,89 @@
+/**
+ * topics 表 store：用户 ↔ topic 双向映射（docs/guide/database.md）。
+ *
+ * - 入站正向查：findTopicByUser（PK bot_id,user_id）
+ * - 出站反查：findUserIdByThread（UNIQUE bot_id,thread_id）；closed 行对出站
+ *   视同未绑定（静默忽略）
+ * - 复用语义：closed 行不删，reopenTopic 重开（「一个人终身一个 topic」）
+ * - 竞态兜底：insertTopic 原样抛出唯一冲突（UNIQUE），由 pipeline 的败方
+ *   清理流程接手——store 只管数据，不做补偿
+ */
+import { nowIso } from "./util";
+
+/** 正向查找返回的行子集（status 供调用方区分 open / closed） */
+export interface TopicRow {
+  thread_id: number;
+  title: string;
+  status: string;
+}
+
+/** 按 (bot_id, user_id) 查映射行；无行 → null */
+export async function findTopicByUser(
+  db: D1Database,
+  botId: number,
+  userId: number,
+): Promise<TopicRow | null> {
+  return db
+    .prepare("SELECT thread_id, title, status FROM topics WHERE bot_id = ? AND user_id = ?")
+    .bind(botId, userId)
+    .first<TopicRow>();
+}
+
+/** 重开 closed 行（/deluser 置 closed 后用户再来即重开；closed_at 清空） */
+export async function reopenTopic(
+  db: D1Database,
+  botId: number,
+  userId: number,
+): Promise<void> {
+  await db
+    .prepare(
+      "UPDATE topics SET status = 'open', closed_at = NULL WHERE bot_id = ? AND user_id = ?",
+    )
+    .bind(botId, userId)
+    .run();
+}
+
+/** 新映射行参数（title 建档时定死，不再复算） */
+export interface NewTopicRow {
+  botId: number;
+  userId: number;
+  threadId: number;
+  title: string;
+}
+
+/**
+ * 写入新映射行：唯一冲突（(bot_id,user_id) 或 (bot_id,thread_id)）时
+ * 原样抛出 D1 错误，由调用方执行竞态败方清理。
+ */
+export async function insertTopic(db: D1Database, row: NewTopicRow): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO topics (bot_id, user_id, thread_id, title, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .bind(row.botId, row.userId, row.threadId, row.title, nowIso())
+    .run();
+}
+
+/** 出站反查返回：目标用户与其行状态（closed 对出站视同未绑定） */
+export interface ThreadOwnerRow {
+  user_id: number;
+  status: string;
+}
+
+/** 按 (bot_id, thread_id) 反查目标用户；无行 → null（含 closed 行也返回，由调用方判定） */
+export async function findUserIdByThread(
+  db: D1Database,
+  botId: number,
+  threadId: number,
+): Promise<ThreadOwnerRow | null> {
+  return db
+    .prepare("SELECT user_id, status FROM topics WHERE bot_id = ? AND thread_id = ?")
+    .bind(botId, threadId)
+    .first<ThreadOwnerRow>();
+}
+
+/** D1 唯一冲突错误判定（消息含 "UNIQUE constraint failed"），竞态清理的唯一信号 */
+export function isUniqueViolation(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("UNIQUE constraint failed");
+}

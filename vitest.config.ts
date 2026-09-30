@@ -16,8 +16,20 @@ export default defineConfig(async () => {
   const workers = {
     // 绑定来源：wrangler.jsonc（HODOR_DB 等）
     wrangler: { configPath: "./wrangler.jsonc" },
-    // 本阶段不注入任何假环境变量（阶段 1 不读 env）
-    miniflare: { bindings: { TEST_MIGRATIONS: migrations } },
+    // 注入确定性测试变量：miniflare bindings 未覆盖的变量会从本地 .dev.vars
+    // 泄漏进来（不同机器结果不同），因此全部显式钉死；缺省分支的确定性由
+    // env.test.ts 用构造 env 对象覆盖，而非依赖此处缺省
+    miniflare: {
+      bindings: {
+        TEST_MIGRATIONS: migrations,
+        TELEGRAM_BOT_TOKEN: "test-bot-token",
+        TELEGRAM_WEBHOOK_SECRET: "test-webhook-secret",
+        ADMIN_SECRET: "test-admin-secret",
+        SUPPORT_CHAT_ID: "-1001234567890",
+        ADMIN_IDS: "111111111,222222222",
+        MAX_ATTEMPTS: "3",
+      },
+    },
   };
   return {
     // cloudflareTest：Vitest 插件，提供 cloudflare:test 虚拟模块

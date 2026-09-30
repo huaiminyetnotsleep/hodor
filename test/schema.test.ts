@@ -75,6 +75,23 @@ describe("schema: processed_updates 幂等主键", () => {
   });
 });
 
+describe("schema: processed_updates status 三值 CHECK（迁移 0002）", () => {
+  it("processing / processed / failed 均可插入；非法值被拒", async () => {
+    for (const [i, status] of ["processing", "processed", "failed"].entries()) {
+      await env.HODOR_DB.prepare(
+        "INSERT INTO processed_updates (bot_id, update_id, status) VALUES (1, ?, ?)",
+      )
+        .bind(9200 + i, status)
+        .run();
+    }
+    await expect(
+      env.HODOR_DB.prepare(
+        "INSERT INTO processed_updates (bot_id, update_id, status) VALUES (1, 9999, 'bogus')",
+      ).run(),
+    ).rejects.toThrow();
+  });
+});
+
 describe("schema: settings 读写冒烟", () => {
   it("INSERT → UPDATE → SELECT 往返取到更新后的值", async () => {
     await env.HODOR_DB.prepare(
