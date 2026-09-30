@@ -2,7 +2,7 @@
  * 手工维护的环境类型合并（见 .trellis/spec/backend/env-config.md）。
  *
  * `wrangler types` 只能从 wrangler.jsonc 推导绑定类型（如 HODOR_DB），
- * 读不到 Secret 与面板变量，因此这 8 个变量在这里手工声明。
+ * 读不到 Secret 与面板变量，因此这 9 个变量在这里手工声明。
  *
  * 注意：选填变量未配置时运行时为 undefined（binding 缺席），
  * 消费方必须自行处理默认值，不得假设字段恒为字符串。
@@ -26,6 +26,8 @@ declare global {
       VERIFY_TTL_HOURS?: string;
       /** 【选填 Var】同一条 update 处理失败的最大重试次数，缺省 3 */
       MAX_ATTEMPTS?: string;
+      /** 【选填 Var】自定义欢迎语文案，支持换行（字面 \n 解释为换行）；缺省用内置默认文案 */
+      WELCOME_TEXT?: string;
     }
   }
 }

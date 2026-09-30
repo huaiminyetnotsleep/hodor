@@ -116,6 +116,83 @@ export interface DeleteForumTopicParams {
   message_thread_id: number;
 }
 
+/* ------------------------------------------------------------------ */
+/* T22 / T24（阶段 3）：媒体 per-type send + 置顶/编辑 8 方法          */
+/* ------------------------------------------------------------------ */
+
+/** 统一出参最小子集：send* / editMessageText 只取新消息 ID（复用同一形状） */
+export interface MessageIdResult {
+  message_id: number;
+}
+
+/**
+ * 媒体 send* 入参公共形状：`{ chat_id, <字段>: file_id, caption?, message_thread_id? }`。
+ * file_id 按字符串原样直传（不下载、不落盘——docs/guide/architecture.md 决策）；
+ * 入站带 thread（落客服群 topic），出站私聊不传。
+ * sticker 不可能携带 caption，其入参类型单独省略该字段。
+ */
+export interface SendPhotoParams {
+  chat_id: number;
+  photo: string;
+  caption?: string;
+  message_thread_id?: number;
+}
+
+export interface SendVideoParams {
+  chat_id: number;
+  video: string;
+  caption?: string;
+  message_thread_id?: number;
+}
+
+export interface SendVoiceParams {
+  chat_id: number;
+  voice: string;
+  caption?: string;
+  message_thread_id?: number;
+}
+
+/** 音频（音乐文件）：2026-09-30 真机验收按用户要求纳入支持集；title/performer 元数据不透传 */
+export interface SendAudioParams {
+  chat_id: number;
+  audio: string;
+  caption?: string;
+  message_thread_id?: number;
+}
+
+export interface SendDocumentParams {
+  chat_id: number;
+  document: string;
+  caption?: string;
+  message_thread_id?: number;
+}
+
+export interface SendStickerParams {
+  chat_id: number;
+  sticker: string;
+  message_thread_id?: number;
+}
+
+export interface SendAnimationParams {
+  chat_id: number;
+  animation: string;
+  caption?: string;
+  message_thread_id?: number;
+}
+
+/** pinChatMessage 入参；disable_notification 恒为 true（client 固定注入：置顶不弹通知） */
+export interface PinChatMessageParams {
+  chat_id: number;
+  message_id: number;
+}
+
+/** editMessageText 入参：T24 昵称变更刷新置顶信息用 */
+export interface EditMessageTextParams {
+  chat_id: number;
+  message_id: number;
+  text: string;
+}
+
 /** client 工厂返回的方法集（全部经 request() 分类，无一旁路） */
 export interface TelegramClient {
   setWebhook(params: SetWebhookParams): Promise<TelegramResult<boolean>>;
@@ -130,4 +207,13 @@ export interface TelegramClient {
     params: CreateForumTopicParams,
   ): Promise<TelegramResult<CreateForumTopicResult>>;
   deleteForumTopic(params: DeleteForumTopicParams): Promise<TelegramResult<boolean>>;
+  sendPhoto(params: SendPhotoParams): Promise<TelegramResult<MessageIdResult>>;
+  sendVideo(params: SendVideoParams): Promise<TelegramResult<MessageIdResult>>;
+  sendVoice(params: SendVoiceParams): Promise<TelegramResult<MessageIdResult>>;
+  sendAudio(params: SendAudioParams): Promise<TelegramResult<MessageIdResult>>;
+  sendDocument(params: SendDocumentParams): Promise<TelegramResult<MessageIdResult>>;
+  sendSticker(params: SendStickerParams): Promise<TelegramResult<MessageIdResult>>;
+  sendAnimation(params: SendAnimationParams): Promise<TelegramResult<MessageIdResult>>;
+  pinChatMessage(params: PinChatMessageParams): Promise<TelegramResult<boolean>>;
+  editMessageText(params: EditMessageTextParams): Promise<TelegramResult<MessageIdResult>>;
 }

@@ -309,3 +309,156 @@ describe("telegram client: 方法契约", () => {
     expect(stub.callsOf("getMe")[0].httpMethod).toBe("POST");
   });
 });
+
+describe("telegram client: T22/T24 新方法（全部经 request()，零分类旁路）", () => {
+  let stub: TelegramFetchStub;
+  let client: ReturnType<typeof createTelegramClient>;
+  beforeEach(() => {
+    stub = stubTelegramFetch();
+    client = createTelegramClient(TOKEN);
+  });
+  afterEach(() => {
+    stub.restore();
+  });
+
+  it("sendPhoto：file_id + caption + thread 蛇形透传，出参 MessageIdResult", async () => {
+    stub.always("sendPhoto", { status: 200, json: { ok: true, result: { message_id: 777 } } });
+    const result = await client.sendPhoto({
+      chat_id: -1001234567890,
+      photo: "AgACAgUAA…",
+      caption: "用户配的说明",
+      message_thread_id: 100,
+    });
+    expect(result).toEqual({ ok: true, result: { message_id: 777 } });
+    // 精确键集：无多余键，caption 字段名即 caption
+    expect(stub.callsOf("sendPhoto")[0].body).toEqual({
+      chat_id: -1001234567890,
+      photo: "AgACAgUAA…",
+      caption: "用户配的说明",
+      message_thread_id: 100,
+    });
+  });
+
+  it("sendSticker：sticker 键名 + thread；类型上就不存在 caption 字段", async () => {
+    stub.always("sendSticker", { status: 200, json: { ok: true, result: { message_id: 778 } } });
+    const result = await client.sendSticker({
+      chat_id: -1001234567890,
+      sticker: "CAACAgIAA…",
+      message_thread_id: 100,
+    });
+    expect(result).toEqual({ ok: true, result: { message_id: 778 } });
+    expect(stub.callsOf("sendSticker")[0].body).toEqual({
+      chat_id: -1001234567890,
+      sticker: "CAACAgIAA…",
+      message_thread_id: 100,
+    });
+  });
+
+  it("sendVideo / sendVoice / sendAudio / sendDocument / sendAnimation：各字段名正确，可选键缺省即剔除", async () => {
+    stub.always("sendVideo", { status: 200, json: { ok: true, result: { message_id: 9 } } });
+    stub.always("sendVoice", { status: 200, json: { ok: true, result: { message_id: 9 } } });
+    stub.always("sendAudio", { status: 200, json: { ok: true, result: { message_id: 9 } } });
+    stub.always("sendDocument", { status: 200, json: { ok: true, result: { message_id: 9 } } });
+    stub.always("sendAnimation", { status: 200, json: { ok: true, result: { message_id: 9 } } });
+
+    // 纯 file_id（无 caption / thread）：键集中只剩 chat_id + 媒体字段
+    await client.sendVideo({ chat_id: 7001, video: "vid_1" });
+    expect(stub.callsOf("sendVideo")[0].body).toEqual({ chat_id: 7001, video: "vid_1" });
+
+    // voice 可带 caption
+    await client.sendVoice({ chat_id: 7001, voice: "voice_1", caption: "语音说明" });
+    expect(stub.callsOf("sendVoice")[0].body).toEqual({
+      chat_id: 7001,
+      voice: "voice_1",
+      caption: "语音说明",
+    });
+
+    // audio（2026-09-30 增补）：audio 字段名 + caption + thread 透传，
+    // title/performer 元数据不在参数集（调用方只组 file_id + caption）
+    await client.sendAudio({ chat_id: 7001, audio: "aud_1", caption: "一首歌", message_thread_id: 6 });
+    expect(stub.callsOf("sendAudio")[0].body).toEqual({
+      chat_id: 7001,
+      audio: "aud_1",
+      caption: "一首歌",
+      message_thread_id: 6,
+    });
+
+    // document 可带 thread
+    await client.sendDocument({ chat_id: 7001, document: "doc_1", message_thread_id: 5 });
+    expect(stub.callsOf("sendDocument")[0].body).toEqual({
+      chat_id: 7001,
+      document: "doc_1",
+      message_thread_id: 5,
+    });
+
+    const animation = await client.sendAnimation({ chat_id: 7001, animation: "gif_1" });
+    expect(animation).toEqual({ ok: true, result: { message_id: 9 } });
+    expect(stub.callsOf("sendAnimation")[0].body).toEqual({ chat_id: 7001, animation: "gif_1" });
+  });
+
+  it("pinChatMessage：disable_notification 恒注入 true（精确键集）", async () => {
+    stub.always("pinChatMessage", { status: 200, json: { ok: true, result: true } });
+    const result = await client.pinChatMessage({ chat_id: -1001234567890, message_id: 500 });
+    expect(result).toEqual({ ok: true, result: true });
+    expect(stub.callsOf("pinChatMessage")[0].body).toEqual({
+      chat_id: -1001234567890,
+      message_id: 500,
+      disable_notification: true,
+    });
+  });
+
+  it("editMessageText：chat_id / message_id / text 透传", async () => {
+    stub.always("editMessageText", { status: 200, json: { ok: true, result: { message_id: 500 } } });
+    const result = await client.editMessageText({
+      chat_id: -1001234567890,
+      message_id: 500,
+      text: "更新后的置顶信息",
+    });
+    expect(result).toEqual({ ok: true, result: { message_id: 500 } });
+    expect(stub.callsOf("editMessageText")[0].body).toEqual({
+      chat_id: -1001234567890,
+      message_id: 500,
+      text: "更新后的置顶信息",
+    });
+  });
+
+  it("分类矩阵对新方法同样成立：429 retry_after=1 → 原地重试恰一次后 Ok（恰 2 次调用）", async () => {
+    stub.on("sendPhoto", (i) =>
+      i === 0
+        ? {
+            status: 429,
+            json: {
+              ok: false,
+              error_code: 429,
+              description: "Too Many Requests: retry after 1",
+              parameters: { retry_after: 1 },
+            },
+          }
+        : { status: 200, json: { ok: true, result: { message_id: 1 } } },
+    );
+    const result = await client.sendPhoto({ chat_id: 7001, photo: "p" });
+    expect(result).toEqual({ ok: true, result: { message_id: 1 } });
+    expect(stub.countOf("sendPhoto")).toBe(2);
+  });
+
+  it("分类矩阵对新方法同样成立：editMessageText 403 → permanent 且 errorCode 按数字码透传", async () => {
+    stub.always("editMessageText", {
+      status: 403,
+      json: { ok: false, error_code: 403, description: "Forbidden: bot was blocked" },
+    });
+    const error = asError(
+      await client.editMessageText({ chat_id: 7001, message_id: 1, text: "t" }),
+    );
+    expect(error.kind).toBe("permanent");
+    expect(error.errorCode).toBe(403);
+    expectNoTokenLeak(error);
+  });
+
+  it("分类矩阵对新方法同样成立：sendDocument 网络错误 → retryable（不透传 URL）", async () => {
+    stub.always("sendDocument", { throwError: true });
+    const error = asError(await client.sendDocument({ chat_id: 7001, document: "d" }));
+    expect(error.kind).toBe("retryable");
+    expect(error.errorMessage).toBe("sendDocument network error");
+    expectNoTokenLeak(error);
+  });
+});

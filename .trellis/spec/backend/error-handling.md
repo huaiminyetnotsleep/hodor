@@ -35,6 +35,68 @@ HTTP 层嗅探字符串;单一分类点,可独立测试。
 - `permanent` → 按 docs/03 逐项决定:标记 `processed`(毒丸 / 被屏蔽用户),绝不返回 5xx。
 - 不要在 `client.ts` 之外新增分类分支。
 
+## 场景:管线副作用的排序与系统消息语义(阶段 3 / T22–T26,2026-09-30 确立)
+
+### 1. 范围 / 触发条件
+
+在中继管线(入站 / 出站)新增任何副作用(欢迎语、置顶、提示、验证码、账本、
+未来阶段的限频 / 封禁提示等)时,本节排序与语义契约生效。
+
+### 2. 签名
+
+- 入站 canonical order:`extractContent → ensureUser → topic(含置顶 4a/4b) →
+  欢迎语(claimNoticeSlot 门控) → relayContent → insertMessage`。
+- 出站 canonical order:`extractContent → 管理员校验 → 反查绑定(未绑定/closed →
+  T26 提示后结束) → relayContent → insertMessage`。
+
+### 3. 契约
+
+- **非中继副作用一律排在中继之前;中继之后只允许账本写入**。系统类消息
+  (欢迎 / 置顶 / 提示)**不入 messages 账本**(非对话内容)。
+- 账本行只在**中继成功后**写入;中继 permanent(消息被丢弃)不写行。
+- 频控提示走原子认领:`UPDATE ... SET last_notice_at=? WHERE ...
+  (last_notice_at IS NULL OR last_notice_at <= ?) AND` `meta.changes === 1` 才发送。
+
+### 4. 校验与错误矩阵
+
+| 副作用 | retryable | permanent |
+|---|---|---|
+| 中继前副作用(置顶 / 欢迎 / 提示) | 抛 → 重推重走该步骤(中继未发生,不产生重复中继) | warn + 跳过,主流程继续 |
+| 中继本身 | 抛 → 重推(at-least-once 已知代价) | warn + 消息丢弃,**不写账本** |
+| 账本 insertMessage | 原样抛 → 重推(可能重发一次中继,绝不提前 markProcessed 掩盖) | —(D1 错误一律按 retryable 对待) |
+| claimNoticeSlot 已赢但发送失败 | 抛;slot 已消耗,宁可丢一条欢迎语也不重复轰炸 | warn + 跳过 |
+
+### 5. 正例 / 基线 / 反例
+
+- **正例**:欢迎语 send 抛 retryable → 整条 update 5xx → 重推时 slot 已占、
+  topic 已在,中继只发生一次。
+- **基线**:中继成功、账本写失败 → 500 重推 → 中继可能重发一次 + 账本行最终写入
+  (test/inbound-ledger-failure.test.ts 固化:保持 processing、不提前标记)。
+- **反例**:把欢迎语排在中继之后——欢迎语 retryable 失败会连带已发出的中继一起
+  重推,制造无谓的用户消息重复。
+
+### 6. 必需测试
+
+每个新增副作用的用例必须断言:三态各自路径的最终 inbox 状态、系统消息不产生
+账本行、以及「该副作用失败时中继不重复」(排序保证)。
+
+### 7. 错误 vs 正确
+
+#### 错误
+
+```ts
+await relayContent(...);          // 先中继
+await sendWelcome(...);           // 欢迎失败 retryable → 抛 → 重推 → 中继重复
+```
+
+#### 正确
+
+```ts
+await maybeSendWelcome(...);      // 先副作用(失败可安全重推)
+await relayContent(...);          // 后中继
+await insertMessage(...);         // 中继之后只有账本(失败抛,at-least-once 已定稿)
+```
+
 ## 必需测试
 
 - 分类矩阵 + 两条 429 路径,并断言调用次数(test/telegram-client.test.ts)。

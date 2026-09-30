@@ -26,8 +26,18 @@ import type {
   CreateForumTopicParams,
   CreateForumTopicResult,
   DeleteForumTopicParams,
+  EditMessageTextParams,
   ForwardMessageParams,
   ForwardMessageResult,
+  MessageIdResult,
+  PinChatMessageParams,
+  SendAnimationParams,
+  SendAudioParams,
+  SendDocumentParams,
+  SendPhotoParams,
+  SendStickerParams,
+  SendVideoParams,
+  SendVoiceParams,
   SendMessageParams,
   SendMessageResult,
   SetWebhookParams,
@@ -194,5 +204,26 @@ export function createTelegramClient(token: string): TelegramClient {
       request<CreateForumTopicResult>("createForumTopic", { ...params }),
     deleteForumTopic: (params: DeleteForumTopicParams) =>
       request<boolean>("deleteForumTopic", { ...params }),
+    // T22 媒体 per-type send：参数名即 Telegram API 字段名（photo/video/…），
+    // 蛇形原样透传；caption / message_thread_id 为 undefined 时 JSON 序列化自然剔除
+    sendPhoto: (params: SendPhotoParams) =>
+      request<MessageIdResult>("sendPhoto", { ...params }),
+    sendVideo: (params: SendVideoParams) =>
+      request<MessageIdResult>("sendVideo", { ...params }),
+    sendVoice: (params: SendVoiceParams) =>
+      request<MessageIdResult>("sendVoice", { ...params }),
+    sendAudio: (params: SendAudioParams) =>
+      request<MessageIdResult>("sendAudio", { ...params }),
+    sendDocument: (params: SendDocumentParams) =>
+      request<MessageIdResult>("sendDocument", { ...params }),
+    sendSticker: (params: SendStickerParams) =>
+      request<MessageIdResult>("sendSticker", { ...params }),
+    sendAnimation: (params: SendAnimationParams) =>
+      request<MessageIdResult>("sendAnimation", { ...params }),
+    // T24：置顶静默（disable_notification 恒 true——invariant 收敛在 client 一处）
+    pinChatMessage: (params: PinChatMessageParams) =>
+      request<boolean>("pinChatMessage", { ...params, disable_notification: true }),
+    editMessageText: (params: EditMessageTextParams) =>
+      request<MessageIdResult>("editMessageText", { ...params }),
   };
 }

@@ -25,6 +25,7 @@
 | `MAX_MESSAGES_PER_MINUTE` | Var | — | `20` | 每用户每分钟转发上限，超限触发重新验证 |
 | `VERIFY_TTL_HOURS` | Var | — | `0` | 验证有效期（小时），`0` = 永久 |
 | `MAX_ATTEMPTS` | Var | — | `3` | 同一条 update 处理失败的最大重试次数，超限标记失败跳过 |
+| `WELCOME_TEXT` | Var | — | 内置默认文案 | 自定义欢迎语，支持换行；字面 `\n` 会解释为换行 |
 
 ::: warning
 三个 Secret 请使用**互不相同**的长随机串。

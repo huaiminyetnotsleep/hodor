@@ -51,6 +51,20 @@ export function parseMaxAttempts(env: Cloudflare.Env): number {
 }
 
 /**
+ * 解析 WELCOME_TEXT：自定义欢迎语文案（选填）。
+ *
+ * 缺失 / trim 后为空 → null（调用方兜底默认文案，见 src/copy.ts——
+ * 本文件保持纯解析，不 import 文案模块）；否则把字面 `\n`（反斜杠 n
+ * 序列——面板 / .dev.vars 单行输入的主流写法）替换为真实换行后返回，
+ * 真实换行原样保留、不重复解释。
+ */
+export function parseWelcomeText(env: Cloudflare.Env): string | null {
+  const raw = env.WELCOME_TEXT?.trim();
+  if (!raw) return null;
+  return raw.replace(/\\n/g, "\n");
+}
+
+/**
  * 常量时间字符串比较（用于 ADMIN_SECRET 路径段 / TELEGRAM_WEBHOOK_SECRET 头校验）。
  *
  * 先对两边各做 SHA-256（定长 32 字节摘要——比较时长与输入长度无关，不泄漏长度），

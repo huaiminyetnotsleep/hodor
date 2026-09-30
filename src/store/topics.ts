@@ -10,11 +10,13 @@
  */
 import { nowIso } from "./util";
 
-/** 正向查找返回的行子集（status 供调用方区分 open / closed） */
+/** 正向查找返回的行子集（status 供调用方区分 open / closed；pinned_msg_id 供置顶流程判定） */
 export interface TopicRow {
   thread_id: number;
   title: string;
   status: string;
+  /** 置顶的用户信息消息 ID；null = 尚未置顶（或上次置顶未落库）——置顶流程的唯一入口判定 */
+  pinned_msg_id: number | null;
 }
 
 /** 按 (bot_id, user_id) 查映射行；无行 → null */
@@ -24,9 +26,28 @@ export async function findTopicByUser(
   userId: number,
 ): Promise<TopicRow | null> {
   return db
-    .prepare("SELECT thread_id, title, status FROM topics WHERE bot_id = ? AND user_id = ?")
+    .prepare(
+      "SELECT thread_id, title, status, pinned_msg_id FROM topics WHERE bot_id = ? AND user_id = ?",
+    )
     .bind(botId, userId)
     .first<TopicRow>();
+}
+
+/**
+ * 记录置顶的用户信息消息 ID（T24）：置顶消息发出（无论 pin 调用本身是否
+ * 成功——信息消息已在，供后续昵称变更 edit 刷新）后落库。
+ * 「每 topic 恰一条置顶」由此列驱动：非 null 即不再重发。
+ */
+export async function setPinnedMsgId(
+  db: D1Database,
+  botId: number,
+  userId: number,
+  pinnedMsgId: number,
+): Promise<void> {
+  await db
+    .prepare("UPDATE topics SET pinned_msg_id = ? WHERE bot_id = ? AND user_id = ?")
+    .bind(pinnedMsgId, botId, userId)
+    .run();
 }
 
 /** 重开 closed 行（/deluser 置 closed 后用户再来即重开；closed_at 清空） */

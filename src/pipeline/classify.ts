@@ -27,9 +27,23 @@ export interface TelegramMessageRef {
   message_id: number;
   from?: TelegramFromRef;
   chat: { id: number; type: string };
-  /** 阶段 2 仅中继非空 text（媒体是 T22 / 阶段 3） */
   text?: string;
   message_thread_id?: number;
+  /**
+   * 媒体载荷（T22 / 阶段 3）：webhook 输入不可信，形态一律不在本文件校验——
+   * 分流只看 chat / thread（媒体不改变路由），字段形态由
+   * pipeline/content.ts 的 extractContent 逐字段运行时校验
+   */
+  photo?: unknown;
+  video?: unknown;
+  voice?: unknown;
+  /** 音频（音乐文件）：2026-09-30 真机验收按用户要求纳入支持集 */
+  audio?: unknown;
+  document?: unknown;
+  sticker?: unknown;
+  animation?: unknown;
+  /** 媒体 caption（与 photo/video/voice/audio/document/animation 搭配，sticker 不可能携带） */
+  caption?: unknown;
 }
 
 /** Telegram update 信封的最小子集（无关字段忽略） */

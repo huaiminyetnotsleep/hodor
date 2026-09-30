@@ -1,12 +1,16 @@
 /**
- * POST /webhook 路由集成（T15/T16/T17）：头鉴权 401 统一、毒丸 200、
- * bots 未绑定 500、幂等认领全分支（duplicate / in-flight / poison / owned）、
- * inbound 全链路（建档 + 建 topic + 单次中继 + markProcessed）。
+ * POST /webhook 路由集成（T15/T16/T17 + 阶段 3 媒体回归）：头鉴权 401 统一、
+ * 毒丸 200、bots 未绑定 500、幂等认领全分支（duplicate / in-flight / poison / owned）、
+ * inbound 全链路（建档 + 建 topic + 置顶 + 欢迎 + 单次中继 + 账本 + markProcessed）。
  *
  * 经 SELF.fetch 走完整 worker 入口；Telegram 出站全部经 telegramFetchStub 拦截，
  * 未注册响应器的调用直接抛错——测试内绝无真实网络。
  * vitest.config.ts 已显式注入 MAX_ATTEMPTS="3"（.dev.vars 不再泄漏进 worker
  * env）；毒丸用例的上限值仍从 parseMaxAttempts(env) 动态取，与 worker 同源。
+ *
+ * 阶段 3 调整说明：首条文本 / 重推去重 / 部分成功窗口三个阶段 2 用例的
+ * sendMessage 计数按新全链（置顶信息 + 欢迎语 + 中继）更新——「中继恰一次
+ * 且带 thread」「不双发」「绝不提前标记」的原始断言意图全部保留。
  */
 import { applyD1Migrations, env, SELF } from "cloudflare:test";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -168,12 +172,13 @@ describe("POST /webhook: inbound 全链路与幂等认领", () => {
     stub.restore();
   });
 
-  it("合法密钥 + 首条私聊文本 → 200；建档 + 建 topic + sendMessage 恰一次 + processed", async () => {
+  it("合法密钥 + 首条私聊文本 → 200；建档 + 建 topic + 置顶 + 欢迎 + 中继恰一次 + processed", async () => {
     stub.always("createForumTopic", {
       status: 200,
       json: { ok: true, result: { message_thread_id: 800 } },
     });
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("pinChatMessage", { status: 200, json: { ok: true, result: true } });
 
     const res = await postWebhook(inboundUpdate(9101, 7301));
     expect(res.status).toBe(200);
@@ -187,21 +192,39 @@ describe("POST /webhook: inbound 全链路与幂等认领", () => {
       .first<{ first_name: string; username: string }>();
     expect(user).toEqual({ first_name: "Zoe", username: "zoe_hd" });
     const topic = await env.HODOR_DB.prepare(
-      "SELECT thread_id, status FROM topics WHERE bot_id = ? AND user_id = ?",
+      "SELECT thread_id, status, pinned_msg_id FROM topics WHERE bot_id = ? AND user_id = ?",
     )
       .bind(BOT_ID, 7301)
-      .first<{ thread_id: number; status: string }>();
-    expect(topic).toEqual({ thread_id: 800, status: "open" });
+      .first<{ thread_id: number; status: string; pinned_msg_id: number }>();
+    expect(topic).toEqual({ thread_id: 800, status: "open", pinned_msg_id: 1 });
     expect(await readProcessed(9101)).toEqual({ status: "processed", attempts: 0 });
 
-    // 中继恰一次且带 thread（精确键集：sendMessage + text + thread，无 from_* 键）
+    // 阶段 3 全链恰 3 次 sendMessage：置顶信息 + 欢迎语 + 中继
     expect(stub.countOf("createForumTopic")).toBe(1);
-    expect(stub.countOf("sendMessage")).toBe(1);
-    expect(stub.callsOf("sendMessage")[0].body).toEqual({
+    expect(stub.countOf("sendMessage")).toBe(3);
+    expect(stub.countOf("pinChatMessage")).toBe(1);
+    // 中继恰一次且带 thread（精确键集：sendMessage + text + thread，无 from_* 键）
+    const relay = stub
+      .callsOf("sendMessage")
+      .filter((call) => (call.body as Record<string, unknown>).text === "hello support");
+    expect(relay).toHaveLength(1);
+    expect(relay[0].body).toEqual({
       chat_id: SUPPORT_CHAT_ID,
       text: "hello support",
       message_thread_id: 800,
     });
+    // 欢迎语发到用户私聊
+    const welcome = stub
+      .callsOf("sendMessage")
+      .filter((call) => (call.body as Record<string, unknown>).chat_id === 7301);
+    expect(welcome).toHaveLength(1);
+    // 账本 in 行
+    const ledger = await env.HODOR_DB.prepare(
+      "SELECT direction, group_msg_id, private_msg_id, content_type FROM messages WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, 7301)
+      .first<{ direction: string; group_msg_id: number; private_msg_id: number; content_type: string }>();
+    expect(ledger).toEqual({ direction: "in", group_msg_id: 1, private_msg_id: 10, content_type: "text" });
   });
 
   it("同一 update_id 重推 → duplicate 200，零新副作用（sendMessage 零新增调用）", async () => {
@@ -210,16 +233,18 @@ describe("POST /webhook: inbound 全链路与幂等认领", () => {
       json: { ok: true, result: { message_thread_id: 801 } },
     });
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("pinChatMessage", { status: 200, json: { ok: true, result: true } });
 
     const first = await postWebhook(inboundUpdate(9102, 7302));
     expect(first.status).toBe(200);
-    expect(stub.countOf("sendMessage")).toBe(1);
+    expect(stub.countOf("sendMessage")).toBe(3);
 
     const replay = await postWebhook(inboundUpdate(9102, 7302));
     expect(replay.status).toBe(200);
     // 重放不再触发任何 Telegram 调用
-    expect(stub.countOf("sendMessage")).toBe(1);
+    expect(stub.countOf("sendMessage")).toBe(3);
     expect(stub.countOf("createForumTopic")).toBe(1);
+    expect(stub.countOf("pinChatMessage")).toBe(1);
     expect(await readProcessed(9102)).toEqual({ status: "processed", attempts: 0 });
   });
 
@@ -228,7 +253,8 @@ describe("POST /webhook: inbound 全链路与幂等认领", () => {
       status: 200,
       json: { ok: true, result: { message_thread_id: 802 } },
     });
-    // 中继一直 5xx（retryable）→ 首次处理失败
+    // sendMessage 一直 5xx（retryable）→ 首次处理在置顶信息步骤即失败
+    //（阶段 3 全链中它先于欢迎/中继——失败点更早，不双发语义不变）
     stub.always("sendMessage", { status: 503, json: { ok: false, description: "unavailable" } });
 
     const first = await postWebhook(inboundUpdate(9103, 7303));
@@ -292,6 +318,7 @@ describe("POST /webhook: inbound 全链路与幂等认领", () => {
       status: 200,
       json: { ok: true, result: { message_thread_id: 999 } },
     });
+    stub.always("pinChatMessage", { status: 200, json: { ok: true, result: true } });
 
     // 模拟「投递 #1」的崩溃现场（design.md 部分成功窗口）：建档与映射行已写、
     // sendMessage 已送达，但 markProcessed 前崩溃 → 行停在 processing(attempts=0)
@@ -307,16 +334,101 @@ describe("POST /webhook: inbound 全链路与幂等认领", () => {
       .bind(BOT_ID, new Date(Date.now() - 61_000).toISOString())
       .run();
 
-    // 重推：过期接管（attempts 0→1 < MAX → owned）→ 入站复用既有映射 → 重发
+    // 重推：过期接管（attempts 0→1 < MAX → owned）→ 入站复用既有映射 → 重发。
+    // 阶段 3 全链差异：预置行的 pinned_msg_id 为 null → 本次接管补发置顶信息
+    //（1 次 sendMessage + 1 次 pinChatMessage）；用户为已存在、非 start → 不补欢迎
     const res = await postWebhook(inboundUpdate(9106, userId));
     expect(res.status).toBe(200);
 
-    // 窗口兑现：本次重推**重发一次** sendMessage（投递 #1 的送达是预置前提，
-    // 不经过本桩；计数 1 = 重发发生）；createForumTopic 不被调用（topic 复用）
+    // 窗口兑现：本次重推**重发一次**中继 sendMessage（投递 #1 的送达是预置前提，
+    // 不经过本桩）；createForumTopic 不被调用（topic 复用）
     expect(stub.countOf("createForumTopic")).toBe(0);
-    expect(stub.countOf("sendMessage")).toBe(1);
-    expect(stub.callsOf("sendMessage")[0].body).toMatchObject({ message_thread_id: 880 });
+    expect(stub.countOf("pinChatMessage")).toBe(1);
+    const relay = stub
+      .callsOf("sendMessage")
+      .filter((call) => (call.body as Record<string, unknown>).text === "hello support");
+    expect(relay).toHaveLength(1);
+    expect(relay[0].body).toMatchObject({ message_thread_id: 880 });
     // 接管确实发生（新插入会是 attempts=0，此处 1 = 0+1 接管），成功后落 processed
     expect(await readProcessed(9106)).toEqual({ status: "processed", attempts: 1 });
+  });
+
+  it("媒体端到端（入站 photo）：全链走通——建档 + 建 topic + 置顶 + sendPhoto(file_id+caption+thread) + 账本", async () => {
+    stub.always("createForumTopic", {
+      status: 200,
+      json: { ok: true, result: { message_thread_id: 890 } },
+    });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("pinChatMessage", { status: 200, json: { ok: true, result: true } });
+    stub.always("sendPhoto", { status: 200, json: { ok: true, result: { message_id: 2 } } });
+
+    const res = await postWebhook({
+      update_id: 9110,
+      message: {
+        message_id: 30,
+        from: { id: 7310, first_name: "MediaIn", username: "media_in" },
+        chat: { id: 7310, type: "private" },
+        photo: [
+          { file_id: "e2e_small", file_unique_id: "u1", width: 320, height: 240 },
+          { file_id: "e2e_big", file_unique_id: "u2", width: 1280, height: 960 },
+        ],
+        caption: "端到端配图",
+        date: 1700000000,
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(await readProcessed(9110)).toEqual({ status: "processed", attempts: 0 });
+
+    // per-type send 按 file_id 直传（最大尺寸），caption 透传，落 topic
+    expect(stub.countOf("sendPhoto")).toBe(1);
+    expect(stub.callsOf("sendPhoto")[0].body).toEqual({
+      chat_id: SUPPORT_CHAT_ID,
+      photo: "e2e_big",
+      caption: "端到端配图",
+      message_thread_id: 890,
+    });
+    // 首条媒体同权：置顶 + 欢迎 + 账本 content_type=photo
+    expect(stub.countOf("pinChatMessage")).toBe(1);
+    const welcome = stub
+      .callsOf("sendMessage")
+      .filter((call) => (call.body as Record<string, unknown>).chat_id === 7310);
+    expect(welcome).toHaveLength(1);
+    const ledger = await env.HODOR_DB.prepare(
+      "SELECT direction, group_msg_id, private_msg_id, content_type FROM messages WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, 7310)
+      .first<{ direction: string; group_msg_id: number; private_msg_id: number; content_type: string }>();
+    expect(ledger).toEqual({ direction: "in", group_msg_id: 2, private_msg_id: 30, content_type: "photo" });
+  });
+
+  it("媒体端到端（出站 sticker）：管理员 topic 内发言 → sendSticker 到用户私聊 + 账本 out 行", async () => {
+    stub.always("sendSticker", { status: 200, json: { ok: true, result: { message_id: 3 } } });
+    const userId = 7311;
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: userId, first_name: "MediaOut" });
+    await insertTopic(env.HODOR_DB, { botId: BOT_ID, userId, threadId: 891, title: "MediaOut" });
+
+    const res = await postWebhook({
+      update_id: 9111,
+      message: {
+        message_id: 31,
+        from: { id: ADMIN_ID, first_name: "Admin" },
+        chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+        message_thread_id: 891,
+        sticker: { file_id: "e2e_stk" },
+        date: 1700000000,
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(await readProcessed(9111)).toEqual({ status: "processed", attempts: 0 });
+
+    // 私聊不带 thread；精确键集
+    expect(stub.countOf("sendSticker")).toBe(1);
+    expect(stub.callsOf("sendSticker")[0].body).toEqual({ chat_id: userId, sticker: "e2e_stk" });
+    const ledger = await env.HODOR_DB.prepare(
+      "SELECT direction, group_msg_id, private_msg_id, content_type FROM messages WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, userId)
+      .first<{ direction: string; group_msg_id: number; private_msg_id: number; content_type: string }>();
+    expect(ledger).toEqual({ direction: "out", group_msg_id: 31, private_msg_id: 3, content_type: "sticker" });
   });
 });

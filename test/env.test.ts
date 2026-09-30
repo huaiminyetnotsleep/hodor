@@ -1,13 +1,15 @@
 /**
  * src/env.ts 纯函数解析矩阵（.trellis/spec/backend/env-config.md 必需测试）：
  * SUPPORT_CHAT_ID -100 前缀校验 / ADMIN_IDS 容错解析 / MAX_ATTEMPTS 缺省 3 /
- * 常量时间字符串比较。纯函数直测，不触碰 D1 与 SELF。
+ * WELCOME_TEXT 自定义欢迎语（字面 \n 解释为换行）/ 常量时间字符串比较。
+ * 纯函数直测，不触碰 D1 与 SELF。
  */
 import { describe, expect, it } from "vitest";
 import {
   parseAdminIds,
   parseMaxAttempts,
   parseSupportChatId,
+  parseWelcomeText,
   timingSafeEqualStrings,
 } from "../src/env";
 
@@ -90,6 +92,32 @@ describe("parseMaxAttempts", () => {
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: "0" }))).toBe(3);
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: "-2" }))).toBe(3);
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: "2.5" }))).toBe(3);
+  });
+});
+
+describe("parseWelcomeText", () => {
+  it("变量缺失（binding 缺席）→ null（调用方兜底默认文案）", () => {
+    expect(parseWelcomeText(envWith({ WELCOME_TEXT: undefined }))).toBeNull();
+  });
+
+  it("空串 / 纯空白（trim 后为空）→ null", () => {
+    expect(parseWelcomeText(envWith({ WELCOME_TEXT: "" }))).toBeNull();
+    expect(parseWelcomeText(envWith({ WELCOME_TEXT: "   \n  " }))).toBeNull();
+  });
+
+  it("自定义文案含字面 \\n（反斜杠 n 序列）→ 解释为真实换行", () => {
+    expect(parseWelcomeText(envWith({ WELCOME_TEXT: "第一行\\n第二行\\n第三行" }))).toBe(
+      "第一行\n第二行\n第三行",
+    );
+  });
+
+  it("真实换行原样保留，与字面 \\n 混用不重复解释", () => {
+    // 源串含一个真实换行 + 一个字面 \n → 各自一个换行，替换后不叠加
+    expect(parseWelcomeText(envWith({ WELCOME_TEXT: "a\nb\\nc" }))).toBe("a\nb\nc");
+  });
+
+  it("前后空白 trim 后返回", () => {
+    expect(parseWelcomeText(envWith({ WELCOME_TEXT: "  你好，欢迎咨询  " }))).toBe("你好，欢迎咨询");
   });
 });
 

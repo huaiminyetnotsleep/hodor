@@ -28,6 +28,9 @@ export default defineConfig(async () => {
         SUPPORT_CHAT_ID: "-1001234567890",
         ADMIN_IDS: "111111111,222222222",
         MAX_ATTEMPTS: "3",
+        // 阶段 3 起入站欢迎语读取该变量：钉死为空 → 各用例统一走默认文案
+        // 兜底分支；自定义文案分支用构造 env 对象覆盖（env.test.ts 同模式）
+        WELCOME_TEXT: "",
       },
     },
   };

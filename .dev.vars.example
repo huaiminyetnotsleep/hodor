@@ -1,4 +1,4 @@
-# hodor 环境变量总表（本地开发模板，共 8 个变量，对齐 docs/guide/deploy.md）
+# hodor 环境变量总表（本地开发模板，共 9 个变量，对齐 docs/guide/deploy.md）
 # 复制为 .dev.vars 并填入真值（.dev.vars 已被 git 忽略，绝不提交）。
 # 远端：Cloudflare 面板 → Worker → 设置 → 变量和机密，按本表逐项配置一次即可；
 # wrangler.jsonc 已开启 keep_vars: true，面板变量跨部署保留，Secret 本就不因部署删除。
@@ -26,3 +26,6 @@ VERIFY_TTL_HOURS=0
 
 # 【选填 Var】同一条 update 处理失败的最大重试次数，超限标记 failed 跳过；缺省 3
 MAX_ATTEMPTS=3
+
+# 【选填 Var】自定义欢迎语（支持换行，字面 \n 解释为换行）；未配置或为空时使用内置默认文案
+WELCOME_TEXT=你好，欢迎咨询！\n直接发送消息即可与客服对话。

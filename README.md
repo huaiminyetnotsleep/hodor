@@ -108,7 +108,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 |---|---|---|
 | **配置即资源**（IaC in repo）：平台按声明置备并回写 | Render `render.yaml`、CF 模板向导/按钮 | wrangler.jsonc 即声明式资源描述；路径二（按钮）由平台置备 D1 |
 | **置备/迁移是部署管线的独立阶段** | Heroku release phase、Render `preDeployCommand`、Fly `release_command` | `scripts/deploy.mjs`：云端经 postinstall 钩子（`WORKERS_CI=1` 门控）自动执行，本地 `npm run deploy` 显式执行，均先于部署 |
-| **平台侧建库 + env 注入引用**（连接信息不进仓库） | Vercel Marketplace、Heroku Add-ons（`DATABASE_URL` 模式） | 8 个变量全部走表单/Secret；D1 是同平台 binding（真实 id 不进仓库，构建时按名字解析注入），故用前两种模式 |
+| **平台侧建库 + env 注入引用**（连接信息不进仓库） | Vercel Marketplace、Heroku Add-ons（`DATABASE_URL` 模式） | 9 个变量全部走表单/Secret；D1 是同平台 binding（真实 id 不进仓库，构建时按名字解析注入），故用前两种模式 |
 
 业界同样没有的第四种——让用户手改配置文件里的资源 ID——正是本方案要消除的。
 

@@ -1,7 +1,7 @@
 # 环境与配置契约
 
 > hodor 如何接线环境绑定与机密。S1(2026-09-28)确立;变量表已对齐 docs/guide/deploy.md
-> 的 8 变量契约(2026-09-30)。
+> 的 9 变量契约(2026-09-30 增补 WELCOME_TEXT)。
 
 ---
 
@@ -30,6 +30,7 @@ declare global {
       MAX_MESSAGES_PER_MINUTE?: string;  // 可选 Var,默认 20
       VERIFY_TTL_HOURS?: string;         // 可选 Var,默认 0(永久)
       MAX_ATTEMPTS?: string;             // 可选 Var,默认 3
+      WELCOME_TEXT?: string;             // 可选 Var,缺省用内置默认欢迎语(src/copy.ts)
     }
   }
 }
@@ -52,6 +53,7 @@ declare global {
 | `MAX_MESSAGES_PER_MINUTE` | string | `.dev.vars` | 控制台「变量和机密」 | 可选;缺失/非法 → `20` |
 | `VERIFY_TTL_HOURS` | string | `.dev.vars` | 控制台「变量和机密」 | 可选;缺失/非法 → `0`(永久) |
 | `MAX_ATTEMPTS` | string | `.dev.vars` | 控制台「变量和机密」 | 可选;缺失/非法 → `3` |
+| `WELCOME_TEXT` | string | `.dev.vars` | 控制台「变量和机密」 | 可选;缺失/空白 → 内置默认欢迎语(`src/copy.ts` `DEFAULT_WELCOME_TEXT`);字面 `\n` 解释为换行(真实换行原样保留) |
 
 `.dev.vars.example` 是带注释的本地模板(每个变量:一条注释 + 一行赋值 + 一个空行)。
 远程值在控制台(Worker → Settings → 变量和机密)配置**一次**即可——绝不进仓库。拆分规则
@@ -64,6 +66,8 @@ declare global {
 - 运行时机密缺失 → 绑定为 `undefined`;在需要它的调用点快速失败(不得带着空凭据静默继续)。
 - `MAX_ATTEMPTS` / `MAX_MESSAGES_PER_MINUTE` 不是正整数 → 回退为 `3` / `20`(先解析,
   不轻信输入)。`VERIFY_TTL_HOURS` 为负 → `0`。
+- `WELCOME_TEXT` 缺失 / trim 后为空 → 使用内置默认欢迎语(`src/copy.ts`),空串不当
+  自定义文案;有效值中字面 `\n` 解释为换行,真实换行原样保留。
 - 本地存在 `.dev.vars` 时重新生成类型,会把其中的键泄漏进提交的 `worker-configuration.d.ts`,
   变成必填的 `Cloudflare.Env` 绑定(2026-09-30 实测:一份过期的 `.dev.vars` 把已删除的
   `ALLOW_UNKNOWN_USERS` 泄漏了进来)。执行 `wrangler types` 前先把 `.dev.vars` 移开;
