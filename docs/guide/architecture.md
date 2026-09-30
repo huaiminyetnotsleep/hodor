@@ -27,21 +27,9 @@
 
 入站（用户 → 群组）与出站（群组 → 用户）共用同一个 `/webhook` 入口，由消息来源分流：私聊消息走入站管线；来自 `SUPPORT_CHAT_ID` 且带 `message_thread_id` 的消息走出站管线。
 
-## 发布与更新链路
+## 发布与更新
 
-代码从 GitHub 到线上 Worker 的路径（与消息链路相互独立）：
-
-```
-维护者 push main ──┬─→ GitHub Actions（release-please）：
-                   │     自动维护「Release PR」= 版本号 bump + CHANGELOG
-                   └─→ CF Workers Builds：立即构建部署，代码上线
-                        （/health 版本号待 Release PR 合并后才更新）
-
-合并 Release PR ───┬─→ Actions：自动打 tag vX.Y.Z + 发布 GitHub Release
-                   └─→ main 版本号变更 → CF 再次构建部署，版本号生效
-```
-
-fork 用户默认**手动**跟随更新：官方 Release 通知 → 在自己 fork 页面点 Sync fork（或 fetch upstream + merge + push）→ 自己的 CF 自动构建、执行迁移、部署 → `/health` 核对。官方仓库更新不会自动波及任何用户实例；版本号唯一来源是 `package.json`，由 Release Please 维护，无需手动修改（详见[运维手册 · 版本管理](/guide/ops.md#版本管理)）。
+发布与更新链路（Release Please 自动发版、fork 用户手动跟随）已独立成页，见[发布与更新](/guide/release.md)。
 
 ## 端点与鉴权
 

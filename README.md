@@ -43,9 +43,11 @@ Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题�
 
 ```bash
 npm install
-npm test                                          # Vitest：本地 D1 + 打桩 Telegram
-npm run typecheck && npm run lint
+npm test            # vitest：workerd 沙箱 + 每文件隔离的本地 D1
+npm run typecheck
 ```
+
+完整指南（一次性准备、手动运行 Worker、命令速查与注意事项）见 [docs/guide/development.md](docs/guide/development.md)。
 
 当前实现进度：S1–S10 全部完成（Phase 1 MVP 功能全集：webhook/inbox、双向中继、六条管理命令、/admin 端点、审计、148 例自动化测试全绿）。剩余工作 = 下方 V4–V10 人工回归（分期计划见 V10 小节）。**完整功能实现清单（✅ 已实现 / 🔄 进行中 / ⬜ 未实现，逐项可勾选）见 [docs/README.md「功能实现清单」](docs/README.md#六功能实现清单)**。任务树与各子任务验收标准见 `.trellis/tasks/`。
 

@@ -1,0 +1,47 @@
+# 文档站自动发布到 GitHub Pages（项目页 https://<user>.github.io/hodor/）。
+# 首次使用前还需在仓库 Settings → Pages 把 Source 设为 GitHub Actions，本工作流才会生效。
+# push main 仅在 docs/** 或本文件变更时触发；也可在 Actions 页面手动触发（workflow_dispatch）。
+name: Docs Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**', '.github/workflows/docs-pages.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只保留一次 Pages 发布，后到的取消先到的
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0' # VitePress lastUpdated 需要完整 git 历史
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+      - run: npm --prefix docs ci
+      - run: npm --prefix docs run build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/.vitepress/dist
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

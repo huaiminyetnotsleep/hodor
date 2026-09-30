@@ -4,20 +4,25 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   lang: 'zh-CN',
   title: 'hodor',
+  // GitHub Pages 项目页路径（https://<user>.github.io/hodor/），资产与站内链接都会带上此前缀
+  base: '/hodor/',
   description: 'Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题，消息不串线',
 
-  head: [['link', { rel: 'icon', href: '/favicon.ico' }]],
+  // VitePress 不会给 head 里的绝对路径自动加 base 前缀，favicon 需显式写 /hodor/ 前缀
+  head: [['link', { rel: 'icon', href: '/hodor/favicon.ico' }]],
 
   themeConfig: {
     nav: [
       { text: '首页', link: '/' },
+      { text: '功能介绍', link: '/guide/features' },
+      { text: '部署流程', link: '/guide/deploy' },
+      { text: '原理与架构', link: '/guide/architecture' },
+      { text: '运维手册', link: '/guide/ops' },
       {
-        text: '指南',
+        text: '开发',
         items: [
-          { text: '功能介绍', link: '/guide/features' },
-          { text: '部署流程', link: '/guide/deploy' },
-          { text: '原理与架构', link: '/guide/architecture' },
-          { text: '运维手册', link: '/guide/ops' },
+          { text: '本地开发', link: '/guide/development' },
+          { text: '发布与更新', link: '/guide/release' },
           { text: '数据表', link: '/guide/database' },
         ],
       },
@@ -50,6 +55,13 @@ export default defineConfig({
             { text: '部署流程', link: '/guide/deploy' },
             { text: '原理与架构', link: '/guide/architecture' },
             { text: '运维手册', link: '/guide/ops' },
+          ],
+        },
+        {
+          text: '开发',
+          items: [
+            { text: '本地开发', link: '/guide/development' },
+            { text: '发布与更新', link: '/guide/release' },
             { text: '数据表', link: '/guide/database' },
           ],
         },

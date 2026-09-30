@@ -72,29 +72,7 @@ bot 身份（bot_id）不变，所有数据继续有效：
 
 ## 版本管理
 
-版本号唯一记录在 `package.json` 的 `version` 字段，由 **Release Please**（GitHub Actions）自动维护——任何人都不需要手动改版本号。
-
-### 发布新版本（维护者）
-
-1. 正常开发提交，commit message 使用约定式格式：`feat:` 新功能（升 MINOR）、`fix:` 修复（升 PATCH）、标注 `BREAKING CHANGE` 的提交升 MAJOR
-2. push 到 main 后，release-please 自动开出（或更新）一个 **Release PR**，内容为版本号 bump + CHANGELOG
-3. 此时 CF 已用最新代码完成部署（**代码先上线**）；合并 Release PR 即完成发布：
-   - Actions 自动打 tag `vX.Y.Z`、发布 GitHub Release（正文即 changelog）
-   - main 版本号变更再次触发 CF 部署，`/health` 显示新版本
-
-::: tip
-代码上线与版本号生效是两次部署：可以攒若干 feature 后再合并 Release PR 集中发版；窗口期内 `/health` 显示的仍是上一个已发布的版本号，属正常现象。
-:::
-
-### 跟随更新（fork 用户，默认手动）
-
-官方发版**不会自动波及任何用户实例**，更新由用户手动触发：
-
-1. 打开自己 fork 的 GitHub 页面，点 **Sync fork**（无需终端；或命令行 `git fetch upstream && git merge upstream/main && git push`）
-2. 自己的 Cloudflare 随即自动构建、执行数据库迁移并部署
-3. 访问 `/health` 确认自检全绿、版本号已更新
-
-在官方仓库点 **Watch → Releases** 可收到发版通知。
+发布新版本（维护者）与跟随更新（fork 用户）已独立成页，见[发布与更新](/guide/release.md)。
 
 ## 常用 SQL
 
