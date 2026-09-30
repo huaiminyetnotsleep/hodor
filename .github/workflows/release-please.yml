@@ -1,0 +1,26 @@
+# Release Please —— 版本号自动维护，对应 docs/guide/release.md「发布与更新」：
+#   约定式提交（feat: 升 MINOR / fix: 升 PATCH / 标注 BREAKING CHANGE 升 MAJOR）
+#   → push main 后自动开出（或更新）Release PR（package.json 版本 bump + CHANGELOG）
+#   → 维护者合并 Release PR → 自动打 tag vX.Y.Z 并发布 GitHub Release（正文即 changelog）
+#   → main 版本号变更再次触发 CF Workers Builds 部署，/health 显示新版本。
+# 版本号唯一来源是 package.json，由本流程维护，任何人无需手动改版本号。
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    # fork 上跳过，官方仓库独占（fork 不会开出 Release PR / 打 tag）
+    if: github.repository == 'huaiminyetnotsleep/hodor'
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          release-type: node
+          package-name: hodor

@@ -25,6 +25,8 @@ coverage/
 dist/
 build/
 *.log
+# 构建时从 package.json 注入的版本模块
+src/generated/
 
 # Local planning and Trellis state
 .zcode/plans/

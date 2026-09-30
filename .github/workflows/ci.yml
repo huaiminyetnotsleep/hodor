@@ -1,0 +1,25 @@
+# CI —— push / PR 到 main 时跑质量门（typecheck + test），保障合并质量；
+# release-please 机器人开出的 Release PR 同样受其约束。
+# 干净检出上没有 src/generated/version.ts：pretest / pretypecheck 钩子
+# （node scripts/gen-version.mjs）会在对应命令前自动生成（T08 版本注入设计），
+# 因此无需专门的生成步骤。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
