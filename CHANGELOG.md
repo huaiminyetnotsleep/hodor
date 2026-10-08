@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.3.0...v1.4.0) (2026-10-08)
+
+
+### Features
+
+* stage 5 daily management — verify switch, mode, TTL, notes, risk flags (T31-T33, T36-T37) ([7a45886](https://github.com/huaiminyetnotsleep/hodor/commit/7a4588615fa99a11c229c23806ebffb1b6166d73))
+
 ## [1.3.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.2.0...v1.3.0) (2026-09-30)
 
 
