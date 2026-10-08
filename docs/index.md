@@ -2,12 +2,19 @@
 layout: home
 
 hero:
-  name: hodor
-  text: Telegram 客服消息中继 Bot
+  name: Hodor
+  text: Telegram 双向私聊机器人
   tagline: 一个用户，一个话题，消息不串线。
+  actions:
+    - theme: brand
+      text: 快速开始
+      link: /guide/deploy
+    - theme: alt
+      text: GitHub
+      link: https://github.com/huaiminyetnotsleep/hodor
   image:
     src: /icon.png
-    alt: hodor 图标
+    alt: Hodor 图标
 
 features:
   - icon: 🆓

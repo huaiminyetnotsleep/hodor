@@ -3,10 +3,10 @@ import { defineConfig } from 'vitepress'
 // hodor 文档服务配置（独立于主应用，所有依赖装在 docs/ 下）
 export default defineConfig({
   lang: 'zh-CN',
-  title: 'hodor',
+  title: 'Hodor',
   // GitHub Pages 项目页路径（https://<user>.github.io/hodor/），资产与站内链接都会带上此前缀
   base: '/hodor/',
-  description: 'Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题，消息不串线',
+  description: 'Telegram 双向私聊机器人 —— 客服消息双向转发，一个用户一个群组独立话题，消息不串线',
 
   // VitePress 不会给 head 里的绝对路径自动加 base 前缀，图标需显式写 /hodor/ 前缀
   // 图标源文件 docs/icon.png，缩放产物在 docs/public/（512 logo / 180 apple-touch / 64 favicon）
