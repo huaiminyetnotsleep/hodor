@@ -182,8 +182,9 @@ export function formatHelpText(settings: HelpSettings): string {
     "/unnote - 清除用户备注",
     "/risk - 标记高危用户",
     "/unrisk - 取消高危标记",
-    "/deluser - 删除本话题用户（关闭话题、清除验证，历史与备注保留，用户重新 /start 后复用本话题重开）",
-    "/purgemsg - 清空本话题全部聊天消息并重置置顶",
+    "/archive - 软归档当前用户（关闭话题，保留绑定、历史与备注）",
+    "/deluser - 物理删除当前用户及群内话题（需二次确认；不删除私聊历史）",
+    "/purgemsg - 清理本话题可追踪群消息并重置置顶（话题关闭时先在 Telegram 重开）",
     "",
     "验证：",
   ];
@@ -198,7 +199,7 @@ export function formatHelpText(settings: HelpSettings): string {
     "纯按钮模式防护较弱，bot 可直接调 API 点击，仅建议受信任场景使用。",
     "",
     "危险操作：",
-    "/wipealldata - 清空全部用户、话题绑定与消息记录（两步确认，不可恢复）",
+    "/wipealldata - 删除全部群内话题并清空全部用户数据（两步确认，不可恢复）",
     "",
     "说明：以 / 开头的消息不会中继给用户。",
   );
@@ -235,9 +236,10 @@ export const ADMIN_COMMAND_MENU: readonly { command: string; description: string
   { command: "verifyon", description: "开启人机验证" },
   { command: "verifyoff", description: "临时关闭人机验证" },
   { command: "verifymode", description: "切换验证模式" },
-  { command: "deluser", description: "删除本话题用户并关闭话题" },
-  { command: "purgemsg", description: "清空本话题消息并重置置顶" },
-  { command: "wipealldata", description: "清空全部数据（两步确认）" },
+  { command: "archive", description: "软归档本话题用户" },
+  { command: "deluser", description: "物理删除用户及本话题（需确认）" },
+  { command: "purgemsg", description: "清理本话题可追踪群消息" },
+  { command: "wipealldata", description: "删除全部话题并清空数据（两步确认）" },
 ];
 
 /** /ban 确认（T35）：回 topic，携带目标用户 ID 便于管理员核对 */
@@ -327,37 +329,24 @@ export function formatVerifyButtonQuestion(): string {
 export const VERIFY_BUTTON_LABEL = "我不是机器人";
 
 /* ------------------------------------------------------------------ */
-/* 阶段 6：会话维护（T38 deluser / T39 purgemsg / T40 wipealldata）文案   */
+/* 阶段 6：会话维护（T38 archive/deluser / T39 purgemsg / T40 wipe）文案  */
 /* ------------------------------------------------------------------ */
 
-/**
- * /deluser 的用户私聊提示（T38）：告知会话结束与重新入口。直发不占提示
- * 频控 slot——管理员主动触发的治理通知，无用户侧刷量面（T30 防的是用户
- * 触发式轰炸）。permanent（如用户拉黑 bot）→ warn 吞 + 确认注记。
- */
-export const DELUSER_USER_NOTICE = "本次会话已结束。如需继续联系客服，请重新发送 /start。";
+/** /archive 软归档的 pre-close 确认：必须在 topic 关闭前送达 */
+export const ARCHIVE_PREPARING_TEXT = "正在软归档此用户：验证状态将清除，用户与本话题历史、备注会保留。";
 
-/**
- * /deluser 确认（T38）：回 topic，携带目标用户 ID + 保留 / 重开语义。
- * 可选注记行：topic 关闭失败（如已被原生删除）、私聊提示未送达——
- * 两个 best-effort 步骤的失败必须让管理员可见（不静默吞治理反馈）。
- */
-export function formatDeluserConfirmed(
-  userId: number,
-  annotations: { closeFailed?: string; noticeFailed?: boolean } = {},
-): string {
-  const lines = [
-    `已删除用户 ${userId}：验证状态已清除，本话题已关闭（历史与备注保留）。`,
-    "用户重新 /start 后将复用本话题重开，验证开关开启时会重新验证。",
-  ];
-  if (annotations.closeFailed) {
-    lines.push(`⚠️ 话题关闭未成功：${annotations.closeFailed}`);
-  }
-  if (annotations.noticeFailed) {
-    lines.push("⚠️ 私聊提示未送达（用户可能已拉黑 bot）。");
-  }
-  return lines.join("\n");
-}
+/** /archive 软归档后的用户提示；管理员主动操作，不占用户触发式提示频控 slot */
+export const ARCHIVE_USER_NOTICE = "本次会话已结束。如需继续联系客服，请重新发送 /start。";
+export const DELUSER_WARNING_TEXT = "⚠️ 物理删除确认\n将删除此用户的 Hodor 档案、绑定、账本，以及客服群话题和其中消息。Telegram 私聊窗口中的双方历史不会删除。此操作不可恢复，请在 60 秒内确认。";
+export const DELUSER_CONFIRM_LABEL = "确认物理删除";
+export const DELUSER_CANCEL_LABEL = "取消";
+export const DELUSER_TOAST_EXPIRED = "确认已超时，请重新发起 /deluser。";
+export const DELUSER_TOAST_CANCELLED = "已取消，未删除数据。";
+export const DELUSER_TOAST_NOT_ADMIN = "该操作仅客服管理员可用。";
+export const DELUSER_TOAST_DONE = "群内话题与 Hodor 数据已删除；私聊历史保留。";
+export const DELUSER_TOAST_FAILED = "Telegram 未能删除话题，数据已保留。";
+export const ARCHIVE_SUCCESS_TEXT = "用户已软归档：验证与待答题已清除，话题已关闭。用户、绑定、消息历史与备注均保留；用户重新联系后会自动恢复原话题，并在验证开启时重新验证。";
+export const ARCHIVE_CLOSE_FAILED_TEXT = "归档未执行：Telegram 未能关闭话题，用户数据与验证状态未变。请检查权限后重试。";
 
 /**
  * /purgemsg 确认（T39）：三态计数——不把未删除内容标为已清空（failed>0
@@ -390,12 +379,13 @@ export function formatPurgeConfirmed(counts: {
  */
 export const WIPE_WARNING_TEXT = [
   "⚠️ 危险操作 ⚠️",
-  "将清空全部数据，不可恢复：",
+  "将删除客服群内全部话题及其中群内消息，并清空全部数据，不可恢复：",
   "- 全部用户档案与验证 / 封禁 / 备注状态",
   "- 全部用户 ↔ 话题绑定",
   "- 全部消息记录",
+  "- 客服群内全部话题（General 除外）",
   "",
-  "保留：验证开关与模式（settings）、幂等台账；群内已创建的话题不会被自动删除（旧话题内再发言会提示「找不到对应用户」，可手动删除）。",
+  "保留：验证开关与模式（settings）、幂等台账（processed_updates）、Bot 身份（bots）。双方私聊窗口消息不在删除范围。",
   "",
   "请在 60 秒内点击按钮确认或取消。",
 ].join("\n");
@@ -406,9 +396,17 @@ export const WIPE_CONFIRM_LABEL = "⚠️ 确认清空（不可恢复）";
 /** /wipealldata 取消按钮文案（T40） */
 export const WIPE_CANCEL_LABEL = "取消";
 
-/** /wipealldata 确认执行后的完成文案（编辑原警告消息，键盘随之移除） */
+/** /wipealldata 确认执行后的完成文案（尝试编辑原警告消息；话题已被删时 edit 失败 warn 吞） */
 export const WIPE_DONE_TEXT =
-  "已清空全部用户、话题绑定与消息记录。验证开关与模式保留；群内话题未删除。用户再次私聊将全新建档。";
+  "已删除客服群内全部话题（General 除外）并清空全部用户、绑定与消息记录。验证开关与模式保留。用户再次私聊将全新建档。";
+
+/** /wipealldata 话题删除部分失败：不清库，提示失败数并引导重试 */
+export function formatWipeTopicsFailed(failed: number): string {
+  return `${failed} 个话题删除失败，数据未清空。请检查 bot 权限后重新发起 /wipealldata 继续删除。`;
+}
+
+/** /wipealldata 完成提示（话题已删，警告消息不在——toast 是主要反馈） */
+export const WIPE_TOAST_DONE = "全部话题与 Hodor 数据已删除；私聊历史保留。";
 
 /** wipe 回调 toast：非管理员（T40 再次鉴权失败） */
 export const WIPE_TOAST_NOT_ADMIN = "该操作仅客服管理员可用。";

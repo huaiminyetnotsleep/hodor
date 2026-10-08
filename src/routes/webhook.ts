@@ -3,8 +3,8 @@
  *
  * 路由层保持极薄（架构分层约定）：只做「鉴权 → 解析 → 认领 → 分流 → 派发」的
  * 编排，业务全部在 pipeline，数据全部在 store，Telegram 调用全部在 client。
- * classify 三分流：inbound（私聊 message）/ callback（私聊题面按钮）/
- * outbound（客服群 topic 内 message）；callback 同样携带 update_id——
+ * classify 分流：inbound / outbound / topic_event / private callback / group callback；
+ * 所有类别同样携带 update_id——
  * 幂等认领 / 毒丸状态机与其余分流完全共用。
  *
  * | 环节 | 结果 | 响应 |
@@ -28,6 +28,8 @@ import { handleInbound } from "../pipeline/inbound";
 import { handleOutbound } from "../pipeline/outbound";
 import { handleVerifyCallback } from "../pipeline/verify";
 import { handleWipeCallback } from "../pipeline/wipe";
+import { handleTopicEvent } from "../pipeline/topicEvents";
+import { handleDeluserCallback } from "../pipeline/deluser";
 import { getSingleBotId } from "../store/bots";
 import { claimUpdate, markFailed, markProcessed } from "../store/processedUpdates";
 
@@ -106,7 +108,7 @@ export async function handleWebhook(
     return ok();
   }
 
-  /* ---------------- ⑤ 三路派发（classify fail-closed：env 畸形时全 ignore） ---------------- */
+  /* ---------------- ⑤ 按分类派发（classify fail-closed：env 畸形时全 ignore） ---------------- */
   const kind = classifyUpdate(update, parseSupportChatId(env));
   if (kind === "ignore") {
     await markProcessed(env.HODOR_DB, botId, updateId);
@@ -116,7 +118,10 @@ export async function handleWebhook(
   // classify 已做运行时形态校验；此处仅收窄类型（缺字段 = 不可达的防御式兜底，
   // warn 后按毒丸 200 处理，不让畸形信封触发重推）
   try {
-    if (kind === "callback" || kind === "group_callback") {
+    if (kind === "topic_event") {
+      const message = update.message as TelegramMessageRef | undefined;
+      if (message) await handleTopicEvent(env.HODOR_DB, botId, message);
+    } else if (kind === "callback" || kind === "group_callback") {
       // callback = 私聊题面按钮（T27）；group_callback = 客服群内按钮
       //（T40 wipe 确认键盘）——两者信封同形，仅 chat 归属不同
       const callbackQuery = update.callback_query as TelegramCallbackQueryRef | undefined;
@@ -124,7 +129,11 @@ export async function handleWebhook(
         if (kind === "callback") {
           await handleVerifyCallback(env, botId, callbackQuery);
         } else {
-          await handleWipeCallback(env, botId, callbackQuery);
+          if (callbackQuery.data?.startsWith("d:")) {
+            await handleDeluserCallback(env, botId, callbackQuery);
+          } else {
+            await handleWipeCallback(env, botId, callbackQuery);
+          }
         }
       } else {
         console.warn(`[webhook] update ${updateId}: classify=${kind} 但 callback_query 缺失`);

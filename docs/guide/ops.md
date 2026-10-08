@@ -64,7 +64,7 @@ bot 身份（bot_id）不变，所有数据继续有效：
 部署后或每次更新后建议访问一次，确认服务存活并核对版本号。
 
 ::: warning 完整自检尚未实现
-逐项检查环境变量、数据库六表、Webhook 指向的完整自检（`{"status":"error","failed":[...]}` 形态）规划在 [T07 / 阶段 7](/todo/index.md)。当前排查部署问题可用：`/setwebhook/<ADMIN_SECRET>`（缺 token / secret 会明确报出变量名）、`wrangler tail`（实时日志）、D1 Console（数据核对）。
+逐项检查环境变量、数据库表、Webhook 指向的完整自检（`{"status":"error","failed":[...]}` 形态）规划在 [T07 / 阶段 7](/todo/index.md)。当前排查部署问题可用：`/setwebhook/<ADMIN_SECRET>`（缺 token / secret 会明确报出变量名）、`wrangler tail`（实时日志）、D1 Console（数据核对）。
 :::
 
 - **部署与更新**：push 到 main 即自动部署新版本

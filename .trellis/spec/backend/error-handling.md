@@ -122,12 +122,90 @@ await insertMessage(...);         // 中继之后只有账本(失败抛,at-least
 是唯一信号时,允许在唯一模块 `src/pipeline/errors.ts` 内对已消毒的 `errorMessage`
 做 permanent 子类判定**。约束:
 
-- 谓词集中收敛在 `src/pipeline/errors.ts`(isTopicGoneError / isMessageGoneError),
-  **绝不**在 client 分类矩阵内分支、绝不散落在各 pipeline 文件。
-- 判定原则:**宁可漏判不可误判**——不匹配一律落默认 permanent 语义(丢弃 + warn),
-  绝不把可恢复的配置问题(如 bot 被移出群)误判成死绑定触发自愈删行。
+- 谓词集中收敛在 `src/pipeline/errors.ts`(isTopicGoneError / isMessageGoneError /
+  isTopicClosedError / isTopicNotModifiedError),**绝不**在 client 分类矩阵内分支、
+  绝不散落在各 pipeline 文件。
+- 判定原则:**宁可漏判不可误判**——未知 permanent 一律落各消费方默认行为；topic-gone 只能
+  清理死绑定，TOPIC_CLOSED 只能触发 reopen-and-retry，二者严禁混淆。
 - 新增谓词必须配套:单元断言(命中 / 不命中 / undefined 三态)与消费方用例
   (test/stage6.test.ts「errors: 错误摘要谓词」describe)。
 - 触发背景:Telegram 对「topic 已被原生删除」只回 400 + description
   ("message thread not found" / "TOPIC_ID_INVALID"),无独立数字码;该判定驱动
   topics 绑定回收自愈(阶段 6 design.md §五.2)。
+
+## 场景:原生 forum topic close/reopen 与入站恢复(阶段 6)
+
+### 1. 范围 / 触发
+
+客服群原生 `forum_topic_closed` / `forum_topic_reopened` service message，或向原生
+closed topic 中继返回 `TOPIC_CLOSED`。Telegram Core API 将 closed 定义为该 topic
+不接受消息；不能假设管理员 / bot 有发送例外。
+
+### 2. 签名
+
+- `classifyUpdate(update, supportChatId) -> "topic_event"`：仅客服群、正整数
+  `message_id`、正整数 `message_thread_id`、且恰好一个合法 service flag 时成立。
+- `handleTopicEvent(db, botId, message) -> Promise<void>`：只投影 `topics.status`
+  与 `closed_at`，不读写 users/messages。
+- `isTopicClosedError(errorMessage?)` / `isTopicGoneError(errorMessage?)` /
+  `isTopicNotModifiedError(errorMessage?)`：均为 `src/pipeline/errors.ts` 中唯一的
+  permanent 子类谓词，不改变 client 的 `retryable|permanent` 分类。
+
+### 3. 契约
+
+- service close → `topics.status='closed', closed_at` 首次写入时间；重复 close 不刷新
+  原 `closed_at`。service reopen → `status='open', closed_at=NULL`。不存在绑定则安全忽略。
+- service message 永不进入 outbound relay、messages ledger 或用户状态变更。
+- inbound relay permanent `TOPIC_CLOSED` → 对同一 `thread_id` 调 `reopenForumTopic`；
+  Ok 或 `TOPIC_NOT_MODIFIED` 后同步 DB open，并对**同一个当前 payload**有界重试一次。
+  retryable reopen → 抛；明确 topic-gone → 走删除自愈；其他 permanent 保留 mapping 并 warn/drop。
+- topic-gone 是删除而不是关闭：只匹配明确的 deleted-topic description；open-row 自愈
+  创建替代 topic 并转发当前 payload 一次，closed-row reopen 自愈也处理当前 payload。
+- native reopen event 只改变 topic state，不等同 `/archive`；软归档用户的验证状态仍由 users
+  真值控制，重验证后再进入 topic 路由。
+
+### 4. Validation & Error Matrix
+
+| 输入/调用结果 | 消费行为 |
+|---|---|
+| 客服群合法 `forum_topic_closed` / reopened | update topic row；200；零 relay/ledger |
+| 其他群、缺/非正 message_id、缺/非法 thread、双 service flags | ignore，零 DB 写 |
+| relay `TOPIC_CLOSED` | reopen API；不会 delete mapping |
+| reopen Ok / TOPIC_NOT_MODIFIED | 同 payload retry 一次；第二次 Ok 才写 ledger |
+| reopen retryable | 抛，webhook 5xx 重推；DB state 不误删 |
+| reopen `message thread not found` / TOPIC_ID_INVALID | topic-gone rebuild；当前普通消息继续 |
+| 其他 permanent | warn/drop，绑定保留 |
+
+### 5. Good / Base / Bad
+
+- **Good**：关状态与 topic-gone 分谓词；`TOPIC_CLOSED` reopen + 单次 retry 同一个 update payload；第二次失败时不循环、不写账本。
+- **Base**：service event 更新状态，重推同事件只再次投影相同状态。
+- **Bad**：把 `TOPIC_CLOSED` 当 topic-gone 删除绑定；或把 reopen permanent 吞掉后继续写账本；或在 closed topic 发 final confirmation。
+
+### 6. 必需测试
+
+- classify 合法 / malformed service event 与 foreign chat；webhook topic_event 写 DB 并断言零 Telegram relay、零 ledger。
+- 重复 close 保持 closed_at 稳定；reopen 清 closed_at；users 验证态 / note / ledger 不变。
+- inbound `TOPIC_CLOSED`：reopen 只调用一次，payload 到原 thread 并只记一条账本；retryable、TOPIC_NOT_MODIFIED、topic-gone、其他 permanent 各断言终态。
+- 原生删除 open row：第一次 old-thread send permanent，当前 payload 在替代 thread 成功并只写一条账本。
+- `/start` + open dead binding：不得伪探测 / 不得把 start 写账本；文档注明普通消息才触发检测（Bot API 无只读 topic 查询）。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+if (!relay.ok && relay.kind === "permanent") {
+  await deleteTopicBinding(db, botId, userId); // TOPIC_CLOSED 也会误删绑定
+  return;
+}
+```
+
+#### Correct
+
+```ts
+if (!relay.ok && relay.kind === "permanent" && isTopicClosedError(relay.errorMessage)) {
+  await reopenForumTopic(...);
+  // 仅 Ok / TOPIC_NOT_MODIFIED 时把同一 payload 重试一次；失败不写账本
+}
+```

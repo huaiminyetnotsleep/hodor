@@ -154,6 +154,56 @@ describe("classify: 无 message / 畸形形态", () => {
   });
 });
 
+describe("classify: Telegram 原生 forum topic 状态事件", () => {
+  it("客服群带合法 thread 的 forum_topic_closed / reopened → topic_event", () => {
+    const base = {
+      chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+      message_thread_id: 123,
+    };
+    expect(
+      classifyUpdate(update(message({ ...base, forum_topic_closed: {} })), SUPPORT_CHAT_ID),
+    ).toBe("topic_event");
+    expect(
+      classifyUpdate(update(message({ ...base, forum_topic_reopened: {} })), SUPPORT_CHAT_ID),
+    ).toBe("topic_event");
+  });
+
+  it("其他群、缺 thread、双事件或畸形事件 → ignore", () => {
+    expect(
+      classifyUpdate(
+        update(message({ chat: { id: -1009876543210, type: "supergroup" }, message_thread_id: 123, forum_topic_closed: {} })),
+        SUPPORT_CHAT_ID,
+      ),
+    ).toBe("ignore");
+    expect(
+      classifyUpdate(update(message({ chat: { id: SUPPORT_CHAT_ID, type: "supergroup" }, forum_topic_closed: {} })), SUPPORT_CHAT_ID),
+    ).toBe("ignore");
+    expect(
+      classifyUpdate(
+        update(message({
+          chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+          message_thread_id: 123,
+          forum_topic_closed: {},
+          forum_topic_reopened: {},
+        })),
+        SUPPORT_CHAT_ID,
+      ),
+    ).toBe("ignore");
+    expect(
+      classifyUpdate(
+        update(message({ chat: { id: SUPPORT_CHAT_ID, type: "supergroup" }, message_thread_id: 123, forum_topic_closed: null })),
+        SUPPORT_CHAT_ID,
+      ),
+    ).toBe("ignore");
+    expect(
+      classifyUpdate(
+        update(message({ message_id: "not-an-id", chat: { id: SUPPORT_CHAT_ID, type: "supergroup" }, message_thread_id: 123, forum_topic_closed: {} })),
+        SUPPORT_CHAT_ID,
+      ),
+    ).toBe("ignore");
+  });
+});
+
 describe("classify: supportChatId === null（env 畸形）fail-closed", () => {
   it("私聊 → ignore（宁可零副作用，不产生半吊子转发）", () => {
     expect(classifyUpdate(update(message()), null)).toBe("ignore");

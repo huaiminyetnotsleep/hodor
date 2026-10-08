@@ -21,7 +21,7 @@
                              │ SQL
                              ▼
                        ┌──────────┐
-                       │  D1 数据库 │ （六张表）
+                       │  D1 数据库 │ （七张表）
                        └──────────┘
 ```
 
@@ -51,7 +51,7 @@
 | 检查项 | 内容 |
 | --- | --- |
 | 环境变量 | 必填变量已配置且格式合法（如 `SUPPORT_CHAT_ID` 以 `-100` 开头） |
-| 数据库 | `HODOR_DB` 绑定可用、六张表已建（迁移已执行） |
+| 数据库 | `HODOR_DB` 绑定可用、七张表已建（迁移已执行） |
 | Webhook 绑定 | 通过 `getWebhookInfo` 确认 webhook 已指向本 Worker 的 `/webhook` |
 
 - 全部通过：`{"status":"ok","version":"x.y.z"}`
@@ -83,7 +83,7 @@ update 到达
  │ ⑦ 限频门：60 秒固定窗口计数 ≥ MAX_MESSAGES_PER_MINUTE？
  │      → 标记未验证 + 发新验证码（提示含限频数字），丢弃
  │ ⑧ 确保 topic：查 topics 表；无则 createForumTopic + 置顶用户信息
- │      （置顶消息 ID 落库，昵称/验证/高危/备注变化自动刷新）；deluser 过的用户 → 重开
+ │      （置顶消息 ID 落库，昵称/验证/高危/备注变化自动刷新）；native close / archive 用户回访 → reopenForumTopic
  │ ⑨ 欢迎语：新用户或 /start 触发（每用户每分钟 ≤1 次）；
  │      /start 到此结束——入口命令不中继、不落账本
  │ ⑩ per-type send 中继到 topic → 成功后写 messages 账本（双端消息 ID）
@@ -100,12 +100,10 @@ update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
  │      否 + 普通文本 → 静默忽略
  │ ③ 内容抽取（支持集之外安全忽略）
  │ ④ 管理员 / 开头 → 命令管线（/help /ban /unban /note /unnote /risk /unrisk
- │      /verifyon /verifyoff /verifymode，未知命令提示；不中继不账本；
- │      /ban /unban /note /unnote /risk /unrisk 需 topic 绑定，
- │      /help 与验证三命令全局生效，无需绑定）
- │ ⑤ thread_id 反查 topics → user
- │      查无用户或 topic 已关闭 → 在该 topic 内提示「找不到对应用户」（T26）
- │ ⑥ per-type send 私聊送达（不带 thread）→ 成功后写 messages 账本 → 返回 200
+ │      /archive /deluser /purgemsg /wipealldata /verifyon /verifyoff /verifymode；
+ │      命令不中继不账本；归档/物理删除需绑定，其余按命令语义授权）
+ │ ⑤ thread_id 反查 topics → user；native closed topic 不接受新群消息，原生 reopen 服务事件同步 DB
+ │ ⑥ open topic 的管理员消息 per-type send 私聊送达 → 成功后写 messages 账本 → 返回 200
 ```
 
 ## 验证状态机
@@ -119,7 +117,7 @@ update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
                               │   限频超限 / VERIFY_TTL 过期
                               └──────────────────────┘
                               ▲
-                              │ /deluser（同时关闭 topic，阶段 6）
+                              │ /archive（关闭 topic 并清验证；deluser 硬删整条记录，阶段 6）
                               └──────────────────────┘
 ```
 
@@ -173,7 +171,7 @@ src/
 | --- | --- |
 | 媒体 file_id 直传，不落盘 | `sendPhoto`/`sendVideo` 等按 file_id 原样发送（T22 已交付：7 类媒体 + 文本）；零存储成本、零 R2 依赖，部署门槛最低。代价是 Telegram 服务端为唯一存储（可接受，不做本地留存） |
 | token 永不进 URL | URL 会留在浏览器历史、CF 访问日志等处，泄漏即被接管 bot。管理端点用独立的 `ADMIN_SECRET` 鉴权，token 只从 env 读取 |
-| 一人一 topic，deluser 后复用 | 管理员在同一个 topic 看到该用户完整历史；群组不堆积僵尸 topic；省去「新建 topic 重名」和墓碑表的复杂度 |
+| 一人一 topic，archive 后复用、deluser 后删除 | `/archive` 保留绑定 / 历史 / 备注并在回访时重开；`/deluser` 物理删除 topic + Hodor 数据；native close/reopen 服务事件同步 topic 状态 |
 | 全表带 bot_id | v1 单 bot，但数据模型天然支持多 bot：未来按 bot 独立 webhook 路径接入时只改接入层，不动数据 |
 | 无框架，原生 fetch | 端点总共只有 4 个，引入 Web 框架收益极低；零运行时依赖也让免费额度占用最小 |
 | 提示回复限频（每用户每分钟 1 次） | 防止攻击者用「垃圾消息 → 触发提示回复」反向刷 CF 请求额度 |

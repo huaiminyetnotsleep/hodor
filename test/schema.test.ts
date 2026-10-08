@@ -1,4 +1,4 @@
-// 六表齐备 + 关键约束生效 + settings 读写冒烟（T04）
+// 七表齐备 + 关键约束生效 + settings 读写冒烟（T04）
 // 原则：本阶段尚无 store 层，直接用 env.HODOR_DB 裸 SQL 断言 schema 本身
 import { applyD1Migrations, env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -8,8 +8,8 @@ beforeAll(async () => {
   await applyD1Migrations(env.HODOR_DB, env.TEST_MIGRATIONS);
 });
 
-describe("schema: 六表齐备", () => {
-  it("sqlite_master 恰好包含六张业务表", async () => {
+describe("schema: 七表齐备", () => {
+  it("sqlite_master 恰好包含七张业务表", async () => {
     const { results } = await env.HODOR_DB.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table'" +
         // 排除内部表：sqlite_%（SQLite 内部）、d1_migrations（wrangler 迁移台账）、
@@ -19,6 +19,7 @@ describe("schema: 六表齐备", () => {
     ).all<{ name: string }>();
     expect(results.map((row) => row.name)).toEqual([
       "bots",
+      "delete_confirmations",
       "messages",
       "processed_updates",
       "settings",

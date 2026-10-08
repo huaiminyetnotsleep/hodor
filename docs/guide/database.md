@@ -1,6 +1,6 @@
 # 数据表
 
-hodor 只依赖一个 D1 数据库，共六张表。
+hodor 只依赖一个 D1 数据库，共七张表。
 
 **全局约定**：
 
@@ -27,7 +27,7 @@ UNIQUE `(bot_id, user_id)`
 | --- | --- | --- |
 | `bot_id` / `user_id` | INTEGER | 联合唯一，用户 Telegram ID |
 | `first_name` / `last_name` / `username` | TEXT | 展示缓存，置顶信息用 |
-| `status` | TEXT | `active` / `deleted`（`/deluser` 后置 deleted） |
+| `status` | TEXT | `active` / `deleted`（`/archive` 后置 deleted 表示软归档；重新通过验证并恢复会话后置 active；`/deluser` 物理删除时删行） |
 | `is_banned` | 0/1 | `/ban` 禁言标记 |
 | `is_risk` | 0/1 | `/risk` 高危标记 |
 | `is_verified` / `verified_at` | 0/1, TEXT | 验证状态与通过时间 |
@@ -49,13 +49,13 @@ UNIQUE `(bot_id, user_id)` **和** UNIQUE `(bot_id, thread_id)` 双向唯一：
 | `bot_id` / `user_id` | INTEGER | 联合唯一，所属用户 |
 | `thread_id` | INTEGER | topic 的 `message_thread_id`，与 bot_id 联合唯一 |
 | `title` | TEXT | 话题名，取用户昵称（`first_name`，回退 `@username` / 用户 ID） |
-| `status` | TEXT | `open` / `closed`（`/deluser` 后 closed，用户重新 start 时 reopen） |
-| `pinned_msg_id` | INTEGER | 置顶的用户信息消息 ID（建档置顶时写入；昵称变更自动刷新，risk / unrisk / deluser 后编辑更新） |
-| `note` | TEXT | 管理员备注（`/note` 写入、`/unnote` 清空，展示于置顶信息）；随 topic 终身保留，deluser 后重开仍在 |
+| `status` | TEXT | `open` / `closed`（原生 forum_topic_closed/reopened service message 同步；`/archive` 也关闭，用户回访时 reopen；`/deluser` 硬删时删行） |
+| `pinned_msg_id` | INTEGER | 置顶的用户信息消息 ID（建档置顶时写入；昵称变更自动刷新，risk / unrisk / archive 后 best-effort 更新；`/purgemsg` 重置） |
+| `note` | TEXT | 管理员备注（`/note` 写入、`/unnote` 清空，展示于置顶信息）；随 topic 终身保留，`/archive` 后仍在；`/deluser` 物理删除时清除 |
 | `created_at` / `closed_at` | TEXT | |
 
 ::: tip 设计意图
-`/deluser` 只把 `status` 置为 `closed`，**不删行**——这是「一个人终身一个 topic」复用语义的基础：用户重新 `/start` 时按 `(bot_id, user_id)` 找到原 topic 重开即可，不需要墓碑表。
+`topics.status` 表示 Telegram topic 开关状态：由原生 close/reopen service message 同步，也由 `/archive` 关闭、用户回访恢复。`users.status='deleted'` 表示 `/archive` 的软归档状态；users/topics/messages 行仍在。`/deluser` 是硬删除，会移除对应 users/topics/messages 行及 Telegram topic；不删除用户与 bot 的私聊窗口历史。
 :::
 
 ## messages — 消息账本
@@ -74,7 +74,7 @@ UNIQUE `(bot_id, user_id)` **和** UNIQUE `(bot_id, thread_id)` 双向唯一：
 
 索引：`(thread_id, created_at)`、`(user_id, created_at)`。
 
-`/purgemsg` 完成后（含部分失败）会删除该 topic 的全部账本行——账本与群内实况对齐；删除失败的消息不再被追踪，可手动删除。话题被原生删除后的自愈只清 topics 绑定行，历史账本行保留（`thread_id` 悬空无害）。
+`/purgemsg` 完成后（含部分失败）会删除该 topic 的全部账本行——账本与群内实况对齐；删除失败的消息不再被追踪，可手动删除。原生删除 topic 后自愈只清旧 topics 绑定行，历史账本行保留（`thread_id` 悬空无害）。`/deluser` 物理删除则会删除该用户对应账本行；Telegram 私聊消息不在删除范围内。`/wipealldata` 确认后先按本表删除全部群内话题（General 除外），成功后清空全表。
 
 ## settings — 运行时开关
 
@@ -95,6 +95,19 @@ UNIQUE `(bot_id, update_id)`
 | `attempts` | INTEGER | 失败重推计数，每次认领接管 +1，≥ `MAX_ATTEMPTS` 置 `failed` 跳过（防毒丸） |
 | `created_at` | TEXT | 最近认领时间（每次重试 / 接管刷新）；超过 60 秒的 `processing` 行视为崩溃残留，可被下一次重推接管 |
 
+## delete_confirmations — /deluser 二次确认（阶段 6）
+
+PK `(bot_id, prompt_msg_id)`：一条确认按钮消息一行，`prompt_msg_id` 为该警告消息在客服群的 message_id。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `user_id` / `thread_id` | INTEGER | 按钮目标用户与话题；回调必须与行完全一致 |
+| `started_at` | INTEGER | 按钮发起时间戳（秒）；60 秒有效期判定 |
+| `status` | TEXT | `pending` / `cancelled` / `confirmed`；取消与确认各用单条原子 `UPDATE ... WHERE status='pending'` 裁决，先到先得 |
+| `confirm_callback_id` | TEXT | 确认获胜的 callback id；仅该 id 的后续 webhook 重推可继续执行（TG 已删而 D1 清理失败的收敛），其他回调一律拒绝 |
+
+确认 `UPDATE` 的 `WHERE` 同时要求 topics 当前仍存在该 `(bot_id, user_id, thread_id)` 双向绑定。`/deluser` 删除用户时随 users 一并清理该表行；`/wipealldata` 确认后全表清空（清库前先按 topics 表删除全部群内话题）。
+
 ## 表间关系
 
 ```
@@ -102,5 +115,5 @@ bots ──1:n── users ──1:1── topics
               │              │
               └──1:n── messages ──┘   （messages 同时归属 user 与 topic）
 
-settings、processed_updates 为独立表
+settings、processed_updates、delete_confirmations 为独立表
 ```

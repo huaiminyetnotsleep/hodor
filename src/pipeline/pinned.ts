@@ -14,7 +14,7 @@
  *   best-effort（design §三「命令内置顶刷新」行：确认回复已反馈，置顶是
  *   展示面，两种失败均 warn 吞，绝不放大用户消息重发面）。
  * - downgradePinnedToUnverified：inbound ③ 超限 / ② TTL 过期的置顶降级 ❌
- *   （同为 best-effort；强制 verify="unverified"）；T38 /deluser 清验证后复用。
+ *   （同为 best-effort；强制 verify="unverified"）；T38 /archive 清验证后复用。
  * - pinUserCard（阶段 6 迁入）：4a 置顶流程唯一入口——inbound 首联与
  *   T39 /purgemsg 重置置顶共用同一「发信息卡 → pin → 落库」链。
  *
@@ -117,7 +117,7 @@ export async function editPinnedBestEffort(
 
 /**
  * 置顶验证行降级 ❌（inbound ③ 超限撤验证后 / ② TTL 过期撤验证后 / T38
- * /deluser 清验证后）：强制 verify="unverified"——降级时刻的置顶必须显示
+ * /archive 清验证后）：强制 verify="unverified"——降级时刻的置顶必须显示
  * ❌，即便 settings 已切到其他态（关闭态的「未启用」是门放行的展示，不是
  * 验证失败的展示）。best-effort 与 4b 刷新同款：两种失败均 warn 吞（降级
  * 失败不抛断主流程）。

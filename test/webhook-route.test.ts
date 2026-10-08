@@ -31,12 +31,14 @@ import { applyD1Migrations, env, SELF } from "cloudflare:test";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { parseMaxAttempts } from "../src/env";
 import {
+  DELUSER_TOAST_CANCELLED,
   VERIFY_EXPIRED_NOTICE,
   VERIFY_PASSED_TEXT,
   VERIFY_PASSED_TOAST,
 } from "../src/copy";
 import { handleWebhook } from "../src/routes/webhook";
 import { upsertBot } from "../src/store/bots";
+import { saveDeleteConfirmation } from "../src/store/deleteConfirmations";
 import { ensureUser, setPendingVerification } from "../src/store/users";
 import { setVerificationEnabled } from "../src/store/settings";
 import { insertTopic } from "../src/store/topics";
@@ -822,6 +824,141 @@ describe("POST /webhook: verifyoff 端到端（T31，阶段 5 M3）", () => {
   });
 });
 
+describe("POST /webhook: native topic service update 与 /deluser callback（阶段 6）", () => {
+  let stub: TelegramFetchStub;
+  beforeEach(() => {
+    stub = stubTelegramFetch();
+    stub.always("answerCallbackQuery", { status: 200, json: { ok: true, result: true } });
+    stub.always("editMessageText", { status: 200, json: { ok: true, result: { message_id: 103 } } });
+  });
+  afterEach(() => stub.restore());
+
+  it("客服群 forum_topic_closed/reopened 更新 DB 状态；服务消息零中继、零账本", async () => {
+    const userId = 7352;
+    const threadId = 852;
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: userId, first_name: "Native" });
+    await insertTopic(env.HODOR_DB, { botId: BOT_ID, userId, threadId, title: "Native" });
+
+    const closed = await postWebhook({
+      update_id: 9160,
+      message: {
+        message_id: 100,
+        chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+        message_thread_id: threadId,
+        forum_topic_closed: {},
+      },
+    });
+    expect(closed.status).toBe(200);
+    expect(await readProcessed(9160)).toEqual({ status: "processed", attempts: 0 });
+    let topic = await env.HODOR_DB.prepare(
+      "SELECT status, closed_at FROM topics WHERE bot_id = ? AND thread_id = ?",
+    ).bind(BOT_ID, threadId).first<{ status: string; closed_at: string | null }>();
+    expect(topic!.status).toBe("closed");
+    expect(topic!.closed_at).not.toBeNull();
+
+    const reopened = await postWebhook({
+      update_id: 9161,
+      message: {
+        message_id: 101,
+        chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+        message_thread_id: threadId,
+        forum_topic_reopened: {},
+      },
+    });
+    expect(reopened.status).toBe(200);
+    topic = await env.HODOR_DB.prepare(
+      "SELECT status, closed_at FROM topics WHERE bot_id = ? AND thread_id = ?",
+    ).bind(BOT_ID, threadId).first<{ status: string; closed_at: string | null }>();
+    expect(topic).toEqual({ status: "open", closed_at: null });
+    expect(stub.countOf("sendMessage")).toBe(0);
+    expect(stub.countOf("deleteMessage")).toBe(0);
+    expect(
+      await env.HODOR_DB.prepare("SELECT COUNT(*) AS n FROM messages WHERE user_id = ?")
+        .bind(userId).first<{ n: number }>(),
+    ).toEqual({ n: 0 });
+  });
+
+  it("客服群 /deluser 取消 callback 缺少 message_thread_id 时仍应结束按钮等待", async () => {
+    const userId = 7354;
+    const threadId = 854;
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: userId, first_name: "Cancel" });
+    await insertTopic(env.HODOR_DB, { botId: BOT_ID, userId, threadId, title: "Cancel" });
+    const epoch = Math.floor(Date.now() / 1000);
+    await saveDeleteConfirmation(env.HODOR_DB, BOT_ID, 103, userId, threadId, epoch);
+
+    const res = await postWebhook({
+      update_id: 9163,
+      callback_query: {
+        id: "cb-deluser-cancel-9163",
+        from: { id: ADMIN_ID, first_name: "Admin" },
+        message: { message_id: 103, chat: { id: SUPPORT_CHAT_ID, type: "supergroup" } },
+        data: `d:no:${userId}:${threadId}:${epoch}`,
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await readProcessed(9163)).toEqual({ status: "processed", attempts: 0 });
+    expect(stub.callsOf("answerCallbackQuery")[0].body).toMatchObject({
+      callback_query_id: "cb-deluser-cancel-9163",
+      text: DELUSER_TOAST_CANCELLED,
+    });
+    expect(stub.countOf("deleteForumTopic")).toBe(0);
+    expect(stub.callsOf("editMessageText")[0].body).toMatchObject({
+      chat_id: SUPPORT_CHAT_ID,
+      message_id: 103,
+      text: DELUSER_TOAST_CANCELLED,
+    });
+    expect(
+      await env.HODOR_DB.prepare("SELECT COUNT(*) AS n FROM topics WHERE bot_id = ? AND user_id = ?")
+        .bind(BOT_ID, userId).first<{ n: number }>(),
+    ).toEqual({ n: 1 });
+  });
+
+  it("客服群 /deluser 确认 callback 路由到物理删除处理器", async () => {
+    const userId = 7353;
+    const threadId = 853;
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: userId, first_name: "Delete" });
+    await insertTopic(env.HODOR_DB, { botId: BOT_ID, userId, threadId, title: "Delete" });
+    await env.HODOR_DB.prepare(
+      `INSERT INTO messages (bot_id, user_id, thread_id, direction, group_msg_id, private_msg_id, content_type)
+       VALUES (?, ?, ?, 'in', 101, 41, 'text')`,
+    ).bind(BOT_ID, userId, threadId).run();
+    stub.always("deleteForumTopic", { status: 200, json: { ok: true, result: true } });
+    const epoch = Math.floor(Date.now() / 1000);
+    await saveDeleteConfirmation(env.HODOR_DB, BOT_ID, 102, userId, threadId, epoch);
+
+    const res = await postWebhook({
+      update_id: 9162,
+      callback_query: {
+        id: "cb-deluser-9162",
+        from: { id: ADMIN_ID, first_name: "Admin" },
+        message: {
+          message_id: 102,
+          message_thread_id: threadId,
+          chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+        },
+        data: `d:yes:${userId}:${threadId}:${epoch}`,
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(await readProcessed(9162)).toEqual({ status: "processed", attempts: 0 });
+    expect(stub.countOf("deleteForumTopic")).toBe(1);
+    expect(stub.countOf("deleteMessage")).toBe(0); // 不清理私聊窗口消息
+    expect(
+      await env.HODOR_DB.prepare("SELECT COUNT(*) AS n FROM users WHERE bot_id = ? AND user_id = ?")
+        .bind(BOT_ID, userId).first<{ n: number }>(),
+    ).toEqual({ n: 0 });
+    expect(
+      await env.HODOR_DB.prepare("SELECT COUNT(*) AS n FROM topics WHERE bot_id = ? AND thread_id = ?")
+        .bind(BOT_ID, threadId).first<{ n: number }>(),
+    ).toEqual({ n: 0 });
+    expect(
+      await env.HODOR_DB.prepare("SELECT COUNT(*) AS n FROM messages WHERE bot_id = ? AND user_id = ?")
+        .bind(BOT_ID, userId).first<{ n: number }>(),
+    ).toEqual({ n: 0 });
+  });
+});
+
 describe("POST /webhook: group_callback 端到端（T40 wipe 确认，阶段 6）", () => {
   let stub: TelegramFetchStub;
   beforeEach(() => {
@@ -839,19 +976,25 @@ describe("POST /webhook: group_callback 端到端（T40 wipe 确认，阶段 6�
     data: string,
     fromId = ADMIN_ID,
     messageId = 77,
+    threadId?: number,
   ): Record<string, unknown> {
     return {
       update_id: updateId,
       callback_query: {
         id: `cb-${updateId}`,
         from: { id: fromId, first_name: "Admin" },
-        message: { message_id: messageId, chat: { id: SUPPORT_CHAT_ID, type: "supergroup" } },
+        message: {
+          message_id: messageId,
+          ...(threadId !== undefined ? { message_thread_id: threadId } : {}),
+          chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+        },
         data,
       },
     };
   }
 
-  it("确认回调全链（路由接线）：200 + 三表清空 + settings/幂等台账保留 + toast + 完成文案", async () => {
+  it("确认回调全链（路由接线）：200 + 先删全部话题再清库 + settings/幂等台账保留 + toast", async () => {
+    stub.always("deleteForumTopic", { status: 200, json: { ok: true, result: true } });
     // 播种：一个用户 + 绑定 + 账本 + 幂等台账行 + settings 翻转（验证开关关）
     await ensureUser(env.HODOR_DB, BOT_ID, { id: 7350, first_name: "W" });
     await insertTopic(env.HODOR_DB, {
@@ -870,14 +1013,22 @@ describe("POST /webhook: group_callback 端到端（T40 wipe 确认，阶段 6�
     const processedBefore = (
       await env.HODOR_DB.prepare("SELECT COUNT(*) AS n FROM processed_updates").first<{ n: number }>()
     )!.n;
+    const topicsBefore = (
+      await env.HODOR_DB.prepare("SELECT COUNT(*) AS n FROM topics").first<{ n: number }>()
+    )!.n;
 
     const res = await postWebhook(groupWipeCallback(9150, `w:yes:${epoch}`));
     expect(res.status).toBe(200);
     expect(await readProcessed(9150)).toEqual({ status: "processed", attempts: 0 });
-    // toast「正在清空」+ 原消息改完成文案（先于计数断言——证明确认分支已执行）
-    expect(stub.countOf("answerCallbackQuery")).toBe(1);
+    // toast「正在清空」→ 全部既有话题逐一删除 → toast 完成 → 清库
+    expect(stub.countOf("answerCallbackQuery")).toBe(2);
     expect(stub.callsOf("answerCallbackQuery")[0].body).toMatchObject({ text: "已确认，正在清空…" });
-    expect(stub.callsOf("editMessageText")[0].body).toMatchObject({ message_id: 77 });
+    expect(stub.callsOf("answerCallbackQuery")[1].body).toMatchObject({ text: "全部话题与 Hodor 数据已删除；私聊历史保留。" });
+    expect(stub.countOf("deleteForumTopic")).toBe(topicsBefore);
+    const deletedThreads = stub
+      .callsOf("deleteForumTopic")
+      .map((call) => (call.body as Record<string, unknown>).message_thread_id);
+    expect(deletedThreads).toContain(850);
 
     const count = async (table: string) =>
       (await env.HODOR_DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())!.n;

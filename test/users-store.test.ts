@@ -268,7 +268,7 @@ describe("store: 验证态原语（T27/T29）", () => {
     expect((await readVerifyRow())!.verified_at).not.toBeNull();
   });
 
-  it("markUnverified：撤验证 + 清 verified_at 与题目字段（超限重验 / 阶段 6 deluser 复用）", async () => {
+  it("markUnverified：撤验证 + 清 verified_at 与题目字段（超限重验 / 阶段 6 archive 复用）", async () => {
     await setPendingVerification(env.HODOR_DB, BOT_ID, VERIFY_USER, { answer: 9, msgId: 5000 });
     await markUnverified(env.HODOR_DB, BOT_ID, VERIFY_USER);
     expect(await readVerifyRow()).toEqual({

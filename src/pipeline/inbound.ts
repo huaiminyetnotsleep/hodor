@@ -90,8 +90,12 @@ import {
 import { createTelegramClient } from "../telegram/client";
 import type { TelegramClient } from "../telegram/types";
 import { sendVerificationCode } from "./verify";
-import { downgradePinnedToUnverified, pinUserCard } from "./pinned";
-import { isTopicGoneError } from "./errors";
+import { composePinnedText, downgradePinnedToUnverified, pinUserCard } from "./pinned";
+import {
+  isTopicClosedError,
+  isTopicGoneError,
+  isTopicNotModifiedError,
+} from "./errors";
 import { extractContent, relayContent } from "./content";
 import type { TelegramMessageRef } from "./classify";
 
@@ -235,7 +239,7 @@ export async function handleInbound(
   }
 
   /* ---------------- ④ 阶段 3 链（三门全过；以下逻辑不变） ---------------- */
-  const topic = await resolveTopic(env, client, {
+  let topic = await resolveTopic(env, client, {
     botId,
     userId: from.id,
     supportChatId,
@@ -243,6 +247,7 @@ export async function handleInbound(
   });
   // null = createForumTopic permanent（topic 未建），本条按已处理丢弃（阶段 2 语义）
   if (topic === null) return;
+  let currentTopic = topic;
 
   /**
    * 置顶信息正文（昵称用本次消息的最新展示字段 + 库内建档时间）：
@@ -259,23 +264,23 @@ export async function handleInbound(
       firstSeenAt: userState.firstSeenAt,
       verify: settings.verifyEnabled ? "verified" : "disabled",
       isRisk: userState.isRisk,
-      note: topic.note,
+      note: currentTopic.note,
     });
 
   /* ---------------- 4a / 4b：用户信息置顶（T24） ---------------- */
-  if (topic.pinned_msg_id === null) {
+  if (currentTopic.pinned_msg_id === null) {
     await pinUserCard(env, client, {
       botId,
       userId: from.id,
       supportChatId,
-      threadId: topic.thread_id,
+      threadId: currentTopic.thread_id,
       text: pinnedText(),
     });
   } else if (userState.displayChanged) {
     // 4b 昵称变更刷新：best-effort——两种失败都只 warn，下次变更再试
     const edited = await client.editMessageText({
       chat_id: supportChatId,
-      message_id: topic.pinned_msg_id,
+      message_id: currentTopic.pinned_msg_id,
       text: pinnedText(),
     });
     if (!edited.ok) {
@@ -297,26 +302,91 @@ export async function handleInbound(
   // 短路 = 静默完成（update 照常 processed），中继与账本（第 7 步）都不执行。
   if (isStart) return;
 
-  const relayed = await relayContent(client, payload, {
+  let relayed = await relayContent(client, payload, {
     chatId: supportChatId,
-    threadId: topic.thread_id,
+    threadId: currentTopic.thread_id,
   });
-  if (!relayed.ok) {
-    if (relayed.kind === "retryable") {
-      throw new Error(relayed.errorMessage ?? "relay retryable");
+  if (!relayed.ok && relayed.kind === "retryable") {
+    throw new Error(relayed.errorMessage ?? "relay retryable");
+  }
+
+  // 若 native close service update 尚未到达 / DB 状态落后，closed topic 的
+  // TOPIC_CLOSED permanent 仍按「关闭」处理（绝不删除 binding）：显式重开后
+  // 把同一条当前消息重试一次。Telegram 官方定义 closed topic 不接受消息，
+  // 所以回访恢复是 Hodor 调 reopenForumTopic 的受控行为。
+  if (!relayed.ok && isTopicClosedError(relayed.errorMessage)) {
+    const reopened = await client.reopenForumTopic({
+      chat_id: supportChatId,
+      message_thread_id: currentTopic.thread_id,
+    });
+    if (!reopened.ok && reopened.kind === "retryable") {
+      throw new Error(reopened.errorMessage ?? "reopenForumTopic retryable");
     }
-    // 原生删除自愈（design §五.2）：绑定指向的 thread 已被 TG 客户端删除——
-    // 回收死绑定（note 随行丢失、账本历史保留悬空无害），本条按中继 permanent
-    // 既有语义丢弃，下一条消息走新建 topic。其他 permanent（含 TOPIC_CLOSED
-    // 等）不匹配、走原语义，绝不误删可恢复的绑定。
-    if (isTopicGoneError(relayed.errorMessage)) {
+    if (!reopened.ok && !isTopicNotModifiedError(reopened.errorMessage)) {
+      if (isTopicGoneError(reopened.errorMessage)) {
+        relayed = { ok: false, kind: "permanent", errorMessage: reopened.errorMessage };
+      } else {
+        console.warn(
+          `[inbound] user ${from.id}: TOPIC_CLOSED 后 reopenForumTopic permanent，保留绑定并丢弃本条：${reopened.errorMessage ?? "no detail"}`,
+        );
+        return;
+      }
+    } else {
+      await markUserActive(env.HODOR_DB, botId, from.id);
+      await reopenTopic(env.HODOR_DB, botId, from.id);
+      relayed = await relayContent(client, payload, {
+        chatId: supportChatId,
+        threadId: currentTopic.thread_id,
+      });
+      if (!relayed.ok && relayed.kind === "retryable") {
+        throw new Error(relayed.errorMessage ?? "reopened relay retryable");
+      }
+    }
+  }
+
+  if (!relayed.ok && isTopicGoneError(relayed.errorMessage)) {
+    // 原生删除自愈：回收死映射、建替代 topic，并把同一 payload 重发一次；
+    // 当前消息尽量保留。note 随旧映射丢失，历史账本保留。
+    const deletedThread = currentTopic.thread_id;
+    await deleteTopicBinding(env.HODOR_DB, botId, from.id);
+    console.warn(
+      `[inbound] user ${from.id}: thread ${deletedThread} 已不存在，回收绑定并为当前消息创建替代 topic`,
+    );
+    const replacement = await resolveTopic(env, client, {
+      botId,
+      userId: from.id,
+      supportChatId,
+      title: resolveDisplayName(from),
+    });
+    if (replacement === null) return;
+    currentTopic = replacement;
+    const replacementCard = await composePinnedText(env.HODOR_DB, botId, from.id);
+    if (replacementCard !== null) {
+      await pinUserCard(env, client, {
+        botId,
+        userId: from.id,
+        supportChatId,
+        threadId: currentTopic.thread_id,
+        text: replacementCard,
+      });
+    }
+    relayed = await relayContent(client, payload, {
+      chatId: supportChatId,
+      threadId: currentTopic.thread_id,
+    });
+    if (!relayed.ok && relayed.kind === "retryable") {
+      throw new Error(relayed.errorMessage ?? "replacement relay retryable");
+    }
+    if (!relayed.ok && isTopicGoneError(relayed.errorMessage)) {
       await deleteTopicBinding(env.HODOR_DB, botId, from.id);
       console.warn(
-        `[inbound] user ${from.id}: 中继目标 thread ${topic.thread_id} 已不存在（topic 被删除），绑定已回收，本条丢弃，下一条消息将新建 topic`,
+        `[inbound] user ${from.id}: replacement thread ${currentTopic.thread_id} 也不存在，本条丢弃且不继续重建`,
       );
       return;
     }
-    // permanent：重试无益，消息被丢弃——**不写账本**（T25 只记成功中继）
+  }
+  if (!relayed.ok) {
+    // 其余 permanent 不是可确认的 close/delete 事件：保留绑定并警告，不写账本。
     console.warn(
       `[inbound] user ${from.id}: 中继 permanent，按已处理跳过（消息被丢弃，不写账本）：${relayed.errorMessage ?? "no detail"}`,
     );
@@ -327,7 +397,7 @@ export async function handleInbound(
   await insertMessage(env.HODOR_DB, {
     botId,
     userId: from.id,
-    threadId: topic.thread_id,
+    threadId: currentTopic.thread_id,
     direction: "in",
     groupMsgId: relayed.result.message_id,
     privateMsgId: message.message_id,
@@ -346,7 +416,7 @@ export async function handleInbound(
     const notice = await client.sendMessage({
       chat_id: supportChatId,
       text: formatRiskTopicNotice(resolveDisplayName(from)),
-      message_thread_id: topic.thread_id,
+      message_thread_id: currentTopic.thread_id,
     });
     if (!notice.ok) {
       console.warn(
@@ -368,8 +438,8 @@ interface CreateTopicContext {
  * topic 解析（阶段 2 逻辑 + 阶段 6 T38 真重开 / 原生删除自愈）：
  *
  * - open 行 → 直接复用；
- * - closed 行 → **API 先行**（reopenForumTopic ok 才动 DB——retryable 抛出时
- *   DB 仍 closed，重推原样重入本分支重试 reopen，无半开窗口）：
+   * - closed 行（native close / /archive）→ **API 先行**（reopenForumTopic ok
+   *   才动 DB——retryable 抛出时 DB 仍 closed，重推原样重入本分支重试，无半开窗口）：
  *   reopenTopic + markUserActive（users.status 复位，成对写、幂等）后返回
  *   原行（pinned_msg_id / note 保留，重开不重发置顶）；
  *   reopenForumTopic permanent 且 topic-gone（原生删除）→ deleteTopicBinding
@@ -384,15 +454,20 @@ async function resolveTopic(
   ctx: CreateTopicContext,
 ): Promise<TopicRow | null> {
   const existing = await findTopicByUser(env.HODOR_DB, ctx.botId, ctx.userId);
-  if (existing && existing.status === "open") return existing;
+  if (existing && existing.status === "open") {
+    // Native topic re-open may be the user's first activity after /archive.
+    // A successfully routed inbound message ends the soft-delete lifecycle.
+    await markUserActive(env.HODOR_DB, ctx.botId, ctx.userId);
+    return existing;
+  }
   if (existing) {
-    // closed：终身一个 topic，重开复用（阶段 6 起 /deluser 真关闭 TG 侧，
-    // 重开必须真重开——仅改 DB 状态会让后续中继全部落空）
+    // closed：终身一个 topic，重开复用（原生 close / /archive 后都必须真调用
+    // reopenForumTopic——仅改 DB 状态会让后续中继全部落空）
     const reopened = await client.reopenForumTopic({
       chat_id: ctx.supportChatId,
       message_thread_id: existing.thread_id,
     });
-    if (!reopened.ok) {
+    if (!reopened.ok && !isTopicNotModifiedError(reopened.errorMessage)) {
       if (reopened.kind === "retryable") {
         // DB 仍 closed：重推原样重入本分支重试 reopen（无半开窗口）
         throw new Error(reopened.errorMessage ?? "reopenForumTopic retryable");

@@ -26,3 +26,18 @@ export function isMessageGoneError(errorMessage?: string): boolean {
   if (!errorMessage) return false;
   return /message to delete not found/i.test(errorMessage);
 }
+
+/**
+ * closeForumTopic / reopenForumTopic 幂等重试：目标状态已生效时 Telegram 可能
+ * 返回 TOPIC_NOT_MODIFIED。只在对应的 close/reopen 状态转换处将其视为成功。
+ */
+export function isTopicNotModifiedError(errorMessage?: string): boolean {
+  if (!errorMessage) return false;
+  return /TOPIC_NOT_MODIFIED/i.test(errorMessage);
+}
+
+/** 向 native closed topic 发消息时的 permanent 响应；关闭不等同删除，应重开再重试。 */
+export function isTopicClosedError(errorMessage?: string): boolean {
+  if (!errorMessage) return false;
+  return /TOPIC_CLOSED/i.test(errorMessage);
+}

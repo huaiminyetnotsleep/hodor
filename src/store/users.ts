@@ -360,9 +360,8 @@ export async function setBanned(
 }
 
 /**
- * 置用户 deleted 态（T38 /deluser 的 DB 真值先行步骤之一）：status 列为
- * 运维可读的会话终态标记（database.md 既定契约），不参与任何门控判定——
- * 门控行为由 deluser 同步清掉的验证字段（markUnverified）决定。幂等 setter。
+ * 置用户 deleted 态（T38 /archive 的 DB 状态之一）：表示软归档，不删除 users 行，
+ * 也不参与验证门判定；验证态由 markUnverified 单独清理。物理 /deluser 会删行。幂等 setter。
  */
 export async function markUserDeleted(
   db: D1Database,

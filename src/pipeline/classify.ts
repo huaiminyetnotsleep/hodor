@@ -1,5 +1,5 @@
 /**
- * update 分流（T15 + T27 callback 分流 + T40 群内回调分流）：纯函数，无 IO、无副作用。
+ * update 分流（T15/T27 callback + T38 deluser callback + 原生 topic service event + T40 群回调）：纯函数，无 IO。
  *
  * 输入是 webhook 解析出的 JSON（不可信），所以一切字段先做运行时形态校验，
  * 任何不完整 / 非预期形态一律 'ignore'（安全忽略，零副作用）。
@@ -8,8 +8,9 @@
  * - callback_query 存在 → 回调形态（id / from.id / message.message_id /
  *   message.chat.id 数值全合法）后按 chat 归属：
  *   chat.type === 'private' → callback（私聊题面按钮，T27）；
- *   chat.id === SUPPORT_CHAT_ID → group_callback（客服群内按钮，T40 wipe 确认）；
+ *   chat.id === SUPPORT_CHAT_ID → group_callback（客服群内按钮，T38/T40 确认）；
  *   其他群 / 畸形 → ignore
+ * - 客服群 message 带 forum_topic_closed / forum_topic_reopened + 合法 thread → topic_event
  * - 无 message 且无 callback_query（edited_message / channel_post 等）→ ignore
  * - chat.type === 'private' → inbound（用户私聊）
  * - chat.id === SUPPORT_CHAT_ID 且带 message_thread_id → outbound（topic 内发言）
@@ -22,6 +23,7 @@ export type UpdateClassification =
   | "outbound"
   | "callback"
   | "group_callback"
+  | "topic_event"
   | "ignore";
 
 /** update.message.from 的最小子集（入站建档 / 出站管理员判定用） */
@@ -54,6 +56,8 @@ export interface TelegramMessageRef {
   animation?: unknown;
   /** 媒体 caption（与 photo/video/voice/audio/document/animation 搭配，sticker 不可能携带） */
   caption?: unknown;
+  forum_topic_closed?: unknown;
+  forum_topic_reopened?: unknown;
 }
 
 /** Telegram update 信封的最小子集（无关字段忽略） */
@@ -77,6 +81,7 @@ export interface TelegramCallbackQueryRef {
   message?: {
     message_id: number;
     chat: { id: number; type: string };
+    message_thread_id?: number;
   };
   data?: string;
 }
@@ -138,7 +143,15 @@ export function classifyUpdate(
   if (chat.type === "private") return "inbound";
 
   if (chat.id === supportChatId) {
-    return typeof message.message_thread_id === "number" ? "outbound" : "ignore";
+    const validThread = Number.isSafeInteger(message.message_thread_id) && (message.message_thread_id as number) > 0;
+    const validMessageId = Number.isSafeInteger(message.message_id) && (message.message_id as number) > 0;
+    const hasClosedEvent = isRecord(message.forum_topic_closed);
+    const hasReopenedEvent = isRecord(message.forum_topic_reopened);
+    const hasTopicEvent = "forum_topic_closed" in message || "forum_topic_reopened" in message;
+    if (hasTopicEvent) {
+      return validMessageId && validThread && hasClosedEvent !== hasReopenedEvent ? "topic_event" : "ignore";
+    }
+    return validThread ? "outbound" : "ignore";
   }
   return "ignore";
 }

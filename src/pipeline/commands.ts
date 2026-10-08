@@ -1,51 +1,23 @@
 /**
- * 命令管线（T34 /help + T35 /ban /unban + T36/T37 note / risk 组 + T31/T32
- * verifyon / verifyoff / verifymode 组 + 阶段 6 T38 /deluser、T39 /purgemsg、
- * T40 /wipealldata，design.md §二.6 / §二.9 / §二.10 + §四失败表）：
+ * 管理命令管线（T34/T35/T36/T37/T31/T32 + T38/T39/T40）：
+ * outbound 在管理员校验后把 `/` 开头文本整条移交本管线——命令永不中继、永不
+ * 写 messages 账本。非管理员命令的提示由 outbound 管线处理。
  *
- * outbound 在管理员校验后把 `/` 开头的文本消息整条移交本管线——**一律按
- * 命令终结，永不中继、永不写账本**（命令是客服侧治理操作而非对话内容）；
- * 非管理员 `/` 沿用阶段 3 静默（outbound 管理员校验已挡，本文件不重复判）。
- *
- * 命令语义：
- * - /help → 回当前 topic formatHelpText（只列已交付命令 + 「/ 开头消息不中继」；
- *   验证段接库内 settings 真值——开 → 展示 /verifyoff，关 → /verifyon）
- * - /ban / /unban → 反查绑定（**open 与 closed 均可操作**——治理操作不依赖
- *   topic 开放；无绑定 → 复用 T26 UNBOUND_TOPIC_NOTICE）→ setBanned
- *   （DB 真值先行，幂等 setter——确认消息失败重推不产生二次状态翻转）
- *   → topic 内确认（携带目标用户 ID 便于管理员核对）
- * - /note / /unnote / /risk / /unrisk（T36/T37，/ban 同姿态需绑定组）：
- *   /note 空参数先回用法提示（绝不误写空备注）；有绑定 → 幂等 setter 落库
- *   （DB 真值先行）→ 置顶刷新（editPinnedBestEffort，best-effort）→ topic
- *   确认（回显写入的备注 / 携带目标用户 ID）。/risk 的窗口重置语义在 setter
- *   内（置 1 清 risk_notice_at——下一条消息重新提醒一次）
- * - /verifyon / /verifyoff / /verifymode（T31/T32，**全局命令**——/help 同
- *   姿态，任意 topic 可执行无需绑定）：开关 = 幂等 setter（重复执行同值
- *   无害，确认照发）；/verifymode 无参循环切换（math ↔ button），先
- *   clearAllPendingVerifications 后 setVerificationMode（顺序 binding，见
- *   分支注释），确认携带新模式 + button 弱防护说明
- * - /deluser（T38，需绑定组）→ DB 真值先行三 setter（markUnverified +
- *   markUserDeleted + closeTopic）→ closeForumTopic（permanent warn 吞 +
- *   确认注记）→ 置顶降级 ❌（best-effort）→ 用户私聊「请重新 /start」
- *   提示（直发不占 slot）→ topic 确认（含失败注记）。绑定 / 账本 / note 保留
- * - /purgemsg（T39，需绑定组）→ 账本 + 置顶取删除列表 → 逐条 deleteMessage
- *   三态计数（已删 / 已不存在 / 失败）→ 清账本 + clearPinnedMsgId →
- *   pinUserCard 立即重置置顶（4a 同链）→ topic 确认（failed>0 明示未清空）
- * - /wipealldata（T40，全局命令）→ 只发警告 + 确认键盘（60s 窗口编入
- *   callback_data，无服务端状态）；真正执行在确认回调（pipeline/wipe.ts）
- * - 未知命令 → topic 内「未知命令」提示并引导 /help，**绝不发给用户**
- *
- * 失败语义（design.md §四「命令回复」行，binding）：回复 retryable → 抛
- * （webhook 500 → 重推重发回复）；permanent → warn 吞（跳过该条回复）。
- * 置顶刷新恒 best-effort（§三「命令内置顶刷新」行：确认回复已反馈，edit
- * 两种失败均 warn 吞）。命令回复全部发回管理员发言的同一 topic（classify
- * 保证 chat 即客服群）：零用户侧消息（/deluser 的私聊提示除外——治理语义
- * 的一部分）、零 messages 账本行（系统消息不入账本，error-handling spec）。
+ * - `/archive`：soft lifecycle 操作，关闭 TG topic、清验证并保留 users/topics/messages/note；
+ *   close 后结果发到客服群 General，绝不依赖向 closed topic 发送。
+ * - `/deluser`：只发物理删除警告键盘；真正执行在 pipeline/deluser.ts callback，
+ *   先删 TG topic，再批量清对应 users/topics/messages；结果用 callback toast。
+ * - `/purgemsg`：绑定 scope，账本 + pinned 驱动的群内消息清理。
+ * - `/wipealldata`：全局 scope，两步确认后先删全部群内话题再清数据库（执行在 pipeline/wipe.ts）。
+ * - 其余命令维持既有分流与三态失败语义；所有系统消息零 messages 账本。
  */
 import {
-  DELUSER_USER_NOTICE,
+  ARCHIVE_CLOSE_FAILED_TEXT,
+  ARCHIVE_PREPARING_TEXT,
+  ARCHIVE_SUCCESS_TEXT,
+  ARCHIVE_USER_NOTICE,
+  DELUSER_WARNING_TEXT,
   formatBanConfirmed,
-  formatDeluserConfirmed,
   formatHelpText,
   formatNoteConfirmed,
   formatPurgeConfirmed,
@@ -68,7 +40,8 @@ import {
   pinUserCard,
 } from "./pinned";
 import { buildWipeKeyboard } from "./wipe";
-import { isMessageGoneError } from "./errors";
+import { buildDeluserKeyboard } from "./deluser";
+import { isMessageGoneError, isTopicGoneError, isTopicNotModifiedError } from "./errors";
 import {
   clearPinnedMsgId,
   closeTopic,
@@ -93,6 +66,7 @@ import {
   setVerificationMode,
 } from "../store/settings";
 import { createTelegramClient } from "../telegram/client";
+import { saveDeleteConfirmation } from "../store/deleteConfirmations";
 import type { InlineKeyboardMarkup } from "../telegram/types";
 
 /**
@@ -146,6 +120,23 @@ async function replyInTopic(
     console.warn(
       `[commands] thread ${threadId}: 命令回复 permanent，跳过：${sent.errorMessage ?? "no detail"}`,
     );
+  }
+}
+
+/**
+ * 话题已关闭后不能依赖向原 thread 发消息；归档结果改发客服群 General。
+ * 这是系统反馈，不进入对话账本。retryable 抛出后命令重推以幂等状态收敛。
+ */
+async function replyInGeneral(
+  env: Cloudflare.Env,
+  chatId: number,
+  text: string,
+): Promise<void> {
+  const client = createTelegramClient(env.TELEGRAM_BOT_TOKEN);
+  const sent = await client.sendMessage({ chat_id: chatId, text });
+  if (!sent.ok) {
+    if (sent.kind === "retryable") throw new Error(sent.errorMessage ?? "sendMessage retryable");
+    console.warn(`[commands] General 命令反馈 permanent，跳过：${sent.errorMessage ?? "no detail"}`);
   }
 }
 
@@ -277,62 +268,78 @@ export async function handleCommand(
     return;
   }
 
-  /* ------------- T38 /deluser（需绑定，/ban 同姿态） ------------- */
-  if (name === "/deluser") {
-    // 反查绑定：closed 行同样可操作（治理操作不依赖 open）；无行 → T26 提示
+  /* ------------- T38 /archive（需绑定：软归档，保留历史并清验证） ------------- */
+  if (name === "/archive") {
     const owner = await findUserIdByThread(env.HODOR_DB, botId, threadId);
     if (!owner) {
       await replyInTopic(env, chatId, threadId, UNBOUND_TOPIC_NOTICE);
       return;
     }
     const client = createTelegramClient(env.TELEGRAM_BOT_TOKEN);
-    // DB 真值先行（全部幂等 setter，重推 / 重复执行同值无害）：清验证与信任
-    // 状态 + users.status=deleted + topics 行 closed。绑定行 / 账本 / note 不动
-    //（「保留绑定、历史与备注」）。
-    await markUnverified(env.HODOR_DB, botId, owner.user_id);
-    await markUserDeleted(env.HODOR_DB, botId, owner.user_id);
-    await closeTopic(env.HODOR_DB, botId, owner.user_id);
-    // TG 侧真关闭（阶段 6 起关闭是物理关闭，重开链路据此补 reopenForumTopic）：
-    // retryable → 抛（重推幂等重关）；permanent（典型：topic 已被原生删除 /
-    // 重复 /deluser）→ warn 吞并注记——DB 真值已定，关闭失败不阻断命令
-    let closeFailed: string | undefined;
+    // 先向尚可写的 topic 发送操作说明；Telegram 明确规定 closed topic 不能再收消息。
+    // 后续最终结果发往 General，TOPIC_NOT_MODIFIED 视为重推时已关闭的幂等成功。
+    await replyInTopic(env, chatId, threadId, ARCHIVE_PREPARING_TEXT);
     const closed = await client.closeForumTopic({
       chat_id: chatId,
       message_thread_id: threadId,
     });
-    if (!closed.ok) {
-      if (closed.kind === "retryable") {
-        throw new Error(closed.errorMessage ?? "closeForumTopic retryable");
-      }
-      closeFailed = closed.errorMessage ?? "no detail";
-      console.warn(
-        `[commands] thread ${threadId}: closeForumTopic permanent（DB 已置 closed）：${closeFailed}`,
-      );
+    const topicGone = !closed.ok && closed.kind === "permanent" && isTopicGoneError(closed.errorMessage);
+    if (!closed.ok && closed.kind === "retryable") {
+      throw new Error(closed.errorMessage ?? "closeForumTopic retryable");
     }
-    // 置顶验证行降级 ❌（best-effort）：验证已清，置顶不得残留 ✅
+    if (!closed.ok && !topicGone && !isTopicNotModifiedError(closed.errorMessage)) {
+      console.warn(
+        `[commands] thread ${threadId}: archive closeForumTopic permanent，归档未写库：${closed.errorMessage ?? "no detail"}`,
+      );
+      await replyInGeneral(env, chatId, ARCHIVE_CLOSE_FAILED_TEXT);
+      return;
+    }
+
+    // 软归档：用户行与 topic 绑定、账本、备注均保留；只清验证态、设置软删除标记。
+    // setter 幂等，D1 中途失败后重推会再次完成；closeForumTopic already-closed 被视为成功。
+    await markUnverified(env.HODOR_DB, botId, owner.user_id);
+    await markUserDeleted(env.HODOR_DB, botId, owner.user_id);
+    await closeTopic(env.HODOR_DB, botId, owner.user_id);
+    // 置顶编辑在 close 后只是 best-effort 展示刷新；权限或 closed 限制失败不影响归档。
     await downgradePinnedToUnverified(env, client, botId, owner.user_id);
-    // 用户私聊提示：直发不占提示频控 slot（管理员主动触发的治理通知，无
-    // 用户侧刷量面）；retryable → 抛；permanent（如拉黑 bot）→ warn 吞 + 注记
+
     let noticeFailed = false;
-    const noticed = await client.sendMessage({
-      chat_id: owner.user_id,
-      text: DELUSER_USER_NOTICE,
-    });
+    const noticed = await client.sendMessage({ chat_id: owner.user_id, text: ARCHIVE_USER_NOTICE });
     if (!noticed.ok) {
-      if (noticed.kind === "retryable") {
-        throw new Error(noticed.errorMessage ?? "sendMessage retryable");
-      }
+      if (noticed.kind === "retryable") throw new Error(noticed.errorMessage ?? "sendMessage retryable");
       noticeFailed = true;
-      console.warn(
-        `[commands] user ${owner.user_id}: 重新 start 提示 permanent，跳过：${noticed.errorMessage ?? "no detail"}`,
-      );
+      console.warn(`[commands] user ${owner.user_id}: archive DM notice permanent: ${noticed.errorMessage ?? "no detail"}`);
     }
-    await replyInTopic(
+    await replyInGeneral(
       env,
       chatId,
-      threadId,
-      formatDeluserConfirmed(owner.user_id, { closeFailed, noticeFailed }),
+      `${ARCHIVE_SUCCESS_TEXT}${topicGone ? " 原话题已不存在，用户回访时会自动创建替代话题。" : ""}${noticeFailed ? " 私聊提示未送达。" : ""}`,
     );
+    return;
+  }
+
+  /* ------------- T38 /deluser（物理删除，二次确认） ------------- */
+  if (name === "/deluser") {
+    const owner = await findUserIdByThread(env.HODOR_DB, botId, threadId);
+    if (!owner) {
+      await replyInTopic(env, chatId, threadId, UNBOUND_TOPIC_NOTICE);
+      return;
+    }
+    const startedAt = Math.floor(Date.now() / 1000);
+    const client = createTelegramClient(env.TELEGRAM_BOT_TOKEN);
+    const prompt = await client.sendMessage({
+      chat_id: chatId,
+      message_thread_id: threadId,
+      text: DELUSER_WARNING_TEXT,
+      reply_markup: buildDeluserKeyboard(owner.user_id, threadId, startedAt),
+    });
+    if (!prompt.ok) {
+      if (prompt.kind === "retryable") throw new Error(prompt.errorMessage ?? "sendMessage retryable");
+      console.warn(`[commands] thread ${threadId}: 删除确认发送 permanent，跳过：${prompt.errorMessage ?? "no detail"}`);
+      return;
+    }
+    // 按钮消息 ID 是一次确认的身份；落库失败时已发出的按钮无法通过确认校验。
+    await saveDeleteConfirmation(env.HODOR_DB, botId, prompt.result.message_id, owner.user_id, threadId, startedAt);
     return;
   }
 

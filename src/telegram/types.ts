@@ -136,7 +136,7 @@ export interface DeleteForumTopicParams {
 /* 阶段 6（T38–T39）：topic 开关 + 消息删除                              */
 /* ------------------------------------------------------------------ */
 
-/** closeForumTopic 入参（T38 /deluser：TG 侧真关闭；对已关闭 topic 幂等） */
+/** closeForumTopic 入参（原生 topic 状态同步 / T38 archive 软归档） */
 export interface CloseForumTopicParams {
   chat_id: number;
   message_thread_id: number;
@@ -144,7 +144,7 @@ export interface CloseForumTopicParams {
 
 /**
  * reopenForumTopic 入参（T38 重开链路：closed 行复用前真重开——阶段 6 起
- * /deluser 真关闭 TG topic，仅改 DB 状态不再够用）
+ * 原生 close / /archive 真关闭 TG topic，仅改 DB 状态不再够用）
  */
 export interface ReopenForumTopicParams {
   chat_id: number;

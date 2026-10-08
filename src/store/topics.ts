@@ -19,7 +19,7 @@ export interface TopicRow {
   pinned_msg_id: number | null;
   /**
    * 管理员备注（topics.note，T36）：置顶信息「备注」行的数据源；随 topic
-   * 终身保留（存 topics 行而非 users——/deluser 关 topic 后重开仍在）
+   * 终身保留（存 topics 行而非 users——/archive 或原生 close 后重开仍在）
    */
   note: string | null;
 }
@@ -73,7 +73,24 @@ export async function setPinnedMsgId(
     .run();
 }
 
-/** 重开 closed 行（/deluser 置 closed 后用户再来即重开；closed_at 清空） */
+/** 重开 closed 行（原生 close / archive 后用户再来即重开；closed_at 清空） */
+export async function setTopicStateByThread(
+  db: D1Database,
+  botId: number,
+  threadId: number,
+  closed: boolean,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      closed
+        ? "UPDATE topics SET status = 'closed', closed_at = COALESCE(closed_at, ?) WHERE bot_id = ? AND thread_id = ?"
+        : "UPDATE topics SET status = 'open', closed_at = NULL WHERE bot_id = ? AND thread_id = ?",
+    )
+    .bind(...(closed ? [nowIso(), botId, threadId] : [botId, threadId]))
+    .run();
+  return result.meta.changes === 1;
+}
+
 export async function reopenTopic(
   db: D1Database,
   botId: number,
@@ -88,7 +105,7 @@ export async function reopenTopic(
 }
 
 /**
- * 关闭映射行（T38 /deluser 的 DB 真值先行步骤之一）：status='closed' +
+ * 关闭映射行（T38 /archive 的 DB 真值先行步骤之一）：status='closed' +
  * closed_at。幂等 setter——重推 / 重复执行同值无害；行删除与否由 closeForumTopic
  * 结果决定，本函数不做存在性判断（与 setBanned 同姿态，调用方先反查绑定）。
  */

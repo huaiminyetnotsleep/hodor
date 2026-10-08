@@ -210,7 +210,7 @@ export function createTelegramClient(token: string): TelegramClient {
       request<CreateForumTopicResult>("createForumTopic", { ...params }),
     deleteForumTopic: (params: DeleteForumTopicParams) =>
       request<boolean>("deleteForumTopic", { ...params }),
-    // T38 /deluser 关闭 + 重开链路：参数蛇形原样透传（与 deleteForumTopic 同款）
+    // Telegram 原生 topic state / T38 archive：参数蛇形原样透传（与 deleteForumTopic 同款）
     closeForumTopic: (params: CloseForumTopicParams) =>
       request<boolean>("closeForumTopic", { ...params }),
     reopenForumTopic: (params: ReopenForumTopicParams) =>

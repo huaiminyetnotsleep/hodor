@@ -307,7 +307,7 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
       const text = formatHelpText(settings);
       for (const command of [
         "/help", "/ban", "/unban", "/note", "/unnote", "/risk", "/unrisk", "/verifymode",
-        "/deluser", "/purgemsg", "/wipealldata",
+        "/archive", "/deluser", "/purgemsg", "/wipealldata",
       ]) {
         expect(text).toContain(command);
       }
@@ -343,7 +343,7 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
     expect(menuCommands).toEqual([
       "help", "ban", "unban", "note", "unnote", "risk", "unrisk",
       "verifyon", "verifyoff", "verifymode",
-      "deluser", "purgemsg", "wipealldata",
+      "archive", "deluser", "purgemsg", "wipealldata",
     ]);
 
     for (const settings of [
