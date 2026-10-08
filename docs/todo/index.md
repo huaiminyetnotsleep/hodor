@@ -18,11 +18,11 @@
 - [x] **T04** vitest + vitest-pool-workers 测试基座与数据库冒烟用例。
 - [x] **T05** Git 集成构建自动创建 D1 并绑定；品牌前缀防冲突，权限不足时提供 API token 配置引导。
 - [x] **T06** 部署自动执行数据库迁移，覆盖新部署、已有数据升级及迁移失败恢复。
-- [ ] **T07** `/health` 完整自检：环境变量、数据库六表、Webhook 指向本 Worker，不回显密钥。
+- [x] **T07** 完整自检 `GET /selfcheck`（`/health` 保持纯存活探针）：环境变量（含三 Secret 互异与选填值域）、数据库七表、Webhook 指向本 Worker，不回显密钥。（2026-10-08 验收：端点形态为 GET /selfcheck——用户决策 /health 拆分纯探针 + 无鉴权公开自检端点；缺变量 / 缺表 / 未绑定 / 指向错误 / getWebhookInfo 调用失败均可定位，另含三密钥互异与选填值域检查；证据 test/selfcheck*.test.ts 21 用例）
 - [x] **T08** 构建脚本从 package.json 注入版本，生成模块 gitignored，`/health` 显示版本号。
 - [x] **T09** Release Please 限定官方仓库运行，自动维护 Release PR、tag 与 GitHub Release；fork 手动同步更新。
-- [ ] **T10** `scripts/d1-console.sql` 运维查询包，覆盖用户、topic、消息与失败 update 排障。
-- [ ] **T11** 发布集成回归：既有功能、部署、更新、配置保留与数据兼容；功能测试随各阶段完成。
+- [x] **T10** `scripts/d1-console.sql` 运维查询包，覆盖用户、topic、消息与失败 update 排障。（2026-10-08 验收：全部语句本地 D1 冒烟通过；ops.md「常用 SQL」精选速查与之对应）
+- [x] **T11** 发布集成回归：既有功能、部署、更新、配置保留与数据兼容；功能测试随各阶段完成。（2026-10-08 验收：release-regression.test.ts 9 场景——鉴权 / 入站 / 出站 / 幂等 / 命令 / 限频 / 防毒丸 / 版本——全绿，既有分域测试零退化；部署自动化保护面由 deploy-config 既有用例承载，fork / 升级真机面随 T05/T06/T12 验收）
 - [ ] **T12** README 与功能、部署、运维文档同步，按实际实现核验状态，从零部署及更新流程验收。
 
 ### Webhook 接入与可靠性

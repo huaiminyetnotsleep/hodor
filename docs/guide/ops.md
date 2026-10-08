@@ -55,7 +55,9 @@ bot 身份（bot_id）不变，所有数据继续有效：
 
 ## 健康自检与版本
 
-`GET /health` 返回存活状态与版本号：
+两个公开只读端点，各管一件事：
+
+**`GET /health` — 存活探针 + 版本号**。零外部依赖（不查变量、不查库、不调 Telegram），可供 uptime 监控高频访问：
 
 ```json
 {"status":"ok","version":"1.1.0"}
@@ -63,9 +65,17 @@ bot 身份（bot_id）不变，所有数据继续有效：
 
 部署后或每次更新后建议访问一次，确认服务存活并核对版本号。
 
-::: warning 完整自检尚未实现
-逐项检查环境变量、数据库表、Webhook 指向的完整自检（`{"status":"error","failed":[...]}` 形态）规划在 [T07 / 阶段 7](/todo/index.md)。当前排查部署问题可用：`/setwebhook/<ADMIN_SECRET>`（缺 token / secret 会明确报出变量名）、`wrangler tail`（实时日志）、D1 Console（数据核对）。
-:::
+**`GET /selfcheck` — 完整自检**。按 环境变量 → 数据库七表 → Webhook 绑定 的固定顺序逐项检查：全部通过返回 `200 {"status":"ok","version":"…"}`；有未通过项返回 503 与 `failed` 数组，逐条给出中文失败原因（不回显任何密钥值）。刚部署、变量还没配齐的新实例也能访问它定位缺失项。
+
+常见 `failed` 项与处置：
+
+| failed 文案（节选形态） | 处置 |
+| --- | --- |
+| `必填变量未配置：TELEGRAM_BOT_TOKEN、…`、`SUPPORT_CHAT_ID 非法：…`、`密钥变量取值重复：…`、`MAX_ATTEMPTS 已配置但非法（正整数）…` 类 | 面板 Worker → 设置 → 变量和机密 补齐 / 修正对应变量后重试（选填值非法时运行时已回退默认值，failed 项属提示性质） |
+| `数据库缺表：…（迁移可能未执行，请在构建日志确认 migrations 步骤）` | 查看构建日志安装阶段的 `[provision]` 与迁移输出：确认建库 / 复用是否成功、迁移是否执行或失败 |
+| `webhook 未绑定，请访问 /setwebhook/<ADMIN_SECRET> 完成绑定` | 浏览器访问 `/setwebhook/<ADMIN_SECRET>` 完成绑定 |
+| `webhook 指向错误地址：…（应为 …，请重新执行 /setwebhook）` | 重新执行 `/setwebhook/<ADMIN_SECRET>`（常见于换了 Worker 地址 / 域名后未重绑） |
+| `Webhook 状态未知：getWebhookInfo 调用失败（…）`、`Telegram 最近投递错误：…` | Telegram 侧问题：稍后重试；持续出现时检查 token 是否已被吊销、网络策略 |
 
 - **部署与更新**：push 到 main 即自动部署新版本
 
@@ -75,55 +85,50 @@ bot 身份（bot_id）不变，所有数据继续有效：
 
 ## 常用 SQL
 
-在 Cloudflare dashboard → Storage & Databases → hodor 数据库 → Console 中直接粘贴执行（与仓库 `scripts/d1-console.sql` 对应）。
+在 Cloudflare dashboard → Storage & Databases → hodor 数据库 → Console 中直接粘贴执行（`123456789` 替换为目标 user_id）。
 
-**查用户**：
+完整的运维查询包见仓库 `scripts/d1-console.sql`：总览计数、单用户全档案、topic 绑定与归档清单、消息账本（按用户 / 按 topic）、失败 update、settings / bots、孤儿检测，以及隔离在「危险区」段的维护语句。以下只保留最常用的三条速查，内容与该文件对应条目一致。
+
+**查用户（users 全部状态列 + topic 绑定与备注）**：
 
 ```sql
-SELECT user_id, username, first_name, status, is_banned, is_risk,
-       is_verified, verified_at, first_seen_at, last_seen_at
-FROM users WHERE user_id = 123456789;
+SELECT
+  u.user_id, u.first_name, u.last_name, u.username,
+  u.status, u.is_banned, u.is_risk, u.is_verified, u.verified_at,
+  u.verify_answer, u.verify_msg_id,
+  u.rate_window_start, u.rate_count, u.last_notice_at, u.risk_notice_at,
+  u.first_seen_at, u.last_seen_at,
+  t.thread_id, t.title AS topic_title, t.status AS topic_status,
+  t.note, t.pinned_msg_id, t.created_at AS topic_created_at, t.closed_at
+FROM users u
+LEFT JOIN topics t ON t.bot_id = u.bot_id AND t.user_id = u.user_id
+WHERE u.user_id = 123456789;
 ```
 
-**查某用户的 topic 与最近消息**：
+**查某用户的最近消息**：
 
 ```sql
-SELECT thread_id, status, title, created_at, closed_at
-FROM topics WHERE user_id = 123456789;
-
-SELECT direction, content_type, group_msg_id, private_msg_id, created_at
-FROM messages WHERE user_id = 123456789
-ORDER BY created_at DESC LIMIT 50;
+SELECT
+  direction, content_type, group_msg_id, private_msg_id, created_at
+FROM messages
+WHERE user_id = 123456789
+ORDER BY created_at DESC
+LIMIT 50;
 ```
 
 **查处理失败的 update（毒丸排查）**：
 
 ```sql
-SELECT update_id, attempts, created_at
+SELECT
+  update_id, attempts, created_at
 FROM processed_updates
 WHERE status = 'failed'
-ORDER BY created_at DESC LIMIT 20;
+ORDER BY created_at DESC
+LIMIT 20;
 ```
 
-**清理指定用户的全部数据**：
-
-```sql
-DELETE FROM messages WHERE user_id = 123456789;
-DELETE FROM topics  WHERE user_id = 123456789;
-DELETE FROM users   WHERE user_id = 123456789;
-```
-
-**一键清理全部用户与消息（慎用）**：
-
-```sql
-DELETE FROM messages;
-DELETE FROM topics;
-DELETE FROM users;
--- settings 保留：验证开关与模式不重置
-```
-
-::: warning
-此 SQL 与 topic 内命令 `/wipealldata` 效果相同，但**没有确认步骤**，粘贴执行即生效；日常建议优先使用带两步危险确认的 `/wipealldata`（见[功能介绍](/guide/features.md)）。
+::: warning 维护语句不在此页
+清理类 SQL（重置失败 update、按用户清理、一键全清）**没有确认步骤，粘贴执行即生效**，全文集中在 `scripts/d1-console.sql` 的「危险区」段（带醒目警告与影响范围说明）。日常清理优先使用带两步危险确认的 topic 内命令 `/deluser` / `/wipealldata`（见[功能介绍](/guide/features.md)）。
 :::
 
 ## 故障排查
@@ -134,7 +139,7 @@ DELETE FROM users;
 
 | 现象 | 排查 |
 | --- | --- |
-| ★ bot 完全无响应 | ① 先确认 webhook 已绑定：访问 `/setwebhook/<ADMIN_SECRET>` 回显身份即已绑定（`GET /health` 的完整自检 T07 在阶段 7）；② `npx wrangler tail hodor` 实时日志看请求是否到达、有无 401——secret 头不符说明 `TELEGRAM_WEBHOOK_SECRET` 与注册时不一致，重新 setwebhook；③ 日志无请求 = Telegram 侧未推送，检查 webhook 绑定 |
+| ★ bot 完全无响应 | ① 先确认 webhook 已绑定：访问 `/setwebhook/<ADMIN_SECRET>` 回显身份即已绑定（完整自检 `GET /selfcheck` 已交付：未绑定 / 指向错误会在 `failed` 中逐条点名）；② `npx wrangler tail hodor` 实时日志看请求是否到达、有无 401——secret 头不符说明 `TELEGRAM_WEBHOOK_SECRET` 与注册时不一致，重新 setwebhook；③ 日志无请求 = Telegram 侧未推送，检查 webhook 绑定 |
 | ★ 消息进群但为空 / 报 sendMessage 400 | `wrangler tail` 看具体 API 报错文案；若为「message to copy not found」类，参考 T21 运行时说明（[TODO](/todo/p1.md)） |
 | ★ 验证码收不到 | 用户是否已被 ban（封禁门不发出题）；日志中 sendMessage 是否报 403（用户已停用 / 拉黑 bot）；60 秒内重复消息受提示频控限制（每分钟最多 1 次提示） |
 | 消息转发了但没建 topic，或 topic 操作失败 | ★ bot 在群里缺少「管理话题」权限 |

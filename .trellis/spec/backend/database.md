@@ -25,6 +25,10 @@
 | 迁移 SQL | `migrations/NNNN_*.sql` | 可执行 DDL。幂等由 wrangler migrations 台账保证：不写 `IF NOT EXISTS`，不写任何 DROP / 破坏性语句 |
 | 表文档 | `docs/guide/database.md` | 字段与语义唯一事实源：类型、说明、索引、全局约定 |
 
+阶段 7 起追加第三处同步面：`scripts/d1-console.sql`（D1 Console 运维查询包）引用全部表与字段——
+涉及**字段增删改 / 表语义变化**时，同一提交核对受影响的查询段（含 `docs/guide/ops.md`「常用 SQL」
+精选条目，其 SQL 与本文件逐字一致）；新增表时在孤儿检测 / 总览段评估是否需要补查询。
+
 迁移文件头部必须保留对事实源的引用：
 
 ```sql
@@ -40,6 +44,7 @@
 - [ ] CHECK 枚举值与文档列出的取值一致
 - [ ] 字段语义说明（写入时机、清理时机）随语义同步更新
 - [ ] 「表间关系」图仍成立
+- [ ] `scripts/d1-console.sql` 受影响查询段已核对（字段名 / 表名与 DDL 一致）
 - [ ] 依赖 schema 的测试随迁移更新（测试基座直接注入 `migrations/`，见 [测试基座](./testing.md)）
 
 ### 4. Good / Base / Bad

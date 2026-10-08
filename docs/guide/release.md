@@ -37,7 +37,21 @@
 1. 收到官方 Release 通知（在官方仓库点 **Watch → Releases** 可订阅发版通知）
 2. 打开自己 fork 的 GitHub 页面，点 **Sync fork**（无需终端；或命令行 `git fetch upstream && git merge upstream/main && git push`）
 3. 自己的 Cloudflare 随即自动构建、执行数据库迁移并部署
-4. 访问 `/health` 复查自检全绿、版本号已更新
+4. 访问 `/selfcheck` 复查自检全绿、`/health` 版本号已更新
+
+## 发布回归清单
+
+阶段 7 起每次发版的固定检查面（维护者执行）：
+
+**发版前（合并 Release PR 前）**
+
+- `npm test` 全绿——包含发布回归套件 `test/release-regression.test.ts`（端点鉴权 / 入站 / 出站 / 幂等 / 命令 / 限频 / 防毒丸 / 版本一致共 9 个部署链路顺序场景）
+- `npm run typecheck` 通过
+
+**发版后（部署完成、版本号生效后）**
+
+- `curl https://<worker-url>/health` 返回 ok，且 `version` == 本次 Release tag（如 `v1.2.0`）
+- `curl https://<worker-url>/selfcheck` 全绿返回 `{"status":"ok","version":"…"}`，且 `version` 与 `/health` 一致
 
 ## 相关页面
 

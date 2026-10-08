@@ -50,6 +50,7 @@ import type {
   TelegramBotUser,
   TelegramClient,
   TelegramResult,
+  WebhookInfo,
 } from "./types";
 
 /** 429 时允许原地（sleep 后）重试的 retry_after 上限（秒） */
@@ -200,6 +201,11 @@ export function createTelegramClient(token: string): TelegramClient {
       }),
     deleteWebhook: () => request<boolean>("deleteWebhook", {}),
     getMe: () => request<TelegramBotUser>("getMe", {}),
+    // T07 /selfcheck：读取当前 webhook 绑定状态（诊断用只读方法）。与其余
+    // 方法一样只经 request() 既有分类矩阵（含 429 有界原地重试的共享行为，
+    // 恰一次、绝不两次）——「单次调用不重试」由自检层保证：失败（retryable /
+    // permanent 均同）只落 failed 文案，绝不再次调用
+    getWebhookInfo: () => request<WebhookInfo>("getWebhookInfo", {}),
     sendMessage: (params: SendMessageParams) =>
       request<SendMessageResult>("sendMessage", { ...params }),
     forwardMessage: (params: ForwardMessageParams) =>

@@ -38,24 +38,31 @@
 | `/webhook` | POST | `X-Telegram-Bot-Api-Secret-Token` 头 == `TELEGRAM_WEBHOOK_SECRET` | Telegram update 唯一入口 |
 | `/setwebhook/<ADMIN_SECRET>` | GET | `ADMIN_SECRET`（路径段） | 绑定 webhook，token 从 env 读取 |
 | `/deletewebhook/<ADMIN_SECRET>` | GET | 同上 | 解绑 webhook |
-| `/health` | GET | 无 | 部署完整性自检 + 版本号 |
+| `/health` | GET | 无 | 存活探针 + 版本号 |
+| `/selfcheck` | GET | 无 | 完整自检：环境变量 / 七张表 / webhook 指向；有未通过项 503 + `failed[]` |
 
 ::: info 鉴权失败的响应约定
 管理端点的所有鉴权失败（secret 缺失、不存在、不正确）一律返回 `401` + 「无效的管理密钥」，**不区分具体原因**，避免给探测者反馈某个 secret 是否存在过。`/webhook` 的 secret 头不符同样只返回 `401`，不携带任何区分信息。
 :::
 
-### /health 自检项
+### 自检（/selfcheck）
 
-部署完成后访问 `/health` 即可确认整条链路就绪，逐项检查并返回 JSON（不回显任何密钥值）：
+部署完成后访问 `GET /selfcheck` 即可确认整条链路就绪。它按固定顺序（环境变量 → 数据库 → Webhook）逐项检查并返回 JSON（公开只读端点，不回显任何密钥值）：
 
 | 检查项 | 内容 |
 | --- | --- |
-| 环境变量 | 必填变量已配置且格式合法（如 `SUPPORT_CHAT_ID` 以 `-100` 开头） |
-| 数据库 | `HODOR_DB` 绑定可用、七张表已建（迁移已执行） |
-| Webhook 绑定 | 通过 `getWebhookInfo` 确认 webhook 已指向本 Worker 的 `/webhook` |
+| 环境变量 | 5 条必填变量已配置且格式合法（`SUPPORT_CHAT_ID` 为 `-100` 开头整数、`ADMIN_IDS` 可解析出至少一个合法 ID）；三个 Secret 互异；选填变量（`MAX_ATTEMPTS` / `MAX_MESSAGES_PER_MINUTE` / `VERIFY_TTL_HOURS`）已配置但值非法也可定位 |
+| 数据库 | `HODOR_DB` 绑定可用、当前 schema 全部七张表存在（users / topics / messages / settings / processed_updates / bots / delete_confirmations，迁移已执行） |
+| Webhook 绑定 | 通过 `getWebhookInfo` 确认 webhook 已指向本 Worker 的 `/webhook`；未绑定、指向错误地址、Telegram 调用失败均可定位 |
 
-- 全部通过：`{"status":"ok","version":"x.y.z"}`
-- 有未通过项：`{"status":"error","version":"x.y.z","failed":["...逐项失败原因..."]}`（如「webhook 未绑定，请访问 `/setwebhook/<ADMIN_SECRET>` 完成绑定」）
+- 全部通过：`200 {"status":"ok","version":"x.y.z"}`
+- 有未通过项：`503 {"status":"error","version":"x.y.z","failed":["...逐项失败原因..."]}`（如「webhook 未绑定，请访问 `/setwebhook/<ADMIN_SECRET>` 完成绑定」）
+
+`TELEGRAM_BOT_TOKEN` 未配置时不发起 Telegram 调用，Webhook 项按「无法检查」报告，其余检查照常执行——完全未配置变量的全新实例也能用它定位缺失项。
+
+::: info 端点演进说明
+阶段 1 曾把完整自检规划在 `/health` 本体上，当时未区分「存活探针」与「就绪检查」。阶段 7 起拆分为两个端点：`/health` 是纯存活探针（零外部依赖，供 uptime 监控高频访问）；`/selfcheck` 供部署验证与排障——完整检查含一次 Telegram API 调用，不宜挂在探针上（外部故障会被放大为探针失败、消耗 API 配额）。
+:::
 
 ### 三种密钥的分工
 

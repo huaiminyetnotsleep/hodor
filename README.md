@@ -3,7 +3,7 @@
 Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题，消息不串线。
 设计、部署与运维文档见 [docs/](docs/)（VitePress 站点，`npm run docs:dev` 本地预览）。
 
-**当前进度**：阶段 1–5 已交付并真机验收——webhook 绑定与鉴权、幂等与失败重推、用户建档与 topic 双向映射、文本 + 7 类媒体双向直传、欢迎语（`WELCOME_TEXT` 可配置）与用户信息置顶、双向消息账本、数学题人机验证与未验证拦截、分钟限频与超限重验、提示频控、`/help` `/ban` `/unban` 基础管理命令、验证开关与纯按钮模式（`/verifyon` `/verifyoff` `/verifymode`）、验证有效期（`VERIFY_TTL_HOURS`）、备注与高危标记（`/note` `/risk`）、429 有界重试。阶段 6 会话维护已交付并真机验收——`/archive` 软归档（保留历史/备注、回访重验重开）、`/deluser` 物理删除（二次确认，删 Telegram 话题 + Hodor 数据）、`/purgemsg` 话题消息清理、`/wipealldata`（先删全部群内话题再清库，保留 settings）、Telegram 原生话题关闭/重开状态同步与删除自愈。删除类命令不覆盖 Telegram 私聊窗口历史。后续按 [docs/todo](docs/todo/index.md) 的阶段计划推进（阶段 7 公开发布）。开发过程由 [Trellis](.trellis/workflow.md) 管理。
+**当前进度**：阶段 1–5 已交付并真机验收——webhook 绑定与鉴权、幂等与失败重推、用户建档与 topic 双向映射、文本 + 7 类媒体双向直传、欢迎语（`WELCOME_TEXT` 可配置）与用户信息置顶、双向消息账本、数学题人机验证与未验证拦截、分钟限频与超限重验、提示频控、`/help` `/ban` `/unban` 基础管理命令、验证开关与纯按钮模式（`/verifyon` `/verifyoff` `/verifymode`）、验证有效期（`VERIFY_TTL_HOURS`）、备注与高危标记（`/note` `/risk`）、429 有界重试。阶段 6 会话维护已交付并真机验收——`/archive` 软归档（保留历史/备注、回访重验重开）、`/deluser` 物理删除（二次确认，删 Telegram 话题 + Hodor 数据）、`/purgemsg` 话题消息清理、`/wipealldata`（先删全部群内话题再清库，保留 settings）、Telegram 原生话题关闭/重开状态同步与删除自愈。删除类命令不覆盖 Telegram 私聊窗口历史。阶段 7 公开发布支持的代码与测试面已交付——完整自检端点 `GET /selfcheck`（环境变量 / 七张表 / webhook 指向逐项检查：全过 200，有未通过项 503 + `failed` 数组逐条给出中文失败原因，`/health` 保持纯存活探针）、运维 SQL 查询包 `scripts/d1-console.sql`（总览 / 用户 / topic / 消息账本 / 失败 update / 孤儿检测 + 危险区维护语句）、发布回归测试套件（`test/release-regression.test.ts`，9 个部署链路顺序场景）；fork 从零部署与已有实例升级的真机验收按任务验收清单执行。后续按 [docs/todo](docs/todo/index.md) 的阶段计划推进（阶段 7 真机验收通过后发布完整 v1）。开发过程由 [Trellis](.trellis/workflow.md) 管理。
 
 ## 准备工作（一次性）
 
@@ -69,7 +69,7 @@ npm run typecheck
    - 变量表单：5 条必填值在此一次填齐（向导按 `.dev.vars.example` 生成表单项）；`keep_vars: true` 已在仓库配置，这些值**跨部署持久，fork 使用者零代码改动**（3 个 Secret 建议机密类型）
    - 构建命令：**留空**；部署命令：**保持向导默认 `npx wrangler deploy`，无需改动**——置备（创建/复用同名 D1 → 注入 database_id 到构建工作区，**不改动你的仓库** → 幂等迁移）由 `npm install` 的 postinstall 钩子自动完成，先于部署执行
    - 关闭「启用预览构建」（Phase 1 无 preview 分支部署需求）
-3. 部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"status":"ok","version":"…"}`；再访问 `/setwebhook/<ADMIN_SECRET>` 完成绑定
+3. 部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"status":"ok","version":"…"}`；再 `curl https://hodor.<你的子域>.workers.dev/selfcheck` 做完整自检——全部通过返回 200，有未通过项返回 503 与 `failed` 数组（逐条列出待修复项，未配置变量的新实例也能用它定位缺失项，不回显任何密钥值）；最后访问 `/setwebhook/<ADMIN_SECRET>` 完成绑定
 4. 此后 **push 你的 fork 即自动构建部署**；上游更新 → fork 页点 **Sync fork** → 自动部署
 
 > 排错：报 `The database … could not be found (7404 / 10181)` = 自动置备未生效——先查构建日志**安装阶段**的 `[provision]` 输出；兜底：把部署命令改为 `npm run deploy`（显式置备后部署）再重建。

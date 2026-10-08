@@ -272,11 +272,27 @@ export interface DeleteMyCommandsParams {
   scope?: BotCommandScopeRef;
 }
 
+/* ------------------------------------------------------------------ */
+/* T07（阶段 7）：getWebhookInfo —— /selfcheck 完整自检                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * getWebhookInfo 返回的最小子集（/selfcheck 诊断只需要三个字段）：
+ * url 为空串 = 未绑定 webhook；last_error_message 是 Telegram 记录的
+ * 最近一次 webhook 投递错误原文（非密钥、本身就是排障信息，可直接回显）。
+ */
+export interface WebhookInfo {
+  url: string;
+  pending_update_count: number;
+  last_error_message?: string;
+}
+
 /** client 工厂返回的方法集（全部经 request() 分类，无一旁路） */
 export interface TelegramClient {
   setWebhook(params: SetWebhookParams): Promise<TelegramResult<boolean>>;
   deleteWebhook(): Promise<TelegramResult<boolean>>;
   getMe(): Promise<TelegramResult<TelegramBotUser>>;
+  getWebhookInfo(): Promise<TelegramResult<WebhookInfo>>;
   sendMessage(params: SendMessageParams): Promise<TelegramResult<SendMessageResult>>;
   forwardMessage(
     params: ForwardMessageParams,

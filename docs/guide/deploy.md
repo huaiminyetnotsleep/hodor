@@ -44,10 +44,14 @@ D1 数据库的创建与绑定（变量名 `HODOR_DB`）、数据表迁移全部
 
 ## 部署后收尾
 
-1. **自检**：浏览器打开 `https://<worker-url>/health`，应返回 `{"status":"ok","version":"…"}`
-2. **绑定 webhook**：浏览器打开 `https://<worker-url>/setwebhook/<你的 ADMIN_SECRET>`，回显 bot 身份即成功（详见[运维手册](/guide/ops.md)）
-3. **聊天验收**：用 Telegram 账号直接给 bot 发文本（无需 `/start`）→ 收到欢迎语 + 数学题验证码 → 点对答案 → 群组出现该用户的 topic（置顶含 ✅ 已验证）且消息中继；管理员在 topic 回复，用户私聊收到
-4. **说明**：当前阶段（阶段 4）已交付文本 + 7 类媒体直传、欢迎语（`WELCOME_TEXT` 可配置）、用户信息置顶、数学题验证、分钟限频与 `/help` `/ban` `/unban` 基础命令（setwebhook 时自动注册到客服群命令菜单）；更多管理命令按 [TODO 阶段计划](/todo/index.md)在阶段 5–6 交付
+按以下顺序收尾，逐步把自检清零：
+
+1. **存活确认**：浏览器打开 `https://<worker-url>/health`，应返回 `{"status":"ok","version":"…"}`（存活探针 + 版本号）
+2. **完整自检**：浏览器打开 `https://<worker-url>/selfcheck`。变量未配齐时返回 503 与 `failed` 数组，逐条列出缺失 / 非法的变量等待修复项（不回显密钥值）——据此回到 Settings → Variables 补齐 5 条必填变量
+3. **绑定 webhook**：浏览器打开 `https://<worker-url>/setwebhook/<你的 ADMIN_SECRET>`，回显 bot 身份即成功（详见[运维手册](/guide/ops.md)）
+4. **复查自检**：再次打开 `/selfcheck`，应全绿返回 `{"status":"ok","version":"…"}`
+5. **聊天验收**：用 Telegram 账号直接给 bot 发文本（无需 `/start`）→ 收到欢迎语 + 数学题验证码 → 点对答案 → 群组出现该用户的 topic（置顶含 ✅ 已验证）且消息中继；管理员在 topic 回复，用户私聊收到
+6. **说明**：阶段 1–6 已交付并真机验收——文本 + 7 类媒体直传、欢迎语（`WELCOME_TEXT` 可配置）、用户信息置顶、数学题 / 纯按钮人机验证（开关 / 模式 / 有效期可配）、分钟限频、双向消息账本与 `/help` `/ban` `/unban` `/note` `/risk` `/verifyon` `/verifyoff` `/verifymode` `/archive` `/deluser` `/purgemsg` `/wipealldata` 全套管理命令（setwebhook 时自动注册到客服群命令菜单）；阶段 7 公开发布面（`/selfcheck` 完整自检、运维 SQL、发布回归）已交付，真机验收进行中，见 [TODO 阶段计划](/todo/index.md)
 
 ## 后续如何更新
 
