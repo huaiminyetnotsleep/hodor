@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.5.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.4.0...v1.5.0) (2026-10-08)
+
+
+### Features
+
+* stage 6 session maintenance — deluser/purgemsg/wipealldata + native topic-delete self-heal (T38-T40) ([50860ab](https://github.com/huaiminyetnotsleep/hodor/commit/50860ab31b1c828ac77056d5dd5c93ac7c5eaa3c))
+* stage 6 session maintenance rework — native topic sync, archive, physical delete, wipe deletes all topics (T38-T40) ([3bd70d6](https://github.com/huaiminyetnotsleep/hodor/commit/3bd70d6eeb84e54cb30199b5b3ab6e5b838b895d))
+
 ## [1.4.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.3.0...v1.4.0) (2026-10-08)
 
 
