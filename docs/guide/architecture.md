@@ -76,15 +76,18 @@ update 到达
  │ ③ 内容抽取：文本 + 7 类媒体；支持集之外 → 安全忽略 200
  │ ④ 用户不存在 → 建档（首条消息无论类型、是否 /start 都视为开始）
  │ ⑤ 封禁门：已 ban → 「你已被禁言」提示（每用户每分钟 ≤1 次），丢弃
- │ ⑥ 验证门：未验证 → 出题 / 重发验证码（提示类每分钟 ≤1 次），丢弃
- │      （首联 = 欢迎语 + 首题成对发出；答题前零 topic、零中继、零账本）
+ │ ⑥ 验证门（settings.verify_enabled 关闭时整门跳过、记录保留）：
+ │      未验证 或 VERIFY_TTL_HOURS 过期 → 出题 / 重发验证码（每用户每分钟 ≤1 次），丢弃
+ │      （首联 = 欢迎语 + 首题成对发出；答题前零 topic、零中继、零账本；
+ │        题面形态随 settings.verify_mode：数学题 4 按钮 / 纯按钮单按钮）
  │ ⑦ 限频门：60 秒固定窗口计数 ≥ MAX_MESSAGES_PER_MINUTE？
  │      → 标记未验证 + 发新验证码（提示含限频数字），丢弃
  │ ⑧ 确保 topic：查 topics 表；无则 createForumTopic + 置顶用户信息
- │      （置顶消息 ID 落库，昵称/验证状态变化自动刷新）；deluser 过的用户 → 重开
+ │      （置顶消息 ID 落库，昵称/验证/高危/备注变化自动刷新）；deluser 过的用户 → 重开
  │ ⑨ 欢迎语：新用户或 /start 触发（每用户每分钟 ≤1 次）；
  │      /start 到此结束——入口命令不中继、不落账本
- │ ⑩ per-type send 中继到 topic → 成功后写 messages 账本（双端消息 ID）→ 返回 200
+ │ ⑩ per-type send 中继到 topic → 成功后写 messages 账本（双端消息 ID）
+ │      → 高危用户 24 小时一次话题内提醒（完全 best-effort）→ 返回 200
 ```
 
 ### 出站（群组 topic → 用户）
@@ -96,7 +99,10 @@ update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
  │      否 + / 命令 → 「该命令仅客服管理员可用。」提示，结束
  │      否 + 普通文本 → 静默忽略
  │ ③ 内容抽取（支持集之外安全忽略）
- │ ④ 管理员 / 开头 → 命令管线（/help /ban /unban，未知命令提示；不中继不账本）
+ │ ④ 管理员 / 开头 → 命令管线（/help /ban /unban /note /unnote /risk /unrisk
+ │      /verifyon /verifyoff /verifymode，未知命令提示；不中继不账本；
+ │      /ban /unban /note /unnote /risk /unrisk 需 topic 绑定，
+ │      /help 与验证三命令全局生效，无需绑定）
  │ ⑤ thread_id 反查 topics → user
  │      查无用户或 topic 已关闭 → 在该 topic 内提示「找不到对应用户」（T26）
  │ ⑥ per-type send 私聊送达（不带 thread）→ 成功后写 messages 账本 → 返回 200
@@ -104,7 +110,7 @@ update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
 
 ## 验证状态机
 
-> 阶段 4 已交付：验证默认开启、不可关闭（开关与模式属阶段 5）。置顶信息实时反映 ✅ 已验证 / ❌ 未验证。
+> 阶段 5 起验证可运行时配置：`/verifyon` / `/verifyoff` 全局开关（settings 表持久化，关闭期间记录保留、TTL 不判定）、`/verifymode` 数学题 ↔ 纯按钮循环切换（切换清空全部 pending 旧题，旧题回调一律失效）。置顶信息验证行三态：✅ 已验证 / ❌ 未验证 / 未启用。
 
 ```
           首条消息 / 重新 start
@@ -113,13 +119,14 @@ update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
                               │   限频超限 / VERIFY_TTL 过期
                               └──────────────────────┘
                               ▲
-                              │ /deluser（同时关闭 topic）
+                              │ /deluser（同时关闭 topic，阶段 6）
                               └──────────────────────┘
 ```
 
-- 验证码：`a ± b` 题目 + 4 个答案按钮，正确答案只存数据库，callback 只携带用户所选值，不在消息里泄漏答案
+- 验证码：数学题模式 `a ± b` 题目 + 4 个答案按钮，正确答案只存数据库，callback 只携带用户所选值，不在消息里泄漏答案；纯按钮模式单按钮（防护较弱，帮助与切换确认均说明）
 - 答错：编辑原消息提示错误，并重新出一题
 - 验证通过前的消息直接丢弃，不积压补发
+- `VERIFY_TTL_HOURS`（默认 0 = 永久）：已验证用户的通过时间距 now ≥ TTL 时，下一条消息触发重验（撤验证 + 置顶降级 ❌ + 出题）
 
 ## 可靠性
 
