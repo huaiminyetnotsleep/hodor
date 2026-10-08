@@ -22,17 +22,20 @@
  */
 import type {
   AnswerCallbackQueryParams,
+  CloseForumTopicParams,
   CopyMessageParams,
   CopyMessageResult,
   CreateForumTopicParams,
   CreateForumTopicResult,
   DeleteForumTopicParams,
+  DeleteMessageParams,
   DeleteMyCommandsParams,
   EditMessageTextParams,
   ForwardMessageParams,
   ForwardMessageResult,
   MessageIdResult,
   PinChatMessageParams,
+  ReopenForumTopicParams,
   SendAnimationParams,
   SendAudioParams,
   SendDocumentParams,
@@ -207,6 +210,15 @@ export function createTelegramClient(token: string): TelegramClient {
       request<CreateForumTopicResult>("createForumTopic", { ...params }),
     deleteForumTopic: (params: DeleteForumTopicParams) =>
       request<boolean>("deleteForumTopic", { ...params }),
+    // T38 /deluser 关闭 + 重开链路：参数蛇形原样透传（与 deleteForumTopic 同款）
+    closeForumTopic: (params: CloseForumTopicParams) =>
+      request<boolean>("closeForumTopic", { ...params }),
+    reopenForumTopic: (params: ReopenForumTopicParams) =>
+      request<boolean>("reopenForumTopic", { ...params }),
+    // T39 /purgemsg：按账本 group_msg_id 逐条删除（Bot API 单条接口，
+    // 无批量——部分失败计数由 commands.ts 消费方汇总）
+    deleteMessage: (params: DeleteMessageParams) =>
+      request<boolean>("deleteMessage", { ...params }),
     // T22 媒体 per-type send：参数名即 Telegram API 字段名（photo/video/…），
     // 蛇形原样透传；caption / message_thread_id 为 undefined 时 JSON 序列化自然剔除
     sendPhoto: (params: SendPhotoParams) =>

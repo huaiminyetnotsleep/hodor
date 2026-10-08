@@ -3,7 +3,7 @@
 Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题，消息不串线。
 设计、部署与运维文档见 [docs/](docs/)（VitePress 站点，`npm run docs:dev` 本地预览）。
 
-**当前进度**：阶段 1–4 已交付并真机验收——webhook 绑定与鉴权、幂等与失败重推、用户建档与 topic 双向映射、文本 + 7 类媒体双向直传、欢迎语（`WELCOME_TEXT` 可配置）与用户信息置顶、双向消息账本、数学题人机验证与未验证拦截、分钟限频与超限重验、提示频控、`/help` `/ban` `/unban` 基础管理命令、429 有界重试。后续按 [docs/todo](docs/todo/index.md) 的阶段计划推进（阶段 5 日常管理 → 阶段 7 公开发布）。开发过程由 [Trellis](.trellis/workflow.md) 管理。
+**当前进度**：阶段 1–5 已交付并真机验收——webhook 绑定与鉴权、幂等与失败重推、用户建档与 topic 双向映射、文本 + 7 类媒体双向直传、欢迎语（`WELCOME_TEXT` 可配置）与用户信息置顶、双向消息账本、数学题人机验证与未验证拦截、分钟限频与超限重验、提示频控、`/help` `/ban` `/unban` 基础管理命令、验证开关与纯按钮模式（`/verifyon` `/verifyoff` `/verifymode`）、验证有效期（`VERIFY_TTL_HOURS`）、备注与高危标记（`/note` `/risk`）、429 有界重试。阶段 6 会话维护（`/deluser` `/purgemsg` `/wipealldata` + 原生删除话题自愈）代码已交付，真机验收进行中。后续按 [docs/todo](docs/todo/index.md) 的阶段计划推进（阶段 7 公开发布）。开发过程由 [Trellis](.trellis/workflow.md) 管理。
 
 ## 准备工作（一次性）
 

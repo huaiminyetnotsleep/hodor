@@ -87,6 +87,58 @@ export async function reopenTopic(
     .run();
 }
 
+/**
+ * 关闭映射行（T38 /deluser 的 DB 真值先行步骤之一）：status='closed' +
+ * closed_at。幂等 setter——重推 / 重复执行同值无害；行删除与否由 closeForumTopic
+ * 结果决定，本函数不做存在性判断（与 setBanned 同姿态，调用方先反查绑定）。
+ */
+export async function closeTopic(
+  db: D1Database,
+  botId: number,
+  userId: number,
+): Promise<void> {
+  await db
+    .prepare(
+      "UPDATE topics SET status = 'closed', closed_at = ? WHERE bot_id = ? AND user_id = ?",
+    )
+    .bind(nowIso(), botId, userId)
+    .run();
+}
+
+/**
+ * 删除绑定行（阶段 6 自愈路径，design §五.2）：topic 被原生删除后绑定指向
+ * 已不存在的 thread——删行让下一条消息（或本条的重开路径）走新建 topic。
+ * 唯一调用点带 topic-gone 判定（isTopicGoneError），可恢复的配置问题绝不
+ * 误删。note 随行丢失、messages 历史行保留（thread_id 悬空无害）——PRD 已
+ * 接受代价。
+ */
+export async function deleteTopicBinding(
+  db: D1Database,
+  botId: number,
+  userId: number,
+): Promise<void> {
+  await db
+    .prepare("DELETE FROM topics WHERE bot_id = ? AND user_id = ?")
+    .bind(botId, userId)
+    .run();
+}
+
+/**
+ * 清空置顶消息 ID（T39 /purgemsg 重置置顶第一步）：旧信息卡已删，
+ * pinned_msg_id 置 NULL 使重发流程（pinUserCard）成为唯一置顶入口，
+ * 「每 topic 恰一条置顶」的列驱动语义不变。
+ */
+export async function clearPinnedMsgId(
+  db: D1Database,
+  botId: number,
+  userId: number,
+): Promise<void> {
+  await db
+    .prepare("UPDATE topics SET pinned_msg_id = NULL WHERE bot_id = ? AND user_id = ?")
+    .bind(botId, userId)
+    .run();
+}
+
 /** 新映射行参数（title 建档时定死，不再复算） */
 export interface NewTopicRow {
   botId: number;

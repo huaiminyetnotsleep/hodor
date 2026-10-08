@@ -115,3 +115,19 @@ await insertMessage(...);         // 中继之后只有账本(失败抛,at-least
   同样如此)。消费方按数字码分支,绝不按 `errorMessage` 文本。
 - ~~S3:补充缺失场景「200 + 合法 JSON 但无 `ok` 字段 → retryable」~~ —— 已完成
   (test/telegram-client.test.ts)。
+
+## 有界例外:permanent 子类谓词(阶段 6 / T38–T39,2026-10-08 确立)
+
+「绝不嗅探字符串」的完整口径:**有数字码可分时按数字码;无数字码、且 description
+是唯一信号时,允许在唯一模块 `src/pipeline/errors.ts` 内对已消毒的 `errorMessage`
+做 permanent 子类判定**。约束:
+
+- 谓词集中收敛在 `src/pipeline/errors.ts`(isTopicGoneError / isMessageGoneError),
+  **绝不**在 client 分类矩阵内分支、绝不散落在各 pipeline 文件。
+- 判定原则:**宁可漏判不可误判**——不匹配一律落默认 permanent 语义(丢弃 + warn),
+  绝不把可恢复的配置问题(如 bot 被移出群)误判成死绑定触发自愈删行。
+- 新增谓词必须配套:单元断言(命中 / 不命中 / undefined 三态)与消费方用例
+  (test/stage6.test.ts「errors: 错误摘要谓词」describe)。
+- 触发背景:Telegram 对「topic 已被原生删除」只回 400 + description
+  ("message thread not found" / "TOPIC_ID_INVALID"),无独立数字码;该判定驱动
+  topics 绑定回收自愈(阶段 6 design.md §五.2)。

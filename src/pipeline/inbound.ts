@@ -72,11 +72,11 @@ import { insertMessage } from "../store/messages";
 import { getVerificationSettings } from "../store/settings";
 import { isoBefore } from "../store/util";
 import {
+  deleteTopicBinding,
   findTopicByUser,
   insertTopic,
   isUniqueViolation,
   reopenTopic,
-  setPinnedMsgId,
   type TopicRow,
 } from "../store/topics";
 import {
@@ -85,11 +85,13 @@ import {
   countMessageInWindow,
   ensureUser,
   markUnverified,
+  markUserActive,
 } from "../store/users";
 import { createTelegramClient } from "../telegram/client";
 import type { TelegramClient } from "../telegram/types";
 import { sendVerificationCode } from "./verify";
-import { downgradePinnedToUnverified } from "./pinned";
+import { downgradePinnedToUnverified, pinUserCard } from "./pinned";
+import { isTopicGoneError } from "./errors";
 import { extractContent, relayContent } from "./content";
 import type { TelegramMessageRef } from "./classify";
 
@@ -303,6 +305,17 @@ export async function handleInbound(
     if (relayed.kind === "retryable") {
       throw new Error(relayed.errorMessage ?? "relay retryable");
     }
+    // 原生删除自愈（design §五.2）：绑定指向的 thread 已被 TG 客户端删除——
+    // 回收死绑定（note 随行丢失、账本历史保留悬空无害），本条按中继 permanent
+    // 既有语义丢弃，下一条消息走新建 topic。其他 permanent（含 TOPIC_CLOSED
+    // 等）不匹配、走原语义，绝不误删可恢复的绑定。
+    if (isTopicGoneError(relayed.errorMessage)) {
+      await deleteTopicBinding(env.HODOR_DB, botId, from.id);
+      console.warn(
+        `[inbound] user ${from.id}: 中继目标 thread ${topic.thread_id} 已不存在（topic 被删除），绑定已回收，本条丢弃，下一条消息将新建 topic`,
+      );
+      return;
+    }
     // permanent：重试无益，消息被丢弃——**不写账本**（T25 只记成功中继）
     console.warn(
       `[inbound] user ${from.id}: 中继 permanent，按已处理跳过（消息被丢弃，不写账本）：${relayed.errorMessage ?? "no detail"}`,
@@ -352,9 +365,18 @@ interface CreateTopicContext {
 }
 
 /**
- * topic 解析（阶段 2 逻辑不变，返回值扩为整行——置顶流程需要 pinned_msg_id）：
- * open 复用 / closed 重开（pinned_msg_id 保留，重开不重发置顶）/ 未命中走建 topic
- * 主流程（含并发首联竞态的败方清理）。
+ * topic 解析（阶段 2 逻辑 + 阶段 6 T38 真重开 / 原生删除自愈）：
+ *
+ * - open 行 → 直接复用；
+ * - closed 行 → **API 先行**（reopenForumTopic ok 才动 DB——retryable 抛出时
+ *   DB 仍 closed，重推原样重入本分支重试 reopen，无半开窗口）：
+ *   reopenTopic + markUserActive（users.status 复位，成对写、幂等）后返回
+ *   原行（pinned_msg_id / note 保留，重开不重发置顶）；
+ *   reopenForumTopic permanent 且 topic-gone（原生删除）→ deleteTopicBinding
+ *   回收死绑定 → createTopicWithRaceCleanup **立即建新 topic（本条不丢）**；
+ *   其他 permanent → warn 丢本条（同 createForumTopic permanent 语义，
+ *   不把可恢复的配置问题误判为死绑定）；
+ * - 未命中 → 建 topic 主流程（含并发首联竞态的败方清理）。
  */
 async function resolveTopic(
   env: Cloudflare.Env,
@@ -364,62 +386,42 @@ async function resolveTopic(
   const existing = await findTopicByUser(env.HODOR_DB, ctx.botId, ctx.userId);
   if (existing && existing.status === "open") return existing;
   if (existing) {
-    // closed：终身一个 topic，重开复用（阶段 6 预留语义）
+    // closed：终身一个 topic，重开复用（阶段 6 起 /deluser 真关闭 TG 侧，
+    // 重开必须真重开——仅改 DB 状态会让后续中继全部落空）
+    const reopened = await client.reopenForumTopic({
+      chat_id: ctx.supportChatId,
+      message_thread_id: existing.thread_id,
+    });
+    if (!reopened.ok) {
+      if (reopened.kind === "retryable") {
+        // DB 仍 closed：重推原样重入本分支重试 reopen（无半开窗口）
+        throw new Error(reopened.errorMessage ?? "reopenForumTopic retryable");
+      }
+      if (isTopicGoneError(reopened.errorMessage)) {
+        // topic 已被原生删除：回收死绑定，本条消息直接落新 topic。用户事实上
+        // 回来了——status 先于删行复位（幂等 setter 顺序：markUserActive 失败
+        // 抛出时绑定仍在、重推原样重入本分支重试；反之 status 会永久残留
+        // deleted——重推时行已删、直落建 topic 分支不再经过此处）
+        console.warn(
+          `[inbound] user ${ctx.userId}: 重开 thread ${existing.thread_id} 失败（topic 已被删除），回收绑定并新建 topic`,
+        );
+        await markUserActive(env.HODOR_DB, ctx.botId, ctx.userId);
+        await deleteTopicBinding(env.HODOR_DB, ctx.botId, ctx.userId);
+        return createTopicWithRaceCleanup(env, client, ctx);
+      }
+      // 其他 permanent：丢弃本条（下一条消息重试 reopen），绝不误删绑定
+      console.warn(
+        `[inbound] user ${ctx.userId}: reopenForumTopic permanent，本条丢弃（绑定保留）：${reopened.errorMessage ?? "no detail"}`,
+      );
+      return null;
+    }
+    // status 先于行重开复位（幂等 setter 顺序，同上分支理由：reopenTopic 成功
+    // 而 markUserActive 失败抛出时，重推走 open 复用分支、status 永久残留）
+    await markUserActive(env.HODOR_DB, ctx.botId, ctx.userId);
     await reopenTopic(env.HODOR_DB, ctx.botId, ctx.userId);
     return existing;
   }
   return createTopicWithRaceCleanup(env, client, ctx);
-}
-
-/** 4a 置顶流程的上下文 */
-interface PinUserCardContext {
-  botId: number;
-  userId: number;
-  supportChatId: number;
-  threadId: number;
-  text: string;
-}
-
-/**
- * 4a：在 topic 内发用户信息消息并置顶、落库（T24「每 topic 恰一条」的唯一入口）。
- *
- * - 信息 send retryable → 抛（重推重走 4a：topic 已在、pinned_msg_id 仍 null，
- *   不重建 topic、不重发用户消息；极端窗口可能遗留一条未置顶的旧信息消息，
- *   接受并记录日志——design.md §四）
- * - 信息 send permanent → warn 跳过，**不写** pinned_msg_id（后续消息可再尝试）
- * - pin permanent → warn，信息消息已在，**仍写** pinned_msg_id（供 4b edit 刷新）
- */
-async function pinUserCard(
-  env: Cloudflare.Env,
-  client: TelegramClient,
-  ctx: PinUserCardContext,
-): Promise<void> {
-  const sent = await client.sendMessage({
-    chat_id: ctx.supportChatId,
-    text: ctx.text,
-    message_thread_id: ctx.threadId,
-  });
-  if (!sent.ok) {
-    if (sent.kind === "retryable") throw new Error(sent.errorMessage ?? "sendMessage retryable");
-    console.warn(
-      `[inbound] user ${ctx.userId}: 置顶信息发送 permanent，跳过置顶（不落 pinned_msg_id）：${sent.errorMessage ?? "no detail"}`,
-    );
-    return;
-  }
-  const pinnedMsgId = sent.result.message_id;
-
-  const pinned = await client.pinChatMessage({
-    chat_id: ctx.supportChatId,
-    message_id: pinnedMsgId,
-  });
-  if (!pinned.ok) {
-    if (pinned.kind === "retryable") throw new Error(pinned.errorMessage ?? "pinChatMessage retryable");
-    console.warn(
-      `[inbound] user ${ctx.userId}: pinChatMessage permanent（信息消息已在，仍记录 pinned_msg_id 供刷新）：${pinned.errorMessage ?? "no detail"}`,
-    );
-  }
-  // 落库：D1 失败原样抛（→ retryable 重推；重推重走 4a 属已接受的极端窗口）
-  await setPinnedMsgId(env.HODOR_DB, ctx.botId, ctx.userId, pinnedMsgId);
 }
 
 /** 未命中映射时的建 topic 主流程失败语义（阶段 2 不变） */

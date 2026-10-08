@@ -1,12 +1,15 @@
 /**
- * update 分流（T15 + T27 callback 分流）：纯函数，无 IO、无副作用。
+ * update 分流（T15 + T27 callback 分流 + T40 群内回调分流）：纯函数，无 IO、无副作用。
  *
  * 输入是 webhook 解析出的 JSON（不可信），所以一切字段先做运行时形态校验，
  * 任何不完整 / 非预期形态一律 'ignore'（安全忽略，零副作用）。
  *
  * 规则（design.md「出站管线/入站管线」）：
- * - callback_query 存在 → 私聊题面回调形态（id / from.id / message.message_id /
- *   message.chat.type === 'private' 全合法）→ callback；群内回调 / 畸形 → ignore
+ * - callback_query 存在 → 回调形态（id / from.id / message.message_id /
+ *   message.chat.id 数值全合法）后按 chat 归属：
+ *   chat.type === 'private' → callback（私聊题面按钮，T27）；
+ *   chat.id === SUPPORT_CHAT_ID → group_callback（客服群内按钮，T40 wipe 确认）；
+ *   其他群 / 畸形 → ignore
  * - 无 message 且无 callback_query（edited_message / channel_post 等）→ ignore
  * - chat.type === 'private' → inbound（用户私聊）
  * - chat.id === SUPPORT_CHAT_ID 且带 message_thread_id → outbound（topic 内发言）
@@ -14,7 +17,12 @@
  * - 其他 chat → ignore
  */
 
-export type UpdateClassification = "inbound" | "outbound" | "callback" | "ignore";
+export type UpdateClassification =
+  | "inbound"
+  | "outbound"
+  | "callback"
+  | "group_callback"
+  | "ignore";
 
 /** update.message.from 的最小子集（入站建档 / 出站管理员判定用） */
 export interface TelegramFromRef {
@@ -57,9 +65,10 @@ export interface TelegramUpdateRef {
 }
 
 /**
- * callback_query 的最小子集（T27）：
- * id 供 answerCallbackQuery；message 供归属判定（verify_msg_id 对比）与
- * 题面编辑定位；data 为按钮载荷（"v:<值>"，绝不含答案以外的信息）。
+ * callback_query 的最小子集（T27 + T40）：
+ * id 供 answerCallbackQuery；message 供归属判定（verify_msg_id 对比 / wipe
+ * 原消息编辑定位）；data 为按钮载荷——私聊验证题为 "v:<值>"（绝不含答案
+ * 以外的信息），客服群 wipe 确认为 "w:yes|no:<发起时间戳>"。
  */
 export interface TelegramCallbackQueryRef {
   id: string;
@@ -95,8 +104,8 @@ export function classifyUpdate(
 
   if (!isRecord(update)) return "ignore";
 
-  // callback_query 分流（T27）：先于 message 判定——两者理论上互斥，
-  // 但畸形信封同时携带时优先按回调形态裁决（不回落到中继路径）
+  // callback_query 分流（T27 私聊 / T40 客服群）：先于 message 判定——两者
+  // 理论上互斥，但畸形信封同时携带时优先按回调形态裁决（不回落到中继路径）
   const callbackQuery = update.callback_query;
   if (isRecord(callbackQuery)) {
     // id 供 answerCallbackQuery 单次消费：非字符串（缺失 / 数字等）→ ignore。
@@ -108,10 +117,14 @@ export function classifyUpdate(
     const cbMessage = callbackQuery.message;
     if (!isRecord(cbMessage) || typeof cbMessage.message_id !== "number") return "ignore";
     const cbChat = cbMessage.chat;
-    if (!isRecord(cbChat) || typeof cbChat.id !== "number" || cbChat.type !== "private") {
+    if (!isRecord(cbChat) || typeof cbChat.id !== "number" || typeof cbChat.type !== "string") {
       return "ignore";
     }
-    return "callback";
+    // 按按钮所在 chat 归属：私聊 → 验证答题；客服群 → wipe 确认（T40）；
+    // 其余群（bot 被拉进别的群等）一律 ignore
+    if (cbChat.type === "private") return "callback";
+    if (cbChat.id === supportChatId) return "group_callback";
+    return "ignore";
   }
 
   const message = update.message;

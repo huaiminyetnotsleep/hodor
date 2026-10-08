@@ -60,7 +60,7 @@ UNIQUE `(bot_id, user_id)` **和** UNIQUE `(bot_id, thread_id)` 双向唯一：
 
 ## messages — 消息账本
 
-`/purgemsg`（`deleteMessages` 需要 message_id 列表）与运维查询的数据来源。
+`/purgemsg` 与运维查询的数据来源：逐条 `deleteMessage`（按 `group_msg_id`，双向含管理员发言）。
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
@@ -73,6 +73,8 @@ UNIQUE `(bot_id, user_id)` **和** UNIQUE `(bot_id, thread_id)` 双向唯一：
 | `created_at` | TEXT | |
 
 索引：`(thread_id, created_at)`、`(user_id, created_at)`。
+
+`/purgemsg` 完成后（含部分失败）会删除该 topic 的全部账本行——账本与群内实况对齐；删除失败的消息不再被追踪，可手动删除。话题被原生删除后的自愈只清 topics 绑定行，历史账本行保留（`thread_id` 悬空无害）。
 
 ## settings — 运行时开关
 

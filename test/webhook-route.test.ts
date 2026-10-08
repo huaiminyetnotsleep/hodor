@@ -620,19 +620,29 @@ describe("POST /webhook: callback_query 端到端（T27 答题）", () => {
     expect(row).toEqual({ is_verified: 0, verify_answer: 5 });
   });
 
-  it("群内 / 缺 message 的 callback → classify ignore：200 安全忽略，零出站", async () => {
-    const groupCallback = {
+  it("非客服群 / 缺 message 的 callback → classify ignore：200 安全忽略，零出站", async () => {
+    // 阶段 6 起客服群内回调是合法形态（group_callback → wipe 确认）——
+    // ignore 面收窄为「其他群」与「缺 message」
+    const otherGroupCallback = {
       update_id: 9124,
       callback_query: {
         id: "cb-9124",
         from: { id: 7321, first_name: "Zoe" },
-        message: { message_id: 41, chat: { id: SUPPORT_CHAT_ID, type: "supergroup" } },
+        message: { message_id: 41, chat: { id: -1009999000000, type: "supergroup" } },
         data: "v:5",
       },
     };
-    const res = await postWebhook(groupCallback);
+    const res = await postWebhook(otherGroupCallback);
     expect(res.status).toBe(200);
     expect(await readProcessed(9124)).toEqual({ status: "processed", attempts: 0 });
+    expect(stub.countOf("answerCallbackQuery")).toBe(0);
+
+    const noMessageCallback = {
+      update_id: 9126,
+      callback_query: { id: "cb-9126", from: { id: 7321, first_name: "Zoe" }, data: "v:5" },
+    };
+    const res2 = await postWebhook(noMessageCallback);
+    expect(res2.status).toBe(200);
     expect(stub.countOf("answerCallbackQuery")).toBe(0);
   });
 
@@ -809,5 +819,99 @@ describe("POST /webhook: verifyoff 端到端（T31，阶段 5 M3）", () => {
       .bind(BOT_ID, 7340)
       .first<{ is_verified: number; verified_at: string | null }>();
     expect(user).toEqual({ is_verified: 0, verified_at: null });
+  });
+});
+
+describe("POST /webhook: group_callback 端到端（T40 wipe 确认，阶段 6）", () => {
+  let stub: TelegramFetchStub;
+  beforeEach(() => {
+    stub = stubTelegramFetch();
+    stub.always("answerCallbackQuery", { status: 200, json: { ok: true, result: true } });
+    stub.always("editMessageText", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+  });
+  afterEach(() => {
+    stub.restore();
+  });
+
+  /** 客服群 topic 内的 wipe 确认按钮回调 update */
+  function groupWipeCallback(
+    updateId: number,
+    data: string,
+    fromId = ADMIN_ID,
+    messageId = 77,
+  ): Record<string, unknown> {
+    return {
+      update_id: updateId,
+      callback_query: {
+        id: `cb-${updateId}`,
+        from: { id: fromId, first_name: "Admin" },
+        message: { message_id: messageId, chat: { id: SUPPORT_CHAT_ID, type: "supergroup" } },
+        data,
+      },
+    };
+  }
+
+  it("确认回调全链（路由接线）：200 + 三表清空 + settings/幂等台账保留 + toast + 完成文案", async () => {
+    // 播种：一个用户 + 绑定 + 账本 + 幂等台账行 + settings 翻转（验证开关关）
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: 7350, first_name: "W" });
+    await insertTopic(env.HODOR_DB, {
+      botId: BOT_ID,
+      userId: 7350,
+      threadId: 850,
+      title: "W",
+    });
+    await setVerificationEnabled(env.HODOR_DB, false);
+    await env.HODOR_DB.prepare(
+      "INSERT INTO processed_updates (bot_id, update_id, status) VALUES (?, ?, 'processed')",
+    )
+      .bind(BOT_ID, 888001)
+      .run();
+    const epoch = Math.floor(Date.now() / 1000) - 5; // 60s 窗口内
+    const processedBefore = (
+      await env.HODOR_DB.prepare("SELECT COUNT(*) AS n FROM processed_updates").first<{ n: number }>()
+    )!.n;
+
+    const res = await postWebhook(groupWipeCallback(9150, `w:yes:${epoch}`));
+    expect(res.status).toBe(200);
+    expect(await readProcessed(9150)).toEqual({ status: "processed", attempts: 0 });
+    // toast「正在清空」+ 原消息改完成文案（先于计数断言——证明确认分支已执行）
+    expect(stub.countOf("answerCallbackQuery")).toBe(1);
+    expect(stub.callsOf("answerCallbackQuery")[0].body).toMatchObject({ text: "已确认，正在清空…" });
+    expect(stub.callsOf("editMessageText")[0].body).toMatchObject({ message_id: 77 });
+
+    const count = async (table: string) =>
+      (await env.HODOR_DB.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())!.n;
+    expect(await count("users")).toBe(0);
+    expect(await count("topics")).toBe(0);
+    expect(await count("messages")).toBe(0);
+    // 幂等台账保留：此前全部行 + 本 update 认领 1 行（播种行 888001 也在其中）
+    expect(await count("processed_updates")).toBe(processedBefore + 1);
+    const seeded = await env.HODOR_DB.prepare(
+      "SELECT status FROM processed_updates WHERE bot_id = ? AND update_id = 888001",
+    )
+      .bind(BOT_ID)
+      .first<{ status: string }>();
+    expect(seeded!.status).toBe("processed");
+    // settings 保留（验证开关仍为关）
+    const setting = await env.HODOR_DB.prepare(
+      "SELECT value FROM settings WHERE key = 'verify_enabled'",
+    ).first<{ value: string }>();
+    expect(setting!.value).toBe("0");
+  });
+
+  it("answerCallbackQuery retryable → 500 交重推，行保持 processing（数据未动）", async () => {
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: 7351, first_name: "X" });
+    stub.always("answerCallbackQuery", {
+      status: 500,
+      json: { ok: false, description: "Internal Server Error" },
+    });
+    const epoch = Math.floor(Date.now() / 1000);
+
+    const res = await postWebhook(groupWipeCallback(9151, `w:yes:${epoch}`));
+    expect(res.status).toBe(500);
+    expect(await readProcessed(9151)).toEqual({ status: "processing", attempts: 0 });
+    // 数据未动（重推收敛：重推时 callback id 已消费 → permanent warn 吞 → 继续清库）
+    const users = await env.HODOR_DB.prepare("SELECT COUNT(*) AS n FROM users").first<{ n: number }>();
+    expect(users!.n).toBeGreaterThanOrEqual(1);
   });
 });

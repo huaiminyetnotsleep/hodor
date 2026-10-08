@@ -349,6 +349,7 @@ describe("inbound: 已验证用户全链（置顶 ✅ / 中继 / 账本；阶段
       json: { ok: true, result: { message_thread_id: 300 } },
     });
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 502 } } });
+    stub.always("reopenForumTopic", { status: 200, json: { ok: true, result: true } });
 
     await seedVerifiedUser({ id: 7103, first_name: "Carol" });
     await handleInbound(env, BOT_ID, privateMessage({ id: 7103, first_name: "Carol" }, "第一条", 30));
@@ -367,6 +368,9 @@ describe("inbound: 已验证用户全链（置顶 ✅ / 中继 / 账本；阶段
       closed_at: null,
       pinned_msg_id: 502, // 重开保留原置顶
     });
+    // T38 重开链路：reopenForumTopic 真重开 TG 侧（恰一次，参数指向原 thread）
+    expect(stub.countOf("reopenForumTopic")).toBe(1);
+    expect(stub.callsOf("reopenForumTopic")[0].body).toMatchObject({ message_thread_id: 300 });
     expect(stub.countOf("createForumTopic")).toBe(1);
     expect(stub.countOf("pinChatMessage")).toBe(1); // 恰一条置顶（不重发）
     expect(relayCalls(stub, "又来了")[0].body).toMatchObject({ message_thread_id: 300 });

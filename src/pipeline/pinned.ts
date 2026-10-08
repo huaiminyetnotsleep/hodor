@@ -14,13 +14,15 @@
  *   best-effort（design §三「命令内置顶刷新」行：确认回复已反馈，置顶是
  *   展示面，两种失败均 warn 吞，绝不放大用户消息重发面）。
  * - downgradePinnedToUnverified：inbound ③ 超限 / ② TTL 过期的置顶降级 ❌
- *   （同为 best-effort；强制 verify="unverified"）。
+ *   （同为 best-effort；强制 verify="unverified"）；T38 /deluser 清验证后复用。
+ * - pinUserCard（阶段 6 迁入）：4a 置顶流程唯一入口——inbound 首联与
+ *   T39 /purgemsg 重置置顶共用同一「发信息卡 → pin → 落库」链。
  *
  * 系统消息语义（error-handling spec）：置顶编辑不入 messages 账本。
  */
 import { formatPinnedInfo, type PinnedInfoUser } from "../copy";
 import { parseSupportChatId } from "../env";
-import { findTopicByUser } from "../store/topics";
+import { findTopicByUser, setPinnedMsgId } from "../store/topics";
 import { getVerificationSettings } from "../store/settings";
 import { getGovernanceSnapshot } from "../store/users";
 import type { TelegramClient } from "../telegram/types";
@@ -114,10 +116,11 @@ export async function editPinnedBestEffort(
 }
 
 /**
- * 置顶验证行降级 ❌（inbound ③ 超限撤验证后 / ② TTL 过期撤验证后）：
- * 强制 verify="unverified"——降级时刻的置顶必须显示 ❌，即便 settings
- * 已切到其他态（关闭态的「未启用」是门放行的展示，不是验证失败的展示）。
- * best-effort 与 4b 刷新同款：两种失败均 warn 吞（降级失败不抛断主流程）。
+ * 置顶验证行降级 ❌（inbound ③ 超限撤验证后 / ② TTL 过期撤验证后 / T38
+ * /deluser 清验证后）：强制 verify="unverified"——降级时刻的置顶必须显示
+ * ❌，即便 settings 已切到其他态（关闭态的「未启用」是门放行的展示，不是
+ * 验证失败的展示）。best-effort 与 4b 刷新同款：两种失败均 warn 吞（降级
+ * 失败不抛断主流程）。
  */
 export async function downgradePinnedToUnverified(
   env: Cloudflare.Env,
@@ -126,4 +129,59 @@ export async function downgradePinnedToUnverified(
   userId: number,
 ): Promise<void> {
   await editPinned(env, client, botId, userId, { verify: "unverified" });
+}
+
+/** 4a 置顶流程的上下文（inbound 首联 / T39 /purgemsg 重置置顶共用） */
+export interface PinUserCardContext {
+  botId: number;
+  userId: number;
+  supportChatId: number;
+  threadId: number;
+  text: string;
+}
+
+/**
+ * 4a：在 topic 内发用户信息消息并置顶、落库（T24「每 topic 恰一条」的唯一
+ * 入口；T39 起从 inbound 迁入本模块——/purgemsg 重置置顶与首联置顶同一
+ * 语义，行为零变化）。
+ *
+ * 返回是否完成置顶并落库（/purgemsg 确认文案据此措辞，不虚报已重置）：
+ * - 信息 send retryable → 抛（重推重走 4a：topic 已在、pinned_msg_id 仍 null，
+ *   不重建 topic、不重发用户消息；极端窗口可能遗留一条未置顶的旧信息消息，
+ *   接受并记录日志——design.md §四）
+ * - 信息 send permanent → warn 跳过，**不写** pinned_msg_id（后续消息可再尝试）→ false
+ * - pin permanent → warn，信息消息已在，**仍写** pinned_msg_id（供 4b edit 刷新）→ true
+ */
+export async function pinUserCard(
+  env: Cloudflare.Env,
+  client: TelegramClient,
+  ctx: PinUserCardContext,
+): Promise<boolean> {
+  const sent = await client.sendMessage({
+    chat_id: ctx.supportChatId,
+    text: ctx.text,
+    message_thread_id: ctx.threadId,
+  });
+  if (!sent.ok) {
+    if (sent.kind === "retryable") throw new Error(sent.errorMessage ?? "sendMessage retryable");
+    console.warn(
+      `[pinned] user ${ctx.userId}: 置顶信息发送 permanent，跳过置顶（不落 pinned_msg_id）：${sent.errorMessage ?? "no detail"}`,
+    );
+    return false;
+  }
+  const pinnedMsgId = sent.result.message_id;
+
+  const pinned = await client.pinChatMessage({
+    chat_id: ctx.supportChatId,
+    message_id: pinnedMsgId,
+  });
+  if (!pinned.ok) {
+    if (pinned.kind === "retryable") throw new Error(pinned.errorMessage ?? "pinChatMessage retryable");
+    console.warn(
+      `[pinned] user ${ctx.userId}: pinChatMessage permanent（信息消息已在，仍记录 pinned_msg_id 供刷新）：${pinned.errorMessage ?? "no detail"}`,
+    );
+  }
+  // 落库：D1 失败原样抛（→ retryable 重推；重推重走 4a 属已接受的极端窗口）
+  await setPinnedMsgId(env.HODOR_DB, ctx.botId, ctx.userId, pinnedMsgId);
+  return true;
 }

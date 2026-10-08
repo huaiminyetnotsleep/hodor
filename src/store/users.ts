@@ -360,6 +360,37 @@ export async function setBanned(
 }
 
 /**
+ * 置用户 deleted 态（T38 /deluser 的 DB 真值先行步骤之一）：status 列为
+ * 运维可读的会话终态标记（database.md 既定契约），不参与任何门控判定——
+ * 门控行为由 deluser 同步清掉的验证字段（markUnverified）决定。幂等 setter。
+ */
+export async function markUserDeleted(
+  db: D1Database,
+  botId: number,
+  userId: number,
+): Promise<void> {
+  await db
+    .prepare("UPDATE users SET status = 'deleted' WHERE bot_id = ? AND user_id = ?")
+    .bind(botId, userId)
+    .run();
+}
+
+/**
+ * 复位用户 active 态（T38 重开链路）：resolveTopic 重开 closed 行时的唯一
+ * 复位点（与 reopenTopic 成对），ensureUser 永不触碰 status 列（契约不变）。
+ */
+export async function markUserActive(
+  db: D1Database,
+  botId: number,
+  userId: number,
+): Promise<void> {
+  await db
+    .prepare("UPDATE users SET status = 'active' WHERE bot_id = ? AND user_id = ?")
+    .bind(botId, userId)
+    .run();
+}
+
+/**
  * 高危标记 / 取消（T37）：/risk /unrisk 命令的唯一写入口。
  *
  * 单语句同时写 is_risk 与 risk_notice_at = NULL：置 1 清窗口使该用户

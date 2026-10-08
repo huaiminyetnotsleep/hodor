@@ -1,7 +1,7 @@
 /**
  * 命令管线（T34 /help + T35 /ban /unban + T36/T37 note / risk 组 + T31/T32
- * verifyon / verifyoff / verifymode 组，design.md §二.6 / §二.9 / §二.10 +
- * §四失败表）：
+ * verifyon / verifyoff / verifymode 组 + 阶段 6 T38 /deluser、T39 /purgemsg、
+ * T40 /wipealldata，design.md §二.6 / §二.9 / §二.10 + §四失败表）：
  *
  * outbound 在管理员校验后把 `/` 开头的文本消息整条移交本管线——**一律按
  * 命令终结，永不中继、永不写账本**（命令是客服侧治理操作而非对话内容）；
@@ -24,19 +24,31 @@
  *   无害，确认照发）；/verifymode 无参循环切换（math ↔ button），先
  *   clearAllPendingVerifications 后 setVerificationMode（顺序 binding，见
  *   分支注释），确认携带新模式 + button 弱防护说明
+ * - /deluser（T38，需绑定组）→ DB 真值先行三 setter（markUnverified +
+ *   markUserDeleted + closeTopic）→ closeForumTopic（permanent warn 吞 +
+ *   确认注记）→ 置顶降级 ❌（best-effort）→ 用户私聊「请重新 /start」
+ *   提示（直发不占 slot）→ topic 确认（含失败注记）。绑定 / 账本 / note 保留
+ * - /purgemsg（T39，需绑定组）→ 账本 + 置顶取删除列表 → 逐条 deleteMessage
+ *   三态计数（已删 / 已不存在 / 失败）→ 清账本 + clearPinnedMsgId →
+ *   pinUserCard 立即重置置顶（4a 同链）→ topic 确认（failed>0 明示未清空）
+ * - /wipealldata（T40，全局命令）→ 只发警告 + 确认键盘（60s 窗口编入
+ *   callback_data，无服务端状态）；真正执行在确认回调（pipeline/wipe.ts）
  * - 未知命令 → topic 内「未知命令」提示并引导 /help，**绝不发给用户**
  *
  * 失败语义（design.md §四「命令回复」行，binding）：回复 retryable → 抛
  * （webhook 500 → 重推重发回复）；permanent → warn 吞（跳过该条回复）。
  * 置顶刷新恒 best-effort（§三「命令内置顶刷新」行：确认回复已反馈，edit
  * 两种失败均 warn 吞）。命令回复全部发回管理员发言的同一 topic（classify
- * 保证 chat 即客服群）：零用户侧消息、零 messages 账本行（系统消息不入
- * 账本，error-handling spec）。
+ * 保证 chat 即客服群）：零用户侧消息（/deluser 的私聊提示除外——治理语义
+ * 的一部分）、零 messages 账本行（系统消息不入账本，error-handling spec）。
  */
 import {
+  DELUSER_USER_NOTICE,
   formatBanConfirmed,
+  formatDeluserConfirmed,
   formatHelpText,
   formatNoteConfirmed,
+  formatPurgeConfirmed,
   formatRiskConfirmed,
   formatUnbanConfirmed,
   formatUnnoteConfirmed,
@@ -47,11 +59,31 @@ import {
   NOTE_USAGE_NOTICE,
   UNBOUND_TOPIC_NOTICE,
   UNKNOWN_COMMAND_NOTICE,
+  WIPE_WARNING_TEXT,
 } from "../copy";
-import { editPinnedBestEffort } from "./pinned";
-import { findUserIdByThread, setTopicNote } from "../store/topics";
+import {
+  composePinnedText,
+  downgradePinnedToUnverified,
+  editPinnedBestEffort,
+  pinUserCard,
+} from "./pinned";
+import { buildWipeKeyboard } from "./wipe";
+import { isMessageGoneError } from "./errors";
+import {
+  clearPinnedMsgId,
+  closeTopic,
+  findTopicByUser,
+  findUserIdByThread,
+  setTopicNote,
+} from "../store/topics";
+import {
+  deleteThreadMessages,
+  listThreadGroupMsgIds,
+} from "../store/messages";
 import {
   clearAllPendingVerifications,
+  markUnverified,
+  markUserDeleted,
   setBanned,
   setRisk,
 } from "../store/users";
@@ -61,6 +93,7 @@ import {
   setVerificationMode,
 } from "../store/settings";
 import { createTelegramClient } from "../telegram/client";
+import type { InlineKeyboardMarkup } from "../telegram/types";
 
 /**
  * 备注最大长度（Unicode 码点数）：落库前截断——置顶信息 = 昵称 / ID /
@@ -97,9 +130,15 @@ async function replyInTopic(
   chatId: number,
   threadId: number,
   text: string,
+  replyMarkup?: InlineKeyboardMarkup,
 ): Promise<void> {
   const client = createTelegramClient(env.TELEGRAM_BOT_TOKEN);
-  const sent = await client.sendMessage({ chat_id: chatId, text, message_thread_id: threadId });
+  const sent = await client.sendMessage({
+    chat_id: chatId,
+    text,
+    message_thread_id: threadId,
+    ...(replyMarkup !== undefined ? { reply_markup: replyMarkup } : {}),
+  });
   if (!sent.ok) {
     if (sent.kind === "retryable") {
       throw new Error(sent.errorMessage ?? "sendMessage retryable");
@@ -235,6 +274,146 @@ export async function handleCommand(
     await clearAllPendingVerifications(env.HODOR_DB);
     await setVerificationMode(env.HODOR_DB, nextMode);
     await replyInTopic(env, chatId, threadId, formatVerifyModeConfirmed(nextMode));
+    return;
+  }
+
+  /* ------------- T38 /deluser（需绑定，/ban 同姿态） ------------- */
+  if (name === "/deluser") {
+    // 反查绑定：closed 行同样可操作（治理操作不依赖 open）；无行 → T26 提示
+    const owner = await findUserIdByThread(env.HODOR_DB, botId, threadId);
+    if (!owner) {
+      await replyInTopic(env, chatId, threadId, UNBOUND_TOPIC_NOTICE);
+      return;
+    }
+    const client = createTelegramClient(env.TELEGRAM_BOT_TOKEN);
+    // DB 真值先行（全部幂等 setter，重推 / 重复执行同值无害）：清验证与信任
+    // 状态 + users.status=deleted + topics 行 closed。绑定行 / 账本 / note 不动
+    //（「保留绑定、历史与备注」）。
+    await markUnverified(env.HODOR_DB, botId, owner.user_id);
+    await markUserDeleted(env.HODOR_DB, botId, owner.user_id);
+    await closeTopic(env.HODOR_DB, botId, owner.user_id);
+    // TG 侧真关闭（阶段 6 起关闭是物理关闭，重开链路据此补 reopenForumTopic）：
+    // retryable → 抛（重推幂等重关）；permanent（典型：topic 已被原生删除 /
+    // 重复 /deluser）→ warn 吞并注记——DB 真值已定，关闭失败不阻断命令
+    let closeFailed: string | undefined;
+    const closed = await client.closeForumTopic({
+      chat_id: chatId,
+      message_thread_id: threadId,
+    });
+    if (!closed.ok) {
+      if (closed.kind === "retryable") {
+        throw new Error(closed.errorMessage ?? "closeForumTopic retryable");
+      }
+      closeFailed = closed.errorMessage ?? "no detail";
+      console.warn(
+        `[commands] thread ${threadId}: closeForumTopic permanent（DB 已置 closed）：${closeFailed}`,
+      );
+    }
+    // 置顶验证行降级 ❌（best-effort）：验证已清，置顶不得残留 ✅
+    await downgradePinnedToUnverified(env, client, botId, owner.user_id);
+    // 用户私聊提示：直发不占提示频控 slot（管理员主动触发的治理通知，无
+    // 用户侧刷量面）；retryable → 抛；permanent（如拉黑 bot）→ warn 吞 + 注记
+    let noticeFailed = false;
+    const noticed = await client.sendMessage({
+      chat_id: owner.user_id,
+      text: DELUSER_USER_NOTICE,
+    });
+    if (!noticed.ok) {
+      if (noticed.kind === "retryable") {
+        throw new Error(noticed.errorMessage ?? "sendMessage retryable");
+      }
+      noticeFailed = true;
+      console.warn(
+        `[commands] user ${owner.user_id}: 重新 start 提示 permanent，跳过：${noticed.errorMessage ?? "no detail"}`,
+      );
+    }
+    await replyInTopic(
+      env,
+      chatId,
+      threadId,
+      formatDeluserConfirmed(owner.user_id, { closeFailed, noticeFailed }),
+    );
+    return;
+  }
+
+  /* ------------- T39 /purgemsg（需绑定，/ban 同姿态） ------------- */
+  if (name === "/purgemsg") {
+    const owner = await findUserIdByThread(env.HODOR_DB, botId, threadId);
+    if (!owner) {
+      await replyInTopic(env, chatId, threadId, UNBOUND_TOPIC_NOTICE);
+      return;
+    }
+    // 反查命中保证正向行存在（同一 PK）；取 pinned_msg_id 并入删除列表
+    //（置顶信息是系统消息、不入账本，账本查不到它）
+    const topic = await findTopicByUser(env.HODOR_DB, botId, owner.user_id);
+    const client = createTelegramClient(env.TELEGRAM_BOT_TOKEN);
+    const ids = await listThreadGroupMsgIds(env.HODOR_DB, botId, threadId);
+    if (topic?.pinned_msg_id != null && !ids.includes(topic.pinned_msg_id)) {
+      ids.push(topic.pinned_msg_id);
+    }
+    // 升序删除（账本查询已有序，并入置顶后重排）：确定性行为便于日志 / 断言
+    ids.sort((a, b) => a - b);
+    // 逐条删除 + 三态计数（不把未删除内容标为已清空）：
+    // retryable → 抛交重推（重推重跑：已删的收敛为「已不存在」类）
+    let deleted = 0;
+    let gone = 0;
+    let failed = 0;
+    for (const messageId of ids) {
+      const result = await client.deleteMessage({ chat_id: chatId, message_id: messageId });
+      if (result.ok) {
+        deleted++;
+        continue;
+      }
+      if (result.kind === "retryable") {
+        throw new Error(result.errorMessage ?? "deleteMessage retryable");
+      }
+      if (isMessageGoneError(result.errorMessage)) {
+        gone++;
+      } else {
+        failed++;
+        console.warn(
+          `[commands] thread ${threadId}: deleteMessage(${messageId}) permanent：${result.errorMessage ?? "no detail"}`,
+        );
+      }
+    }
+    // 账本与置顶重置（无论 partial failure——已删 / 不存在的行不再追踪；
+    // 失败未删的消息交管理员手动删除，确认文案已注明）
+    await deleteThreadMessages(env.HODOR_DB, botId, threadId);
+    await clearPinnedMsgId(env.HODOR_DB, botId, owner.user_id);
+    // 立即重发信息卡并重新置顶（4a 同链）：compose 为 null（行缺失竞态）→
+    // 跳过重发，pinned_msg_id 已 null，下次消息 4a 自然补；pinUserCard 返回
+    // 是否完成置顶（send permanent warn 吞 → false）——确认文案据此措辞
+    let pinnedReset = false;
+    const cardText = await composePinnedText(env.HODOR_DB, botId, owner.user_id);
+    if (cardText !== null) {
+      pinnedReset = await pinUserCard(env, client, {
+        botId,
+        userId: owner.user_id,
+        supportChatId: chatId,
+        threadId,
+        text: cardText,
+      });
+    }
+    await replyInTopic(
+      env,
+      chatId,
+      threadId,
+      formatPurgeConfirmed({ deleted, gone, failed, pinnedReset }),
+    );
+    return;
+  }
+
+  /* ------------- T40 /wipealldata（全局命令，/help 同姿态无需绑定） ------------- */
+  if (name === "/wipealldata") {
+    // 第一步只发警告 + 确认键盘（60 秒窗口编入 callback_data，无服务端状态）；
+    // 真正执行在确认回调（pipeline/wipe.ts，含再次鉴权与超时判定）
+    await replyInTopic(
+      env,
+      chatId,
+      threadId,
+      WIPE_WARNING_TEXT,
+      buildWipeKeyboard(Math.floor(Date.now() / 1000)),
+    );
     return;
   }
 

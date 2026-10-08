@@ -182,6 +182,8 @@ export function formatHelpText(settings: HelpSettings): string {
     "/unnote - 清除用户备注",
     "/risk - 标记高危用户",
     "/unrisk - 取消高危标记",
+    "/deluser - 删除本话题用户（关闭话题、清除验证，历史与备注保留，用户重新 /start 后复用本话题重开）",
+    "/purgemsg - 清空本话题全部聊天消息并重置置顶",
     "",
     "验证：",
   ];
@@ -194,6 +196,9 @@ export function formatHelpText(settings: HelpSettings): string {
   lines.push(
     `/verifymode - 切换验证模式（当前：${verifyModeLabel(settings.verifyMode)}）`,
     "纯按钮模式防护较弱，bot 可直接调 API 点击，仅建议受信任场景使用。",
+    "",
+    "危险操作：",
+    "/wipealldata - 清空全部用户、话题绑定与消息记录（两步确认，不可恢复）",
     "",
     "说明：以 / 开头的消息不会中继给用户。",
   );
@@ -230,6 +235,9 @@ export const ADMIN_COMMAND_MENU: readonly { command: string; description: string
   { command: "verifyon", description: "开启人机验证" },
   { command: "verifyoff", description: "临时关闭人机验证" },
   { command: "verifymode", description: "切换验证模式" },
+  { command: "deluser", description: "删除本话题用户并关闭话题" },
+  { command: "purgemsg", description: "清空本话题消息并重置置顶" },
+  { command: "wipealldata", description: "清空全部数据（两步确认）" },
 ];
 
 /** /ban 确认（T35）：回 topic，携带目标用户 ID 便于管理员核对 */
@@ -317,3 +325,99 @@ export function formatVerifyButtonQuestion(): string {
 
 /** 纯按钮模式的唯一按钮文案（T32）：点击即提交答案 0 */
 export const VERIFY_BUTTON_LABEL = "我不是机器人";
+
+/* ------------------------------------------------------------------ */
+/* 阶段 6：会话维护（T38 deluser / T39 purgemsg / T40 wipealldata）文案   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * /deluser 的用户私聊提示（T38）：告知会话结束与重新入口。直发不占提示
+ * 频控 slot——管理员主动触发的治理通知，无用户侧刷量面（T30 防的是用户
+ * 触发式轰炸）。permanent（如用户拉黑 bot）→ warn 吞 + 确认注记。
+ */
+export const DELUSER_USER_NOTICE = "本次会话已结束。如需继续联系客服，请重新发送 /start。";
+
+/**
+ * /deluser 确认（T38）：回 topic，携带目标用户 ID + 保留 / 重开语义。
+ * 可选注记行：topic 关闭失败（如已被原生删除）、私聊提示未送达——
+ * 两个 best-effort 步骤的失败必须让管理员可见（不静默吞治理反馈）。
+ */
+export function formatDeluserConfirmed(
+  userId: number,
+  annotations: { closeFailed?: string; noticeFailed?: boolean } = {},
+): string {
+  const lines = [
+    `已删除用户 ${userId}：验证状态已清除，本话题已关闭（历史与备注保留）。`,
+    "用户重新 /start 后将复用本话题重开，验证开关开启时会重新验证。",
+  ];
+  if (annotations.closeFailed) {
+    lines.push(`⚠️ 话题关闭未成功：${annotations.closeFailed}`);
+  }
+  if (annotations.noticeFailed) {
+    lines.push("⚠️ 私聊提示未送达（用户可能已拉黑 bot）。");
+  }
+  return lines.join("\n");
+}
+
+/**
+ * /purgemsg 确认（T39）：三态计数——不把未删除内容标为已清空（failed>0
+ * 时明确「有内容未清空」）。gone = 已不存在（可能已被手工删，重推重跑
+ * 的收敛类）；failed = 权限不足等其他 permanent。pinnedReset 标记信息卡
+ * 是否成功重置（false → 注明下次消息自动补发，不虚报已重置）。
+ */
+export function formatPurgeConfirmed(counts: {
+  deleted: number;
+  gone: number;
+  failed: number;
+  pinnedReset: boolean;
+}): string {
+  const lines = [`本话题消息清理完成：已删除 ${counts.deleted} 条`];
+  if (counts.gone > 0) lines.push(`${counts.gone} 条已不存在（可能此前已被删除）`);
+  if (counts.failed > 0) {
+    lines.push(`⚠️ ${counts.failed} 条删除失败（bot 可能缺少「删除消息」权限），这些内容未清空，可手动删除。`);
+  }
+  lines.push(
+    counts.pinnedReset
+      ? "用户信息已重新发送并置顶。"
+      : "⚠️ 用户信息未能重新置顶，下次收到用户消息时会自动补发。",
+  );
+  return lines.join("\n");
+}
+
+/**
+ * /wipealldata 第一步警告（T40）：明确不可恢复范围与保留项。60 秒内点击
+ * 「确认清空」才执行；完成文案独立（编辑本消息）。
+ */
+export const WIPE_WARNING_TEXT = [
+  "⚠️ 危险操作 ⚠️",
+  "将清空全部数据，不可恢复：",
+  "- 全部用户档案与验证 / 封禁 / 备注状态",
+  "- 全部用户 ↔ 话题绑定",
+  "- 全部消息记录",
+  "",
+  "保留：验证开关与模式（settings）、幂等台账；群内已创建的话题不会被自动删除（旧话题内再发言会提示「找不到对应用户」，可手动删除）。",
+  "",
+  "请在 60 秒内点击按钮确认或取消。",
+].join("\n");
+
+/** /wipealldata 确认按钮文案（T40）：callback_data 由 wipe.ts 组装（w:yes:<epoch>） */
+export const WIPE_CONFIRM_LABEL = "⚠️ 确认清空（不可恢复）";
+
+/** /wipealldata 取消按钮文案（T40） */
+export const WIPE_CANCEL_LABEL = "取消";
+
+/** /wipealldata 确认执行后的完成文案（编辑原警告消息，键盘随之移除） */
+export const WIPE_DONE_TEXT =
+  "已清空全部用户、话题绑定与消息记录。验证开关与模式保留；群内话题未删除。用户再次私聊将全新建档。";
+
+/** wipe 回调 toast：非管理员（T40 再次鉴权失败） */
+export const WIPE_TOAST_NOT_ADMIN = "该操作仅客服管理员可用。";
+
+/** wipe 回调 toast：超过 60 秒有效期 */
+export const WIPE_TOAST_EXPIRED = "确认已超时（60 秒），本次操作已放弃。请重新发起 /wipealldata。";
+
+/** wipe 回调 toast：取消 */
+export const WIPE_TOAST_CANCELLED = "已取消，未清空任何数据。";
+
+/** wipe 回调 toast：确认后开始执行 */
+export const WIPE_TOAST_RUNNING = "已确认，正在清空…";

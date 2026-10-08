@@ -133,6 +133,31 @@ export interface DeleteForumTopicParams {
 }
 
 /* ------------------------------------------------------------------ */
+/* 阶段 6（T38–T39）：topic 开关 + 消息删除                              */
+/* ------------------------------------------------------------------ */
+
+/** closeForumTopic 入参（T38 /deluser：TG 侧真关闭；对已关闭 topic 幂等） */
+export interface CloseForumTopicParams {
+  chat_id: number;
+  message_thread_id: number;
+}
+
+/**
+ * reopenForumTopic 入参（T38 重开链路：closed 行复用前真重开——阶段 6 起
+ * /deluser 真关闭 TG topic，仅改 DB 状态不再够用）
+ */
+export interface ReopenForumTopicParams {
+  chat_id: number;
+  message_thread_id: number;
+}
+
+/** deleteMessage 入参（T39 /purgemsg：按账本 group_msg_id 逐条删除） */
+export interface DeleteMessageParams {
+  chat_id: number;
+  message_id: number;
+}
+
+/* ------------------------------------------------------------------ */
 /* T22 / T24（阶段 3）：媒体 per-type send + 置顶/编辑 8 方法          */
 /* ------------------------------------------------------------------ */
 
@@ -261,6 +286,9 @@ export interface TelegramClient {
     params: CreateForumTopicParams,
   ): Promise<TelegramResult<CreateForumTopicResult>>;
   deleteForumTopic(params: DeleteForumTopicParams): Promise<TelegramResult<boolean>>;
+  closeForumTopic(params: CloseForumTopicParams): Promise<TelegramResult<boolean>>;
+  reopenForumTopic(params: ReopenForumTopicParams): Promise<TelegramResult<boolean>>;
+  deleteMessage(params: DeleteMessageParams): Promise<TelegramResult<boolean>>;
   sendPhoto(params: SendPhotoParams): Promise<TelegramResult<MessageIdResult>>;
   sendVideo(params: SendVideoParams): Promise<TelegramResult<MessageIdResult>>;
   sendVoice(params: SendVoiceParams): Promise<TelegramResult<MessageIdResult>>;

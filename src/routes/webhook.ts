@@ -27,6 +27,7 @@ import { classifyUpdate, type TelegramCallbackQueryRef, type TelegramMessageRef 
 import { handleInbound } from "../pipeline/inbound";
 import { handleOutbound } from "../pipeline/outbound";
 import { handleVerifyCallback } from "../pipeline/verify";
+import { handleWipeCallback } from "../pipeline/wipe";
 import { getSingleBotId } from "../store/bots";
 import { claimUpdate, markFailed, markProcessed } from "../store/processedUpdates";
 
@@ -115,12 +116,18 @@ export async function handleWebhook(
   // classify 已做运行时形态校验；此处仅收窄类型（缺字段 = 不可达的防御式兜底，
   // warn 后按毒丸 200 处理，不让畸形信封触发重推）
   try {
-    if (kind === "callback") {
+    if (kind === "callback" || kind === "group_callback") {
+      // callback = 私聊题面按钮（T27）；group_callback = 客服群内按钮
+      //（T40 wipe 确认键盘）——两者信封同形，仅 chat 归属不同
       const callbackQuery = update.callback_query as TelegramCallbackQueryRef | undefined;
       if (callbackQuery) {
-        await handleVerifyCallback(env, botId, callbackQuery);
+        if (kind === "callback") {
+          await handleVerifyCallback(env, botId, callbackQuery);
+        } else {
+          await handleWipeCallback(env, botId, callbackQuery);
+        }
       } else {
-        console.warn(`[webhook] update ${updateId}: classify=callback 但 callback_query 缺失`);
+        console.warn(`[webhook] update ${updateId}: classify=${kind} 但 callback_query 缺失`);
       }
     } else {
       const message = update.message as TelegramMessageRef | undefined;

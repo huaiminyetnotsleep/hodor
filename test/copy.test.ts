@@ -305,15 +305,15 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
       { verifyEnabled: false, verifyMode: "button" as const },
     ]) {
       const text = formatHelpText(settings);
-      for (const command of ["/help", "/ban", "/unban", "/note", "/unnote", "/risk", "/unrisk", "/verifymode"]) {
+      for (const command of [
+        "/help", "/ban", "/unban", "/note", "/unnote", "/risk", "/unrisk", "/verifymode",
+        "/deluser", "/purgemsg", "/wipealldata",
+      ]) {
         expect(text).toContain(command);
       }
       expect(text).toContain("不会中继");
       expect(text).toContain("纯按钮模式防护较弱"); // 弱防护说明恒展示
-      // 阶段 6 命令绝不提前出现（只展示已交付）
-      expect(text).not.toContain("/deluser");
-      expect(text).not.toContain("/purgemsg");
-      expect(text).not.toContain("/wipealldata");
+      expect(text).toContain("不可恢复"); // 危险操作段保留警示
     }
   });
 
@@ -343,6 +343,7 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
     expect(menuCommands).toEqual([
       "help", "ban", "unban", "note", "unnote", "risk", "unrisk",
       "verifyon", "verifyoff", "verifymode",
+      "deluser", "purgemsg", "wipealldata",
     ]);
 
     for (const settings of [

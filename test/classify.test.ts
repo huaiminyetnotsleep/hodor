@@ -89,10 +89,19 @@ describe("classify: callback_query 分流（T27 验证题按钮）", () => {
     expect(classifyUpdate(callbackUpdate({ id: 12345 }), SUPPORT_CHAT_ID)).toBe("ignore");
   });
 
-  it("群内回调（chat.type = supergroup）→ ignore（群组内不存在答题形态）", () => {
+  it("客服群内回调（chat.id = SUPPORT_CHAT_ID）→ group_callback（T40 wipe 确认键盘）", () => {
     expect(
       classifyUpdate(
         callbackUpdate({ message: { message_id: 55, chat: { id: SUPPORT_CHAT_ID, type: "supergroup" } } }),
+        SUPPORT_CHAT_ID,
+      ),
+    ).toBe("group_callback");
+  });
+
+  it("其他群内回调（非客服群）→ ignore（不存在合法按钮形态）", () => {
+    expect(
+      classifyUpdate(
+        callbackUpdate({ message: { message_id: 55, chat: { id: -1009876543210, type: "supergroup" } } }),
         SUPPORT_CHAT_ID,
       ),
     ).toBe("ignore");
