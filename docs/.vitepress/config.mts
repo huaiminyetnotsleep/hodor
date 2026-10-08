@@ -8,10 +8,17 @@ export default defineConfig({
   base: '/hodor/',
   description: 'Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题，消息不串线',
 
-  // VitePress 不会给 head 里的绝对路径自动加 base 前缀，favicon 需显式写 /hodor/ 前缀
-  head: [['link', { rel: 'icon', href: '/hodor/favicon.ico' }]],
+  // VitePress 不会给 head 里的绝对路径自动加 base 前缀，图标需显式写 /hodor/ 前缀
+  // 图标源文件 docs/icon.png，缩放产物在 docs/public/（512 logo / 180 apple-touch / 64 favicon）
+  head: [
+    ['link', { rel: 'icon', type: 'image/png', sizes: '64x64', href: '/hodor/favicon.png' }],
+    ['link', { rel: 'apple-touch-icon', sizes: '180x180', href: '/hodor/apple-touch-icon.png' }],
+  ],
 
   themeConfig: {
+    // 导航栏 logo 会经 withBase 自动补上 /hodor/ 前缀
+    logo: '/icon.png',
+
     nav: [
       { text: '首页', link: '/' },
       { text: '功能介绍', link: '/guide/features' },
