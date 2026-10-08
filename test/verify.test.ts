@@ -6,25 +6,37 @@
  * 旧题失效 / 他人或重放失效）+ 毒丸防护（非 v:<n> 载荷零调用）+ 失败语义
  * （markVerified DB 真值先行；answerCb / edit retryable 抛、permanent warn）。
  *
+ * 阶段 5 M3 新增（T32 模式化）：button 出题（单按钮 v:0 + answer=0 落库 /
+ * overflow 限频前缀变体文案）、button 判卷通过链（点击 → markVerified →
+ * 题面编辑 → 置顶 ✅）、模式切换后旧题回调失效（clearAllPendingVerifications
+ * + 归属判定）、答错重出随当前模式（math 回归 + button 防御路径）。
+ *
  * 阶段 4 新增文件。D1 全真（applyD1Migrations）+ telegramFetchStub 拦截出站。
  */
 import { applyD1Migrations, env } from "cloudflare:test";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   formatPinnedInfo,
+  formatRateLimitVerifyButton,
+  formatVerifyButtonQuestion,
+  VERIFY_BUTTON_LABEL,
   VERIFY_EXPIRED_NOTICE,
   VERIFY_PASSED_TEXT,
   VERIFY_PASSED_TOAST,
+  VERIFY_RETRY_PREFIX,
   VERIFY_WRONG_TOAST,
 } from "../src/copy";
 import type { TelegramCallbackQueryRef } from "../src/pipeline/classify";
 import {
+  buttonKeyboard,
   generateQuestion,
   handleVerifyCallback,
   optionsKeyboard,
   sendVerificationCode,
 } from "../src/pipeline/verify";
 import { upsertBot } from "../src/store/bots";
+import { setVerificationMode } from "../src/store/settings";
+import { clearAllPendingVerifications } from "../src/store/users";
 import { insertTopic } from "../src/store/topics";
 import { stubTelegramFetch, type TelegramFetchStub } from "./helpers/telegramFetchStub";
 
@@ -267,7 +279,7 @@ describe("verify: handleVerifyCallback 答题路径", () => {
         first_name: "Verify",
         username: "verify_hd",
         firstSeenAt: "2026-09-01T10:00:00.000Z",
-        isVerified: true,
+        verify: "verified",
       }),
     });
     expect(stub.countOf("sendMessage")).toBe(0); // 零新 push
@@ -470,5 +482,168 @@ describe("verify: handleVerifyCallback 置顶刷新失败语义（best-effort pe
       }),
     ).rejects.toThrow(/editMessageText/);
     expect((await readVerifyRow(7604))!.is_verified).toBe(1); // DB 真值先行
+  });
+});
+
+describe("verify: 纯按钮模式出题与判卷（T32，阶段 5 M3）", () => {
+  let stub: TelegramFetchStub;
+  beforeEach(() => {
+    stub = stubTelegramFetch();
+    stub.always("answerCallbackQuery", { status: 200, json: { ok: true, result: true } });
+    stub.always("editMessageText", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    // settings 表文件内共享：每用例归位默认（无行 = math / enabled——
+    // 供既有 describe 的「阶段 4 零改动」用例维持缺省前提）
+    return env.HODOR_DB.prepare("DELETE FROM settings").run();
+  });
+  afterEach(() => {
+    stub.restore();
+    return env.HODOR_DB.prepare("DELETE FROM settings").run();
+  });
+
+  /** 播种 7605 基准行（题目字段可配；默认归零） */
+  async function seedUser(options: { answer?: number; msgId?: number } = {}): Promise<void> {
+    await env.HODOR_DB.prepare(
+      `INSERT INTO users (bot_id, user_id, first_name, username, first_seen_at, last_seen_at, is_verified, verified_at, verify_answer, verify_msg_id)
+       VALUES (?, 7605, 'Btn', 'btn_hd', '2026-09-01T10:00:00.000Z', '2026-09-01T10:00:00.000Z', 0, NULL, ?, ?)
+       ON CONFLICT (bot_id, user_id) DO UPDATE SET
+         is_verified = 0, verified_at = NULL, verify_answer = ?, verify_msg_id = ?`,
+    )
+      .bind(BOT_ID, options.answer ?? null, options.msgId ?? null, options.answer ?? null, options.msgId ?? null)
+      .run();
+  }
+
+  /** 7605 在题面消息 4242 上点 v:<data> 的回调构造（本组用户号段） */
+  function btnCallback(data: string): TelegramCallbackQueryRef {
+    return {
+      id: "cb-btn",
+      from: { id: 7605, first_name: "Btn" },
+      message: { message_id: 4242, chat: { id: 7605, type: "private" } },
+      data,
+    };
+  }
+
+  it("button 出题（新题形态）：单按钮「我不是机器人」v:0、题面为按钮引导文案、answer=0 落库", async () => {
+    await setVerificationMode(env.HODOR_DB, "button");
+    await seedUser();
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 4500 } } });
+
+    await sendVerificationCode(env, BOT_ID, 7605, { type: "question" });
+
+    expect(stub.countOf("sendMessage")).toBe(1);
+    const body = stub.callsOf("sendMessage")[0].body as Record<string, unknown>;
+    expect(body.chat_id).toBe(7605);
+    expect(body.text).toBe(formatVerifyButtonQuestion());
+    expect(body.reply_markup).toEqual(buttonKeyboard());
+    // 单按钮形态逐字段：唯一选项即唯一合法答案（v:0），载荷无答案标记
+    expect(body.reply_markup).toEqual({
+      inline_keyboard: [[{ text: VERIFY_BUTTON_LABEL, callback_data: "v:0" }]],
+    });
+    const row = await readVerifyRow(7605);
+    expect(row!.verify_answer).toBe(0); // button 恒 0
+    expect(row!.verify_msg_id).toBe(4500);
+    expect(row!.is_verified).toBe(0);
+  });
+
+  it("button 出题（overflow 形态）：保留「发送过快…每分钟最多 {limit} 条」前缀 + 按钮题面（同消息单 push）", async () => {
+    await setVerificationMode(env.HODOR_DB, "button");
+    await seedUser();
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 4501 } } });
+
+    await sendVerificationCode(env, BOT_ID, 7605, { type: "overflow", limit: 5 });
+
+    const body = stub.callsOf("sendMessage")[0].body as Record<string, unknown>;
+    expect(body.text).toBe(formatRateLimitVerifyButton(5));
+    expect((body.text as string)).toContain("每分钟最多 5 条");
+    expect((body.text as string)).toContain("点击下方按钮");
+    expect(body.reply_markup).toEqual(buttonKeyboard());
+    expect((await readVerifyRow(7605))!.verify_answer).toBe(0);
+    expect((await readVerifyRow(7605))!.verify_msg_id).toBe(4501);
+  });
+
+  it("button 判卷通过链：点 v:0 → markVerified（DB 真值先行）→ 通过 toast → 题面编辑 → 置顶刷新 ✅", async () => {
+    // pending 题 answer=0（button 产物形态）；settings 保持 math 不影响判卷——
+    // 判卷只看「selected === 库内 verify_answer」，与模式正交
+    await seedUser({ answer: 0, msgId: 4242 });
+    await env.HODOR_DB.prepare(
+      `INSERT INTO topics (bot_id, user_id, thread_id, title, pinned_msg_id) VALUES (?, 7605, 315, 'Btn', 780)
+       ON CONFLICT (bot_id, user_id) DO UPDATE SET pinned_msg_id = 780, status = 'open'`,
+    )
+      .bind(BOT_ID)
+      .run();
+
+    await handleVerifyCallback(env, BOT_ID, btnCallback("v:0"));
+
+    const row = await readVerifyRow(7605);
+    expect(row!.is_verified).toBe(1);
+    expect(row!.verified_at).not.toBeNull();
+    expect(row!.verify_answer).toBeNull();
+    expect(row!.verify_msg_id).toBeNull();
+    expect(stub.callsOf("answerCallbackQuery")[0].body).toEqual({
+      callback_query_id: "cb-btn",
+      text: VERIFY_PASSED_TOAST,
+    });
+    // 题面 → 通过提示；置顶 → ✅ 已验证（键集精确）
+    expect(stub.countOf("editMessageText")).toBe(2);
+    expect(stub.callsOf("editMessageText")[0].body).toEqual({
+      chat_id: 7605,
+      message_id: 4242,
+      text: VERIFY_PASSED_TEXT,
+    });
+    expect(stub.callsOf("editMessageText")[1].body).toEqual({
+      chat_id: SUPPORT_CHAT_ID,
+      message_id: 780,
+      text: formatPinnedInfo({
+        id: 7605,
+        first_name: "Btn",
+        username: "btn_hd",
+        firstSeenAt: "2026-09-01T10:00:00.000Z",
+        verify: "verified",
+      }),
+    });
+    expect(stub.countOf("sendMessage")).toBe(0); // 零新 push
+  });
+
+  it("模式切换后旧题回调失效：/verifymode 序列（清题 + 切 button）后点旧数学题 → 「题目已失效」，零 edit、零状态变更", async () => {
+    // 播种 math 时代的 pending 题（answer=5, msgId=4242）——随后执行与
+    // /verifymode 完全相同的两步序列
+    await seedUser({ answer: 5, msgId: 4242 });
+    await clearAllPendingVerifications(env.HODOR_DB);
+    await setVerificationMode(env.HODOR_DB, "button");
+
+    // 用户点旧题上的「正确答案」按钮——归属判定（verify_msg_id 单道检查）
+    // 拦下：库内题目字段已清空，绝不误通过
+    await handleVerifyCallback(env, BOT_ID, btnCallback("v:5"));
+
+    expect(stub.callsOf("answerCallbackQuery")[0].body).toEqual({
+      callback_query_id: "cb-btn",
+      text: VERIFY_EXPIRED_NOTICE,
+    });
+    expect(stub.countOf("editMessageText")).toBe(0);
+    expect(stub.countOf("sendMessage")).toBe(0);
+    expect(await readVerifyRow(7605)).toMatchObject({ is_verified: 0, verify_answer: null, verify_msg_id: null });
+  });
+
+  it("答错重出随当前模式（button 防御路径）：脏态 pending（answer≠0）点错 → 重试前缀 + 按钮题面 + 单按钮 v:0，answer 归 0（msgId 不变）", async () => {
+    // button 模式下正确答案恒 0 且唯一按钮即 v:0——本分支正常不可达；
+    // 人为播种 answer=5 的脏态验证防御路径自洽：重出后收敛为合法 button 题
+    await setVerificationMode(env.HODOR_DB, "button");
+    await seedUser({ answer: 5, msgId: 4242 });
+
+    await handleVerifyCallback(env, BOT_ID, btnCallback("v:3"));
+
+    expect(stub.callsOf("answerCallbackQuery")[0].body).toEqual({
+      callback_query_id: "cb-btn",
+      text: VERIFY_WRONG_TOAST,
+    });
+    // 唯一一次 edit：同一 message_id，重试前缀 + 按钮题面 + 单按钮 v:0
+    expect(stub.countOf("editMessageText")).toBe(1);
+    const edit = stub.callsOf("editMessageText")[0].body as Record<string, unknown>;
+    expect(edit.chat_id).toBe(7605);
+    expect(edit.message_id).toBe(4242);
+    expect(edit.text).toBe(`${VERIFY_RETRY_PREFIX}${formatVerifyButtonQuestion()}`);
+    expect(edit.reply_markup).toEqual(buttonKeyboard());
+    // 落库收敛：answer=0（按钮点击即过）、msgId 原位
+    expect(await readVerifyRow(7605)).toMatchObject({ is_verified: 0, verify_answer: 0, verify_msg_id: 4242 });
+    expect(stub.countOf("sendMessage")).toBe(0);
   });
 });

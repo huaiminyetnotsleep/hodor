@@ -1,20 +1,27 @@
 /**
- * users 表 store（T23 改造 + 阶段 4 门控原语）：ensureUser 三态返回与治理快照
- * （新建 / 展示变更 / 纯活跃刷新——治理列与 first_seen_at 永不被 ensureUser 改写）
+ * users 表 store（T23 改造 + 阶段 4 门控原语 + 阶段 5 高危原语）：
+ * ensureUser 三态返回与治理快照（新建 / 展示变更 / 纯活跃刷新——治理列与
+ * first_seen_at 永不被 ensureUser 改写）
  * + claimNoticeSlot 原子频控（首取赢、60s 内再取输、窗口过后可再赢、行不存在 → 输）
  * + 验证态原语（setPendingVerification / markVerified 0→1 转换与幂等 / markUnverified
  * 清字段）+ setBanned + countMessageInWindow 固定窗口（首条 / 第 N 条 / 第 N+1 条
- * 拦截 / 跨窗口重置 / 并发序列语义）。
+ * 拦截 / 跨窗口重置 / 并发序列语义）
+ * + setRisk / claimRiskNoticeSlot（24 小时一次性提醒窗口）/ clearAllPendingVerifications。
  * 文件级隔离 D1，自播种自断言。
  *
  * 阶段 4 调整说明：ensureUser 返回值扩治理快照（isBanned / isVerified /
  * verifyAnswer / verifyMsgId + 展示列），既有 toEqual 断言按新形状更新——
  * 「三态返回 + 治理列不动」的原断言意图保留并按快照真值收紧。
+ * 阶段 5 M1 调整说明：快照再扩 isRisk / verifiedAt（高危提醒与 TTL 判定的
+ * 数据源），既有 toEqual 按新形状补两字段（新档默认 false / null——原
+ * 「建档默认治理态」意图不变）。
  */
 import { applyD1Migrations, env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   claimNoticeSlot,
+  claimRiskNoticeSlot,
+  clearAllPendingVerifications,
   countMessageInWindow,
   ensureUser,
   getGovernanceSnapshot,
@@ -22,6 +29,7 @@ import {
   markVerified,
   setBanned,
   setPendingVerification,
+  setRisk,
 } from "../src/store/users";
 
 const BOT_ID = 42;
@@ -68,9 +76,11 @@ describe("store: ensureUser 三态返回 + 治理快照", () => {
     });
     expect(result.isNew).toBe(true);
     expect(result.displayChanged).toBe(false);
-    // 治理快照 = 建档默认：未封禁 / 未验证 / 无题 + 展示列回读
+    // 治理快照 = 建档默认：未封禁 / 未验证 / 无题 / 非高危 / 无验证时间 + 展示列回读
     expect(result.isBanned).toBe(false);
     expect(result.isVerified).toBe(false);
+    expect(result.isRisk).toBe(false);
+    expect(result.verifiedAt).toBeNull();
     expect(result.verifyAnswer).toBeNull();
     expect(result.verifyMsgId).toBeNull();
     expect(result.firstName).toBe("Alice");
@@ -110,6 +120,8 @@ describe("store: ensureUser 三态返回 + 治理快照", () => {
       firstSeenAt: "2020-01-01T00:00:00.000Z",
       isBanned: false,
       isVerified: false,
+      isRisk: false, // 阶段 5 快照新字段：新档默认（原「治理默认态」意图不变）
+      verifiedAt: null,
       verifyAnswer: null,
       verifyMsgId: null,
       firstName: "新名",
@@ -146,7 +158,8 @@ describe("store: ensureUser 三态返回 + 治理快照", () => {
 
   it("治理列在更新分支永不动：预置 is_banned=1 / pending 题后刷新展示字段，快照回读真值且库内保持", async () => {
     await env.HODOR_DB.prepare(
-      "UPDATE users SET is_banned = 1, status = 'active', verify_answer = 7, verify_msg_id = 4242 WHERE bot_id = ? AND user_id = ?",
+      `UPDATE users SET is_banned = 1, status = 'active', verify_answer = 7, verify_msg_id = 4242,
+         is_risk = 1, verified_at = '2026-10-01T08:00:00.000Z' WHERE bot_id = ? AND user_id = ?`,
     )
       .bind(BOT_ID, USER_ID)
       .run();
@@ -160,6 +173,9 @@ describe("store: ensureUser 三态返回 + 治理快照", () => {
     expect(result.isBanned).toBe(true);
     expect(result.verifyAnswer).toBe(7);
     expect(result.verifyMsgId).toBe(4242);
+    // 阶段 5 快照新字段：is_risk / verified_at 同样顺带读出
+    expect(result.isRisk).toBe(true);
+    expect(result.verifiedAt).toBe("2026-10-01T08:00:00.000Z");
 
     const row = await readUser();
     expect(row!.is_banned).toBe(1);
@@ -168,11 +184,13 @@ describe("store: ensureUser 三态返回 + 治理快照", () => {
     expect(row!.status).toBe("active");
   });
 
-  it("getGovernanceSnapshot：回读治理与展示列；行不存在 → null", async () => {
+  it("getGovernanceSnapshot：回读治理与展示列（含 isRisk / verifiedAt）；行不存在 → null", async () => {
     const snapshot = await getGovernanceSnapshot(env.HODOR_DB, BOT_ID, USER_ID);
     expect(snapshot).not.toBeNull();
     expect(snapshot!.isBanned).toBe(true);
     expect(snapshot!.verifyMsgId).toBe(4242);
+    expect(snapshot!.isRisk).toBe(true);
+    expect(snapshot!.verifiedAt).toBe("2026-10-01T08:00:00.000Z");
     expect(snapshot!.firstName).toBe("又改名");
     expect(await getGovernanceSnapshot(env.HODOR_DB, BOT_ID, 999999999)).toBeNull();
   });
@@ -324,5 +342,126 @@ describe("store: countMessageInWindow 固定窗口（T29）", () => {
     expect(await countMessageInWindow(env.HODOR_DB, BOT_ID, RATE_USER, LIMIT)).toBe(true);
     expect((await readRateRow())!.rate_count).toBe(LIMIT);
     expect(await countMessageInWindow(env.HODOR_DB, BOT_ID, RATE_USER, LIMIT)).toBe(false);
+  });
+});
+
+describe("store: setRisk 窗口重置与 claimRiskNoticeSlot 24h 原子窗口（T37）", () => {
+  const RISK_USER = 7505;
+
+  beforeAll(async () => {
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: RISK_USER, first_name: "Risk" });
+  });
+
+  const readRiskRow = () =>
+    env.HODOR_DB.prepare(
+      "SELECT is_risk, risk_notice_at FROM users WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, RISK_USER)
+      .first<{ is_risk: number; risk_notice_at: string | null }>();
+
+  it("非高危恒输：未标记前 claim 不赢、不落 risk_notice_at；行不存在 → 输", async () => {
+    expect(await claimRiskNoticeSlot(env.HODOR_DB, BOT_ID, RISK_USER)).toBe(false);
+    expect((await readRiskRow())!.risk_notice_at).toBeNull();
+    // 行不存在（防御式）：UPDATE 零行变更 = 输
+    expect(await claimRiskNoticeSlot(env.HODOR_DB, BOT_ID, 999999999)).toBe(false);
+  });
+
+  it("/risk 标记（置 1 清窗口）→ 首条赢；24 小时内再 claim 恒输", async () => {
+    await setRisk(env.HODOR_DB, BOT_ID, RISK_USER, true);
+    expect((await readRiskRow())!.is_risk).toBe(1);
+
+    expect(await claimRiskNoticeSlot(env.HODOR_DB, BOT_ID, RISK_USER)).toBe(true);
+    expect((await readRiskRow())!.risk_notice_at).not.toBeNull();
+    // 同窗口内（24h）再 claim：WHERE 不命中 → 输，时间戳不被刷新
+    const first = (await readRiskRow())!.risk_notice_at;
+    expect(await claimRiskNoticeSlot(env.HODOR_DB, BOT_ID, RISK_USER)).toBe(false);
+    expect((await readRiskRow())!.risk_notice_at).toBe(first);
+  });
+
+  it("跨窗口（risk_notice_at ≤ 24 小时前）→ 再赢；写未来值 → 输", async () => {
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET risk_notice_at = '2020-01-01T00:00:00.000Z' WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, RISK_USER)
+      .run();
+    expect(await claimRiskNoticeSlot(env.HODOR_DB, BOT_ID, RISK_USER)).toBe(true);
+
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET risk_notice_at = '2999-01-01T00:00:00.000Z' WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, RISK_USER)
+      .run();
+    expect(await claimRiskNoticeSlot(env.HODOR_DB, BOT_ID, RISK_USER)).toBe(false);
+  });
+
+  it("/unrisk（置 0 一并清窗口）→ 恒输且行内无悬空窗口；/risk 重新标记重置提示窗口", async () => {
+    await setRisk(env.HODOR_DB, BOT_ID, RISK_USER, false);
+    expect(await readRiskRow()).toEqual({ is_risk: 0, risk_notice_at: null });
+    // 取消后（即使手工残留新值）WHERE is_risk=1 不命中 → 恒输
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET risk_notice_at = ? WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(new Date().toISOString(), BOT_ID, RISK_USER)
+      .run();
+    expect(await claimRiskNoticeSlot(env.HODOR_DB, BOT_ID, RISK_USER)).toBe(false);
+
+    // 重新标记：setRisk 单语句同时置 is_risk=1 + 清 risk_notice_at → 下一条消息再提醒一次
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET risk_notice_at = ? WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(new Date().toISOString(), BOT_ID, RISK_USER)
+      .run();
+    await setRisk(env.HODOR_DB, BOT_ID, RISK_USER, true);
+    expect((await readRiskRow())!.risk_notice_at).toBeNull();
+    expect(await claimRiskNoticeSlot(env.HODOR_DB, BOT_ID, RISK_USER)).toBe(true);
+  });
+});
+
+describe("store: clearAllPendingVerifications（T32 模式切换作废旧题）", () => {
+  const CLEAR_A = 7506;
+  const CLEAR_B = 7507;
+
+  beforeAll(async () => {
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: CLEAR_A, first_name: "CA" });
+    await ensureUser(env.HODOR_DB, BOT_ID, { id: CLEAR_B, first_name: "CB" });
+    // 两行各预置 pending 题 + 验证态（A 未验证带题；B 已验证但留有残留题字段的形态
+    // 不该存在——此处只验证清题不动验证态，按未验证 + 带题统一播种）
+    await setPendingVerification(env.HODOR_DB, BOT_ID, CLEAR_A, { answer: 3, msgId: 111 });
+    await setPendingVerification(env.HODOR_DB, BOT_ID, CLEAR_B, { answer: 5, msgId: 222 });
+  });
+
+  it("一次性清空全部行的题目字段；已验证行 / 无题行不受波及；重复执行幂等", async () => {
+    await env.HODOR_DB.prepare(
+      "UPDATE users SET is_verified = 1, verified_at = '2026-10-01T00:00:00.000Z' WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, CLEAR_B)
+      .run();
+
+    await clearAllPendingVerifications(env.HODOR_DB);
+
+    for (const userId of [CLEAR_A, CLEAR_B]) {
+      const row = await env.HODOR_DB.prepare(
+        "SELECT verify_answer, verify_msg_id FROM users WHERE bot_id = ? AND user_id = ?",
+      )
+        .bind(BOT_ID, userId)
+        .first<{ verify_answer: number | null; verify_msg_id: number | null }>();
+      expect(row).toEqual({ verify_answer: null, verify_msg_id: null });
+    }
+    // B 的验证态不受清题影响（题目字段与验证态互不相干）
+    const verified = await env.HODOR_DB.prepare(
+      "SELECT is_verified, verified_at FROM users WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, CLEAR_B)
+      .first<{ is_verified: number; verified_at: string | null }>();
+    expect(verified).toEqual({ is_verified: 1, verified_at: "2026-10-01T00:00:00.000Z" });
+
+    // 幂等：无题行再执行零变更、不抛
+    await clearAllPendingVerifications(env.HODOR_DB);
+    const again = await env.HODOR_DB.prepare(
+      "SELECT verify_answer, verify_msg_id FROM users WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, CLEAR_A)
+      .first<{ verify_answer: number | null; verify_msg_id: number | null }>();
+    expect(again).toEqual({ verify_answer: null, verify_msg_id: null });
   });
 });

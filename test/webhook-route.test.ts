@@ -23,6 +23,9 @@
  * T18 用例说明：重推的「60s 过期接管」用 created_at 倒填模拟时间流逝
  * （STALE_CLAIM_MS 窗口），投递序列与真实 Telegram 重推完全同构；每轮失败
  * 投递恰 2 次 sendMessage fetch（429 retry_after ≤ 3s 原地重试恰一次）。
+ *
+ * 阶段 5 M3 新增（T31）：verifyoff 端到端一条——settings 置 0 后未验证
+ * 用户消息 200 + 直接中继（阶段 4 验证门 / callback 用例零改动保持回归）。
  */
 import { applyD1Migrations, env, SELF } from "cloudflare:test";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -35,6 +38,7 @@ import {
 import { handleWebhook } from "../src/routes/webhook";
 import { upsertBot } from "../src/store/bots";
 import { ensureUser, setPendingVerification } from "../src/store/users";
+import { setVerificationEnabled } from "../src/store/settings";
 import { insertTopic } from "../src/store/topics";
 import { stubTelegramFetch, type TelegramFetchStub } from "./helpers/telegramFetchStub";
 
@@ -746,5 +750,64 @@ describe("POST /webhook: T18 429 有界重试（验收收口）", () => {
     // 恰 1 次调用：等待超预算绝不 sleep（整链每 update 至多等待 3s 的保证点）
     expect(stub.countOf("sendMessage")).toBe(1);
     expect(await readProcessed(9131)).toEqual({ status: "processing", attempts: 0 });
+  });
+});
+
+describe("POST /webhook: verifyoff 端到端（T31，阶段 5 M3）", () => {
+  let stub: TelegramFetchStub;
+  beforeEach(() => {
+    stub = stubTelegramFetch();
+    // settings 表文件内共享：每用例前后归位默认（无行 = 开 + math）
+    return env.HODOR_DB.prepare("DELETE FROM settings").run();
+  });
+  afterEach(() => {
+    stub.restore();
+    return env.HODOR_DB.prepare("DELETE FROM settings").run();
+  });
+
+  it("settings verify_enabled=0 → 未验证新用户消息 200：零验证题 / 零欢迎，直接建 topic + 置顶 + 中继 + 账本；is_verified 保留 0", async () => {
+    stub.always("createForumTopic", {
+      status: 200,
+      json: { ok: true, result: { message_thread_id: 895 } },
+    });
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    stub.always("pinChatMessage", { status: 200, json: { ok: true, result: true } });
+    await setVerificationEnabled(env.HODOR_DB, false);
+
+    const res = await postWebhook(inboundUpdate(9140, 7340));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "ok" });
+    expect(await readProcessed(9140)).toEqual({ status: "processed", attempts: 0 });
+
+    // 验证门整门跳过：发往用户私聊的推送为零（无验证题、无首联包欢迎语）
+    const toUser = stub
+      .callsOf("sendMessage")
+      .filter((call) => (call.body as Record<string, unknown>).chat_id === 7340);
+    expect(toUser).toHaveLength(0);
+    // 直接进正常链路：置顶信息 + 中继恰一次（带 thread）
+    expect(stub.countOf("createForumTopic")).toBe(1);
+    expect(stub.countOf("pinChatMessage")).toBe(1);
+    const relay = stub
+      .callsOf("sendMessage")
+      .filter((call) => (call.body as Record<string, unknown>).text === "hello support");
+    expect(relay).toHaveLength(1);
+    expect(relay[0].body).toEqual({
+      chat_id: SUPPORT_CHAT_ID,
+      text: "hello support",
+      message_thread_id: 895,
+    });
+    // 账本 in 行；验证记录保留（关闭 ≠ 撤验证）
+    const ledger = await env.HODOR_DB.prepare(
+      "SELECT direction, private_msg_id, content_type FROM messages WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, 7340)
+      .first<{ direction: string; private_msg_id: number; content_type: string }>();
+    expect(ledger).toEqual({ direction: "in", private_msg_id: 10, content_type: "text" });
+    const user = await env.HODOR_DB.prepare(
+      "SELECT is_verified, verified_at FROM users WHERE bot_id = ? AND user_id = ?",
+    )
+      .bind(BOT_ID, 7340)
+      .first<{ is_verified: number; verified_at: string | null }>();
+    expect(user).toEqual({ is_verified: 0, verified_at: null });
   });
 });

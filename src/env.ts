@@ -64,6 +64,21 @@ export function parseMaxMessagesPerMinute(env: Cloudflare.Env): number {
 }
 
 /**
+ * 解析 VERIFY_TTL_HOURS：验证有效期（小时，T33）。
+ *
+ * 缺失 / 非法 / 负数 / 非整数 → 0 = 永久有效（docs/guide/deploy.md 变量表
+ * 缺省值；变量已在 env.d.ts / deploy.md 声明，本函数只补运行时解析——
+ * 与 parseMaxMessagesPerMinute 同款「先解析、不轻信输入」模式）。
+ * 0 是合法值（永不重验），不与「非法回退 0」歧义：两者行为一致。
+ */
+export function parseVerifyTtlHours(env: Cloudflare.Env): number {
+  const raw = env.VERIFY_TTL_HOURS?.trim();
+  if (!raw) return 0;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+/**
  * 解析 WELCOME_TEXT：自定义欢迎语文案（选填）。
  *
  * 缺失 / trim 后为空 → null（调用方兜底默认文案，见 src/copy.ts——

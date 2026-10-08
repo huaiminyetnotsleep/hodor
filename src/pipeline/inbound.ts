@@ -1,24 +1,36 @@
 /**
- * 入站管线（T19/T20/T21 + T22–T25 + 阶段 4 三门 T28/T29/T35）：
+ * 入站管线（T19/T20/T21 + T22–T25 + 阶段 4 三门 T28/T29/T35 + 阶段 5 M2
+ * 置顶治理行 / 高危提醒）：
  *
  * 1. extractContent → 支持集之外（audio 之外的音乐类 / video_note / …）静默完成，零副作用
  * 2. from 校验（缺 id → 静默完成）
  * 3. ensureUser → { isNew, displayChanged, firstSeenAt } + 治理快照
- *    （isBanned / isVerified / verifyAnswer / verifyMsgId）
+ *    （isBanned / isVerified / isRisk / verifyAnswer / verifyMsgId）+
+ *    getVerificationSettings 每消息一次（置顶三态 / M3 门 ②）
  * ①封禁门 isBanned → 拦截 + claimNoticeSlot 赢得才发 BAN_NOTICE（T30 频控）；
  *    封禁用户零验证 / 限频逻辑、零 topic 副作用、零账本
- * ②验证门 !isVerified → 欢迎语（isNew / isStart，slot 门控——阶段 3 语义）+
+ * ②验证门（T27/T28 + T31 开关 + T33 TTL）：
+ *    settings.verifyEnabled=false → **整门跳过**（门位置与门序不动——不删
+ *    任何记录、不判定 TTL，未验证用户直接落 ③ 限频门；首联包欢迎语随门
+ *    一起跳过，仅 isStart 用户在 ④ 仍可获欢迎语）
+ *    开启且 (!isVerified 或 TTL 过期) → （过期先 markUnverified + 置顶降级 ❌
+ *    best-effort）+ 欢迎语（isNew / isStart，slot 门控——阶段 3 语义）+
  *    验证题（首联包 isNew 不占 slot 与欢迎成对；存量 / pending 重出 slot
- *    门控——赢才出换题防死锁，输静默）；本条丢弃（/start 亦如此）
- * ③限频门 countMessageInWindow 超限 → markUnverified + 置顶降级 ❌（best-effort）
+ *    门控——赢才出换题防死锁，输静默；题面随 settings.verifyMode 模式化）；
+ *    本条丢弃（/start 亦如此）
+ * ③限频门 countMessageInWindow 超限 → markUnverified + 置顶降级 ❌
+ *    （downgradePinnedToUnverified 共享助手，best-effort）
  *    + slot 赢得才发「含限频数字 + 新题 + 按钮」合并消息（单 push）；本条丢弃
  * ④通过三门 → 阶段 3 链原样：
  *    topic 解析（open 复用 / closed 重开 / 新建 + 竞态清理）
- *      4a. pinned_msg_id === null → 发用户信息并置顶（验证行恒 ✅——三门后必已验证）
- *      4b. pinned 且 displayChanged → editMessageText 刷新（best-effort）
+ *      4a. pinned_msg_id === null → 发用户信息并置顶（高危 / 备注行随库内
+ *          真值；验证行三态——开关关闭恒「未启用」，开启时三门后恒 ✅）
+ *      4b. pinned 且 displayChanged → editMessageText 刷新（同款文本，best-effort）
  *    欢迎语（仅 isStart 可达：新用户一律先落验证门；slot 门控）
  *    /start 短路（入口命令非对话内容，不中继不写账本）
  *    中继 relayContent → 账本 insertMessage
+ *    8. isRisk && claimRiskNoticeSlot 赢得 → topic 内高危提醒（T37，24h 一次；
+ *       完全 best-effort，绝不放大用户消息重发面）
  *
  * 门序固定：封禁 → 验证 → 限频（封禁不消耗验证 / 限频逻辑；未验证消息不进
  * 限频计数）。三门在建档之后、topic 之前；被任一门拦截 = 零 topic 副作用、
@@ -29,6 +41,8 @@
  * | 步骤                | retryable                    | permanent                          |
  * | ①禁言提示            | 抛（slot 已耗，宁丢一条）      | warn 吞                            |
  * | ②欢迎语 / 验证题      | 抛（同上——重推出题，旧题失效） | warn 吞（题不落库）                 |
+ * | ②TTL 撤验证（DB）     | 抛（重推落回验证门继续出题）    | —（D1 统一按 retryable）           |
+ * | ②TTL 置顶降级         | warn 跳过（best-effort，同 ③） | 同左                               |
  * | ③置顶降级            | warn 跳过（best-effort）      | 同左                               |
  * | ③超限合并消息         | 抛（slot 已耗）               | warn 吞（题不落库）                 |
  * | 4a 置顶 send         | 抛（重推重走 4a，不重建 topic）| warn 跳过，**不写** pinned_msg_id |
@@ -37,13 +51,26 @@
  * | ④欢迎语（start 载体） | 抛（slot 已占，可能丢失）      | warn 跳过                          |
  * | ④中继               | 抛（→ 重推）                  | warn 跳过=丢弃，**不写账本**       |
  * | ④账本               | 抛（→ 重推；可能重发一次中继） | —（D1 错误统一按 retryable 抛）    |
+ * | 8 高危提醒           | **warn 吞（完全 best-effort）** | 同左                             |
  *
  * ③的置顶降级排在合并消息之前且 best-effort：撤验证后重推只会落回验证门
  * （②），永远不会再走到③——降级必须在本轮完成，失败也不抛断主流程。
+ * ② TTL 撤验证同构：markUnverified DB 真值先行，撤了再降级 / 出题，重推
+ * 落回本门继续出题流程，无振荡。
+ * 8 的高危提醒排在账本之后：中继 / 账本是主链，治理提醒是附着物——提醒
+ * 失败绝不连带重推（重推会重发一次用户消息，at-least-once 已有代价不再放大）。
  */
-import { BAN_NOTICE, DEFAULT_WELCOME_TEXT, formatPinnedInfo, isStartCommand } from "../copy";
-import { parseMaxMessagesPerMinute, parseSupportChatId, parseWelcomeText } from "../env";
+import {
+  BAN_NOTICE,
+  DEFAULT_WELCOME_TEXT,
+  formatPinnedInfo,
+  formatRiskTopicNotice,
+  isStartCommand,
+} from "../copy";
+import { parseMaxMessagesPerMinute, parseSupportChatId, parseVerifyTtlHours, parseWelcomeText } from "../env";
 import { insertMessage } from "../store/messages";
+import { getVerificationSettings } from "../store/settings";
+import { isoBefore } from "../store/util";
 import {
   findTopicByUser,
   insertTopic,
@@ -54,6 +81,7 @@ import {
 } from "../store/topics";
 import {
   claimNoticeSlot,
+  claimRiskNoticeSlot,
   countMessageInWindow,
   ensureUser,
   markUnverified,
@@ -61,11 +89,15 @@ import {
 import { createTelegramClient } from "../telegram/client";
 import type { TelegramClient } from "../telegram/types";
 import { sendVerificationCode } from "./verify";
+import { downgradePinnedToUnverified } from "./pinned";
 import { extractContent, relayContent } from "./content";
 import type { TelegramMessageRef } from "./classify";
 
-/** title 三级回退（建档时定死，不再复算）：first_name → @username → ID_<user_id> */
-function resolveTopicTitle(from: { id: number; first_name?: string; username?: string }): string {
+/**
+ * 展示名三级回退：first_name → @username → ID_<user_id>。topic title（建档时
+ * 定死，不再复算）与高危提醒（T37，取当前消息展示字段）共用同一链路。
+ */
+function resolveDisplayName(from: { id: number; first_name?: string; username?: string }): string {
   const firstName = from.first_name?.trim();
   if (firstName) return firstName;
   if (from.username) return `@${from.username}`;
@@ -125,6 +157,9 @@ export async function handleInbound(
 
   const client = createTelegramClient(env.TELEGRAM_BOT_TOKEN);
   const isStart = payload.type === "text" ? isStartCommand(payload.text) : false;
+  // 验证配置每消息一次读取（design：不缓存——命令切换即时生效）：M2 供置顶
+  // 验证行三态映射，M3 起供门 ② 开关 / TTL 判定
+  const settings = await getVerificationSettings(env.HODOR_DB);
 
   /* ---------------- ① 封禁门（T35）：banned → 拦截 + 频控禁言提示 ---------------- */
   if (userState.isBanned) {
@@ -143,20 +178,42 @@ export async function handleInbound(
     return;
   }
 
-  /* ---------------- ② 验证门（T27/T28）：未验证 → 欢迎语 + 验证题，本条丢弃 ---------------- */
-  if (!userState.isVerified) {
-    // 欢迎语：isNew（首联包前半）或 isStart —— 阶段 3 语义不变（slot 门控）
-    if (userState.isNew || isStart) {
-      await maybeSendWelcome(env, client, botId, from.id);
+  /* ---------------- ② 验证门（T27/T28 + T31 开关 + T33 TTL） ---------------- */
+  // 开关关闭 → 整门跳过（门未删除，门序不动）：不删任何验证记录、不判定
+  // TTL（关闭期间不消耗有效期——重开后按库内 verified_at 与当前 TTL 判定），
+  // 未验证用户直接落 ③ 限频门（限频语义独立于验证开关，见 ③ 注释）
+  if (settings.verifyEnabled) {
+    // TTL 过期判定（T33）：VERIFY_TTL_HOURS * 3600s；ISO 字典序比较（util
+    // 契约），恰好等于（verifiedAt ≤ now−ttl）视为过期（PRD 边界语义）。
+    // verifiedAt 为 null 而 isVerified=1 的脏态（理论不可达）→ 不视为过期：
+    // 防御式 fail-open，不因脏数据误伤已验证用户
+    const ttlMs = parseVerifyTtlHours(env) * 3600_000;
+    const expired =
+      ttlMs > 0 &&
+      userState.verifiedAt !== null &&
+      userState.verifiedAt <= isoBefore(ttlMs);
+    if (!userState.isVerified || expired) {
+      if (expired) {
+        // TTL 撤验证（T33）：DB 真值先行——markUnverified 一步清 is_verified /
+        // verified_at / 题目字段；置顶降级 ❌ 复用 ③ 的共享助手（best-effort，
+        // 失败不阻断出题——撤验证后重推只会落回本门继续出题流程，无振荡）
+        await markUnverified(env.HODOR_DB, botId, from.id);
+        await downgradePinnedToUnverified(env, client, botId, from.id);
+      }
+      // 欢迎语：isNew（首联包前半）或 isStart —— 阶段 3 语义不变（slot 门控）
+      if (userState.isNew || isStart) {
+        await maybeSendWelcome(env, client, botId, from.id);
+      }
+      // 出题策略：isNew 首联包不占 slot（与欢迎语成对发出）；存量未验证（无题 /
+      // 有 pending）一律 slot 门控重出**新题**——赢才出（重发节流，T30），输静默；
+      // 题面随 settings.verifyMode 模式化（T32，sendVerificationCode 内读取）
+      if (userState.isNew || (await claimNoticeSlot(env.HODOR_DB, botId, from.id))) {
+        await sendVerificationCode(env, botId, from.id, { type: "question" });
+      }
+      // 丢弃：不建 topic、不置顶、不中继、不写账本（/start 亦如此）；被丢弃的
+      // 消息不积压补发——通过验证后的新消息才进入正常管线
+      return;
     }
-    // 出题策略：isNew 首联包不占 slot（与欢迎语成对发出）；存量未验证（无题 /
-    // 有 pending）一律 slot 门控重出**新题**——赢才出（重发节流，T30），输静默
-    if (userState.isNew || (await claimNoticeSlot(env.HODOR_DB, botId, from.id))) {
-      await sendVerificationCode(env, botId, from.id, { type: "question" });
-    }
-    // 丢弃：不建 topic、不置顶、不中继、不写账本（/start 亦如此）；被丢弃的
-    // 消息不积压补发——通过验证后的新消息才进入正常管线
-    return;
   }
 
   /* ---------------- ③ 限频门（T29）：固定窗口，超限 → 撤验证重验，本条丢弃 ---------------- */
@@ -164,27 +221,9 @@ export async function handleInbound(
   if (!(await countMessageInWindow(env.HODOR_DB, botId, from.id, limit))) {
     await markUnverified(env.HODOR_DB, botId, from.id);
     // 置顶降级 ❌（best-effort，两种失败都 warn）：撤验证后重推只会落回验证门，
-    // 不会再走到本门——降级必须本轮完成；无 topic / 未置顶则跳过
-    const topic = await findTopicByUser(env.HODOR_DB, botId, from.id);
-    if (topic && topic.pinned_msg_id !== null) {
-      const downgraded = await client.editMessageText({
-        chat_id: supportChatId,
-        message_id: topic.pinned_msg_id,
-        text: formatPinnedInfo({
-          id: from.id,
-          first_name: from.first_name,
-          last_name: from.last_name,
-          username: from.username,
-          firstSeenAt: userState.firstSeenAt,
-          isVerified: false,
-        }),
-      });
-      if (!downgraded.ok) {
-        console.warn(
-          `[inbound] user ${from.id}: 置顶降级 ❌ 未验证失败（best-effort 跳过）：${downgraded.errorMessage ?? "no detail"}`,
-        );
-      }
-    }
+    // 不会再走到本门——降级必须本轮完成；无 topic / 未置顶则跳过。共享助手
+    // 从库内真值组装（ensureUser 已刷新展示列）并强制 ❌（pinned.ts）
+    await downgradePinnedToUnverified(env, client, botId, from.id);
     // 合并消息（提示含 limit 数字 + 新题 + 按钮，单 push）——slot 赢得才发，
     // 输则静默（持续刷消息不产生持续回复；重验入口由 60s 后的下一条消息提供）
     if (await claimNoticeSlot(env.HODOR_DB, botId, from.id)) {
@@ -198,12 +237,17 @@ export async function handleInbound(
     botId,
     userId: from.id,
     supportChatId,
-    title: resolveTopicTitle(from),
+    title: resolveDisplayName(from),
   });
   // null = createForumTopic permanent（topic 未建），本条按已处理丢弃（阶段 2 语义）
   if (topic === null) return;
 
-  /** 置顶信息正文（昵称用本次消息的最新展示字段 + 库内建档时间） */
+  /**
+   * 置顶信息正文（昵称用本次消息的最新展示字段 + 库内建档时间）：
+   * 高危 / 备注行接库内真值（快照 isRisk + topic 行 note——新建 topic 的
+   * note 恒 null）；验证行三态：开关关闭恒「未启用」（覆盖真值），开启时
+   * 三门已过恒 ✅（存量置顶由答题 / 降级 / 命令刷新路径同步）。
+   */
   const pinnedText = () =>
     formatPinnedInfo({
       id: from.id,
@@ -211,8 +255,9 @@ export async function handleInbound(
       last_name: from.last_name,
       username: from.username,
       firstSeenAt: userState.firstSeenAt,
-      // 验证门已过——新置顶的验证行恒为真值 ✅（存量置顶由答题 / 降级路径刷新）
-      isVerified: true,
+      verify: settings.verifyEnabled ? "verified" : "disabled",
+      isRisk: userState.isRisk,
+      note: topic.note,
     });
 
   /* ---------------- 4a / 4b：用户信息置顶（T24） ---------------- */
@@ -275,6 +320,27 @@ export async function handleInbound(
     privateMsgId: message.message_id,
     contentType: payload.type,
   });
+
+  /* ------------- 8. 高危 24h 一次性提醒（T37；账本后附着物，完全 best-effort） ------------- */
+  // 排序（design §三）：中继 / 账本是主链，治理提醒是附着物——放最后，两种
+  // 失败均 warn 吞，绝不抛（提醒 429 → 整条重推 → 用户消息重发的放大面为零）；
+  // /start 短路在第 6 步已 return，本提醒只附着在成功中继 + 账本之后。
+  // claimRiskNoticeSlot 原子裁决（WHERE 带 is_risk=1）：24h 窗口内仅一条，
+  // /risk 重新标记后窗口重置（setter 已清 risk_notice_at）。slot 已耗而
+  // 发送失败时本轮提醒丢失，24h 后由下一条消息补上（已接受语义）。
+  // 提醒是系统消息：不入 messages 账本。
+  if (userState.isRisk && (await claimRiskNoticeSlot(env.HODOR_DB, botId, from.id))) {
+    const notice = await client.sendMessage({
+      chat_id: supportChatId,
+      text: formatRiskTopicNotice(resolveDisplayName(from)),
+      message_thread_id: topic.thread_id,
+    });
+    if (!notice.ok) {
+      console.warn(
+        `[inbound] user ${from.id}: 高危提醒发送失败（best-effort 跳过）：${notice.errorMessage ?? "no detail"}`,
+      );
+    }
+  }
 }
 
 /** 竞态清理的上下文（createTopic 主流程 + 失败路径共用） */
@@ -385,8 +451,8 @@ async function createTopicWithRaceCleanup(
       threadId: newThreadId,
       title: ctx.title,
     });
-    // 新建行 pinned_msg_id 必为 null（由 4a 判定驱动置顶）
-    return { thread_id: newThreadId, title: ctx.title, status: "open", pinned_msg_id: null };
+    // 新建行 pinned_msg_id / note 必为 null（由 4a 判定驱动置顶；备注 M2 起接真值）
+    return { thread_id: newThreadId, title: ctx.title, status: "open", pinned_msg_id: null, note: null };
   } catch (error) {
     if (!isUniqueViolation(error)) throw error;
 

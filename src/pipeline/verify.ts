@@ -1,16 +1,21 @@
 /**
- * 数学题人机验证管线（T27/T28/T29 共用件）：
+ * 人机验证管线（T27/T28/T29 共用件 + T32 模式化）：
  *
  * - generateQuestion：纯函数出题（注入 rng 可测）——a,b ∈ [1,9]，a+b 或
  *   （a ≥ b 时）a-b；正确答案 + 3 个互异干扰项（同答案值域 [0,18]）乱序。
  *   按钮只携带所选值（"v:<n>"），正确答案只落 users.verify_answer，
  *   绝不进消息正文 / callback_data。
+ * - buildChallenge（T32）：统一出题产物 { text, answer, keyboard }——
+ *   math = 数学题（现状文案 + 4 选项按钮）；button = 纯按钮题面 + 单按钮
+ *   "v:0" + answer 恒 0（唯一选项即正确答案，判卷与归属判定完全复用）。
  * - sendVerificationCode：出题并发送（inbound 验证门与超限共用）——
+ *   模式读 settings（每题一次点查，不缓存——契约同 settings store）；
  *   **先送达后落库**：sendMessage 成功才 setPendingVerification；
  *   落库失败原样抛（D1 → retryable 重推重出题，旧题消息自然失效）。
  * - handleVerifyCallback：答题回调。归属判定收敛为单道检查
  *   `verify_msg_id === cb.message.message_id`——旧题 / 他人代答 / 重放 /
- *   已清空全部被拦（提示题目已失效）。
+ *   已清空全部被拦（提示题目已失效）；答错分支按当前 settings 模式原位重出
+ *   （button 模式唯一按钮即正确答案，该分支实际不可达——防御式自洽）。
  *
  * 失败语义（design.md §四，binding）：
  * | 环节                          | retryable               | permanent          |
@@ -20,17 +25,21 @@
  * 系统消息（题面 / 提示 / 置顶编辑）一律不入 messages 账本。
  */
 import {
-  formatPinnedInfo,
+  formatRateLimitVerifyButton,
   formatRateLimitVerifyQuestion,
+  formatVerifyButtonQuestion,
   formatVerifyQuestion,
-  formatVerifyRetryQuestion,
+  VERIFY_BUTTON_LABEL,
   VERIFY_EXPIRED_NOTICE,
   VERIFY_PASSED_TEXT,
   VERIFY_PASSED_TOAST,
+  VERIFY_RETRY_PREFIX,
   VERIFY_WRONG_TOAST,
 } from "../copy";
 import { parseSupportChatId } from "../env";
+import { composePinnedText } from "./pinned";
 import { findTopicByUser } from "../store/topics";
+import { getVerificationSettings } from "../store/settings";
 import {
   getGovernanceSnapshot,
   markVerified,
@@ -104,15 +113,70 @@ export function optionsKeyboard(options: readonly number[]): InlineKeyboardMarku
   };
 }
 
+/**
+ * 纯按钮模式的单按钮键盘（T32）：唯一按钮即唯一合法答案 0（"v:0"）——
+ * 与 optionsKeyboard 同为「载荷只携带所选值」形态，判卷路径完全复用。
+ */
+export function buttonKeyboard(): InlineKeyboardMarkup {
+  return {
+    inline_keyboard: [[{ text: VERIFY_BUTTON_LABEL, callback_data: "v:0" }]],
+  };
+}
+
 /** 出题场景：普通新题（验证门）或超限重验（提示含限频数字，T29） */
 export type VerificationSendKind =
   | { type: "question" }
   | { type: "overflow"; limit: number };
 
+/** 模式化出题产物：text（题面正文）/ answer（落库 verify_answer）/ keyboard */
+export interface VerificationChallenge {
+  text: string;
+  answer: number;
+  keyboard: InlineKeyboardMarkup;
+}
+
+/**
+ * 统一出题（T32 模式化）——出题 / 超限重出 / 答错重出的唯一产物入口：
+ *
+ * - math（默认）：现状数学题——题头 / 超限前缀文案（含 limit 数字）+ 4 选项
+ *   按钮乱序，answer 只落库；
+ * - button：纯按钮题面（超限形态保留同一限频前缀）+ 单按钮 "v:0" +
+ *   answer 恒 0——判卷（selected === verifyAnswer）与归属判定零改动复用。
+ */
+export function buildChallenge(
+  mode: "math" | "button",
+  kind: VerificationSendKind,
+): VerificationChallenge {
+  if (mode === "button") {
+    return {
+      text:
+        kind.type === "question"
+          ? formatVerifyButtonQuestion()
+          : formatRateLimitVerifyButton(kind.limit),
+      answer: 0,
+      keyboard: buttonKeyboard(),
+    };
+  }
+  const question = generateQuestion();
+  return {
+    text:
+      kind.type === "question"
+        ? formatVerifyQuestion(question.expression)
+        : formatRateLimitVerifyQuestion(kind.limit, question.expression),
+    answer: question.answer,
+    keyboard: optionsKeyboard(question.options),
+  };
+}
+
 /**
  * 出题并发送到用户私聊（验证门 / 首联包 / 超限合并消息共用）。
  *
- * 文案由 copy.ts 组装（超限形态含 limit 数字）；按钮为 4 选项 inline 键盘。
+ * 模式取自 settings——**最小改动方案**：函数签名与全部调用方零变化，代价是
+ * 每次出题一次 getVerificationSettings 点查（两条 D1 PK 查询，廉价；settings
+ * 契约本就「不缓存」）。与调用方早先的 settings 读取（如 inbound 每消息一次）
+ * 之间即使跨过一次 /verifymode 切换也无害：题面与答案同题落库，自洽无半态
+ * （切换瞬间旧题已被 clearAllPendingVerifications 作废，新题按新态完整落库）。
+ * 文案由 copy.ts 组装（超限形态含 limit 数字）；键盘形态由 mode 决定。
  * sendMessage retryable → 抛（重推重出题，slot 已耗——宁丢一条不轰炸）；
  * permanent → warn 吞且**不落库**（题未送达，库内不留 pending 态）。
  */
@@ -122,17 +186,14 @@ export async function sendVerificationCode(
   userId: number,
   kind: VerificationSendKind = { type: "question" },
 ): Promise<void> {
-  const question = generateQuestion();
-  const text =
-    kind.type === "question"
-      ? formatVerifyQuestion(question.expression)
-      : formatRateLimitVerifyQuestion(kind.limit, question.expression);
+  const { verifyMode } = await getVerificationSettings(env.HODOR_DB);
+  const challenge = buildChallenge(verifyMode, kind);
 
   const client = createTelegramClient(env.TELEGRAM_BOT_TOKEN);
   const sent = await client.sendMessage({
     chat_id: userId,
-    text,
-    reply_markup: optionsKeyboard(question.options),
+    text: challenge.text,
+    reply_markup: challenge.keyboard,
   });
   if (!sent.ok) {
     if (sent.kind === "retryable") {
@@ -145,7 +206,7 @@ export async function sendVerificationCode(
   }
   // 先送达后落库：D1 失败原样抛（→ retryable 重推重出题，旧题消息自然失效）
   await setPendingVerification(env.HODOR_DB, botId, userId, {
-    answer: question.answer,
+    answer: challenge.answer,
     msgId: sent.result.message_id,
   });
 }
@@ -206,12 +267,16 @@ export async function handleVerifyCallback(
   // 3. 答错：原位重出（edit 同一消息——无新 push，频控面为零）
   if (selected !== snapshot.verifyAnswer) {
     await answerQuery(client, callback.id, VERIFY_WRONG_TOAST);
-    const question = generateQuestion();
+    // 重出随当前 settings 模式（T32）：button 模式唯一按钮 v:0 即正确答案，
+    // 本分支实际不可达——仍按当前模式重出，保持代码路径防御式自洽
+    const { verifyMode } = await getVerificationSettings(env.HODOR_DB);
+    const challenge = buildChallenge(verifyMode, { type: "question" });
     const edited = await client.editMessageText({
       chat_id: message.chat.id,
       message_id: message.message_id,
-      text: formatVerifyRetryQuestion(question.expression),
-      reply_markup: optionsKeyboard(question.options),
+      // 重试前缀（copy 定稿）+ 模式化题面——math 模式下与阶段 4 文案逐字一致
+      text: `${VERIFY_RETRY_PREFIX}${challenge.text}`,
+      reply_markup: challenge.keyboard,
     });
     if (!edited.ok) {
       if (edited.kind === "retryable") {
@@ -225,7 +290,7 @@ export async function handleVerifyCallback(
       return;
     }
     await setPendingVerification(env.HODOR_DB, botId, callback.from.id, {
-      answer: question.answer,
+      answer: challenge.answer,
       msgId: message.message_id,
     });
     return;
@@ -249,20 +314,19 @@ export async function handleVerifyCallback(
     );
   }
 
-  // 置顶验证行 → ✅（存量用户已有 topic 且已置顶才刷；否则下次 4a/4b 自然带新值）
+  // 置顶验证行 → ✅（存量用户已有 topic 且已置顶才刷；否则下次 4a/4b 自然带新值）。
+  // 文本组装走共享助手（快照真值 + topic note + settings 三态——消除字段拼装
+  // 重复）；本调用点保持自己的三态消费（retryable → 抛 / permanent → warn），
+  // 不用 editPinnedBestEffort（design §三「答题链」行：置顶 edit retryable 抛，
+  // 重推收敛到失效分支，幂等）
   const topic = await findTopicByUser(env.HODOR_DB, botId, callback.from.id);
   if (!topic || topic.pinned_msg_id === null) return;
+  const pinnedText = await composePinnedText(env.HODOR_DB, botId, callback.from.id);
+  if (pinnedText === null) return;
   const refreshed = await client.editMessageText({
     chat_id: supportChatId,
     message_id: topic.pinned_msg_id,
-    text: formatPinnedInfo({
-      id: callback.from.id,
-      first_name: snapshot.firstName,
-      last_name: snapshot.lastName,
-      username: snapshot.username,
-      firstSeenAt: snapshot.firstSeenAt,
-      isVerified: true,
-    }),
+    text: pinnedText,
   });
   if (!refreshed.ok) {
     if (refreshed.kind === "retryable") {

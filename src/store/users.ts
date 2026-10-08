@@ -8,6 +8,9 @@
  * T27/T29/T35（阶段 4）：ensureUser 的既有 SELECT 顺带读出治理快照
  * （封禁 / 验证 / 题目字段）；验证态、封禁态与限频窗口的全部变更收口在
  * 本模块的专用原子 setter / 计数器——流水线绝不手写治理列 UPDATE。
+ * T37/T32（阶段 5）：快照顺带读出 is_risk / verified_at（高危提醒与
+ * TTL 判定的数据源）；setRisk / claimRiskNoticeSlot（24 小时一次性
+ * 提醒窗口）；clearAllPendingVerifications（/verifymode 切换作废旧题）。
  *
  * 契约：first_seen_at 永不在本模块更新范围（建档即定死）；展示列刷新仅走
  * ensureUser；治理列变更仅走本模块 setter（单语句原子，无读-判-写竞态）。
@@ -31,6 +34,16 @@ export interface GovernanceSnapshot {
   isBanned: boolean;
   /** 验证门：is_verified=0 → 拦截并（按策略）出验证题 */
   isVerified: boolean;
+  /**
+   * 高危标记（users.is_risk）：置顶「高危」行与 topic 内 24 小时一次性
+   * 提醒（claimRiskNoticeSlot）的数据源（T37）
+   */
+  isRisk: boolean;
+  /**
+   * 验证通过时间（users.verified_at）：T33 VERIFY_TTL_HOURS 过期判定用
+   * （字典序比较，util 契约）；未验证 / 已撤销 → null
+   */
+  verifiedAt: string | null;
   /** 当前 pending 题的正确答案（users.verify_answer；无题 → null） */
   verifyAnswer: number | null;
   /** 当前 pending 题的题面消息 ID（users.verify_msg_id；无题 → null） */
@@ -56,6 +69,9 @@ export const NOTICE_SLOT_WINDOW_MS = 60_000;
 /** 限频固定窗口长度：距 rate_window_start ≥ 60s 即重置计数（T29） */
 export const RATE_WINDOW_MS = 60_000;
 
+/** 高危提醒窗口：同一高危用户 24 小时内最多提醒 1 次（T37） */
+export const RISK_NOTICE_WINDOW_MS = 24 * 3600_000;
+
 /**
  * 建档 / 刷新用户行，返回三态结果 + 治理快照。
  *
@@ -74,7 +90,8 @@ export async function ensureUser(
 ): Promise<EnsureUserResult> {
   const existing = await db
     .prepare(
-      `SELECT first_name, last_name, username, first_seen_at, is_banned, is_verified, verify_answer, verify_msg_id
+      `SELECT first_name, last_name, username, first_seen_at, is_banned, is_verified,
+         is_risk, verified_at, verify_answer, verify_msg_id
        FROM users WHERE bot_id = ? AND user_id = ?`,
     )
     .bind(botId, from.id)
@@ -85,6 +102,8 @@ export async function ensureUser(
       first_seen_at: string;
       is_banned: number;
       is_verified: number;
+      is_risk: number;
+      verified_at: string | null;
       verify_answer: number | null;
       verify_msg_id: number | null;
     }>();
@@ -109,6 +128,8 @@ export async function ensureUser(
       firstSeenAt,
       isBanned: false,
       isVerified: false,
+      isRisk: false,
+      verifiedAt: null,
       verifyAnswer: null,
       verifyMsgId: null,
       firstName,
@@ -147,6 +168,8 @@ export async function ensureUser(
     firstSeenAt: existing.first_seen_at,
     isBanned: existing.is_banned === 1,
     isVerified: existing.is_verified === 1,
+    isRisk: existing.is_risk === 1,
+    verifiedAt: existing.verified_at,
     verifyAnswer: existing.verify_answer,
     verifyMsgId: existing.verify_msg_id,
     // 展示列回读「写后真值」：displayChanged 分支刚把新值写入库，
@@ -169,7 +192,8 @@ export async function getGovernanceSnapshot(
 ): Promise<GovernanceSnapshot | null> {
   const row = await db
     .prepare(
-      `SELECT first_name, last_name, username, first_seen_at, is_banned, is_verified, verify_answer, verify_msg_id
+      `SELECT first_name, last_name, username, first_seen_at, is_banned, is_verified,
+         is_risk, verified_at, verify_answer, verify_msg_id
        FROM users WHERE bot_id = ? AND user_id = ?`,
     )
     .bind(botId, userId)
@@ -180,6 +204,8 @@ export async function getGovernanceSnapshot(
       first_seen_at: string;
       is_banned: number;
       is_verified: number;
+      is_risk: number;
+      verified_at: string | null;
       verify_answer: number | null;
       verify_msg_id: number | null;
     }>();
@@ -187,6 +213,8 @@ export async function getGovernanceSnapshot(
   return {
     isBanned: row.is_banned === 1,
     isVerified: row.is_verified === 1,
+    isRisk: row.is_risk === 1,
+    verifiedAt: row.verified_at,
     verifyAnswer: row.verify_answer,
     verifyMsgId: row.verify_msg_id,
     firstName: row.first_name,
@@ -215,6 +243,32 @@ export async function claimNoticeSlot(
        WHERE bot_id = ? AND user_id = ? AND (last_notice_at IS NULL OR last_notice_at <= ?)`,
     )
     .bind(nowIso(), botId, userId, isoBefore(NOTICE_SLOT_WINDOW_MS))
+    .run();
+  return result.meta.changes === 1;
+}
+
+/**
+ * 原子领取高危提醒 slot（T37）：完全复刻 claimNoticeSlot 的原子模式——
+ * 单条 UPDATE 的 WHERE 即裁决，**无读-判-写竞态**；meta.changes === 1 即
+ * 赢得本 24 小时窗口（赢者负责发送 topic 内提醒）。
+ *
+ * WHERE 额外带 `is_risk = 1`：非高危（含 /unrisk 之后）永不赢得，调用方
+ * 无需先判快照；`risk_notice_at IS NULL 或 ≤ 24 小时前` 才允许写入当前
+ * 时间——NULL 即「从未提醒」，首条消息天然赢。/risk 重新标记时 setter
+ * 已清空本列，窗口随之重置（下一条消息再提醒一次，PRD 语义）。
+ */
+export async function claimRiskNoticeSlot(
+  db: D1Database,
+  botId: number,
+  userId: number,
+): Promise<boolean> {
+  const result = await db
+    .prepare(
+      `UPDATE users SET risk_notice_at = ?
+       WHERE bot_id = ? AND user_id = ?
+         AND is_risk = 1 AND (risk_notice_at IS NULL OR risk_notice_at <= ?)`,
+    )
+    .bind(nowIso(), botId, userId, isoBefore(RISK_NOTICE_WINDOW_MS))
     .run();
   return result.meta.changes === 1;
 }
@@ -276,6 +330,22 @@ export async function markUnverified(
     .run();
 }
 
+/**
+ * 作废全部 pending 验证题（T32 /verifymode 切换）：一次性清空所有行的
+ * 题目字段（WHERE verify_msg_id IS NOT NULL——无题行零变更，幂等）。
+ *
+ * 归属判定（verify_msg_id 单道检查）保持不变，被清空的旧题回调天然落
+ * 「题目已失效」分支——「旧题回调不能误通过」的实现根基。题目字段与
+ * 验证态（is_verified / verified_at）互不相干：已验证用户不受影响。
+ */
+export async function clearAllPendingVerifications(db: D1Database): Promise<void> {
+  await db
+    .prepare(
+      "UPDATE users SET verify_answer = NULL, verify_msg_id = NULL WHERE verify_msg_id IS NOT NULL",
+    )
+    .run();
+}
+
 /** 封禁 / 解禁（T35）：/ban /unban 命令的唯一写入口 */
 export async function setBanned(
   db: D1Database,
@@ -286,6 +356,27 @@ export async function setBanned(
   await db
     .prepare("UPDATE users SET is_banned = ? WHERE bot_id = ? AND user_id = ?")
     .bind(banned ? 1 : 0, botId, userId)
+    .run();
+}
+
+/**
+ * 高危标记 / 取消（T37）：/risk /unrisk 命令的唯一写入口。
+ *
+ * 单语句同时写 is_risk 与 risk_notice_at = NULL：置 1 清窗口使该用户
+ * **下一条消息重新提醒一次**（重新标记 → 提示窗口重置，PRD 语义）；
+ * 置 0 一并清——行内不留悬空窗口（再 /risk 语义与首次标记完全一致）。
+ */
+export async function setRisk(
+  db: D1Database,
+  botId: number,
+  userId: number,
+  risk: boolean,
+): Promise<void> {
+  await db
+    .prepare(
+      "UPDATE users SET is_risk = ?, risk_notice_at = NULL WHERE bot_id = ? AND user_id = ?",
+    )
+    .bind(risk ? 1 : 0, botId, userId)
     .run();
 }
 

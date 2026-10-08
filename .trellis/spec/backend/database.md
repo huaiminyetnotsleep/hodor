@@ -74,6 +74,34 @@ ALTER TABLE users ADD COLUMN muted_until TEXT;
 
 ---
 
+## 场景：运行时开关（settings 表，阶段 5 确立）
+
+### 1. 范围 / 触发
+
+需要**命令即时切换、重部署不丢失**的行为开关（如验证开关 `verify_enabled`、
+验证模式 `verify_mode`）。部署级配置仍走 env（见 [环境与配置](./env-config.md)）。
+
+### 2. 契约
+
+- **默认值 = 该功能交付前的既有行为**：行缺失 / 值非法一律回退默认
+  （`verify_enabled=1`、`verify_mode=math`）——存量部署零迁移零感知。
+- 读取每消息一次、**不做缓存**：「命令切换即时生效」是产品语义，缓存引入失效窗口。
+- 写入用 `INSERT ... ON CONFLICT(key) DO UPDATE`（UPSERT 幂等，重复执行无害）。
+- **settings 现无 bot_id 维度**（单 bot 主线）；阶段 8 多 bot 需维度拆分——
+  在此之前不得往 settings 写任何按 bot / 按用户区分的状态（按用户状态属于
+  users / topics 行，如时间窗列用原子认领 UPDATE，见 error-handling 频控契约）。
+- 加列迁移先例（0002/0003）：只允许 `ALTER TABLE ... ADD COLUMN` 增量变更，
+  向后兼容、无破坏语句；文档同步契约照常同提交执行。
+
+### 3. Wrong vs Correct
+
+- **Wrong**：新开关存 env（切换要重部署）；或把按用户的时间窗状态塞进
+  settings（`risk_notice:<uid>` 之类无界键）。
+- **Correct**：全局开关 → settings 键值 + 默认回退；按用户状态 → users 行列 +
+  原子认领 UPDATE。
+
+---
+
 ## 相关规范
 
 - [环境与配置](./env-config.md) — D1 绑定 `HODOR_DB` 与 database_id 占位符约定

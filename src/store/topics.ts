@@ -17,6 +17,11 @@ export interface TopicRow {
   status: string;
   /** 置顶的用户信息消息 ID；null = 尚未置顶（或上次置顶未落库）——置顶流程的唯一入口判定 */
   pinned_msg_id: number | null;
+  /**
+   * 管理员备注（topics.note，T36）：置顶信息「备注」行的数据源；随 topic
+   * 终身保留（存 topics 行而非 users——/deluser 关 topic 后重开仍在）
+   */
+  note: string | null;
 }
 
 /** 按 (bot_id, user_id) 查映射行；无行 → null */
@@ -27,10 +32,28 @@ export async function findTopicByUser(
 ): Promise<TopicRow | null> {
   return db
     .prepare(
-      "SELECT thread_id, title, status, pinned_msg_id FROM topics WHERE bot_id = ? AND user_id = ?",
+      "SELECT thread_id, title, status, pinned_msg_id, note FROM topics WHERE bot_id = ? AND user_id = ?",
     )
     .bind(botId, userId)
     .first<TopicRow>();
+}
+
+/**
+ * 写 / 清管理员备注（T36）：/note /unnote 命令的唯一写入口。
+ * note = null 即清空（/unnote）；UPDATE 0 行（无绑定）由调用方以
+ * findUserIdByThread 先行反查保证——setter 不做存在性判断（与 setBanned
+ * 同姿态）。备注为纯治理信息，永不影响中继 / 账本。
+ */
+export async function setTopicNote(
+  db: D1Database,
+  botId: number,
+  userId: number,
+  note: string | null,
+): Promise<void> {
+  await db
+    .prepare("UPDATE topics SET note = ? WHERE bot_id = ? AND user_id = ?")
+    .bind(note, botId, userId)
+    .run();
 }
 
 /**

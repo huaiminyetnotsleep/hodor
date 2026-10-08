@@ -10,6 +10,7 @@ import {
   parseMaxAttempts,
   parseMaxMessagesPerMinute,
   parseSupportChatId,
+  parseVerifyTtlHours,
   parseWelcomeText,
   timingSafeEqualStrings,
 } from "../src/env";
@@ -139,6 +140,29 @@ describe("parseWelcomeText", () => {
 
   it("前后空白 trim 后返回", () => {
     expect(parseWelcomeText(envWith({ WELCOME_TEXT: "  你好，欢迎咨询  " }))).toBe("你好，欢迎咨询");
+  });
+});
+
+describe("parseVerifyTtlHours（T33 验证有效期）", () => {
+  it("合法非负整数 → 原值（含 0 = 永久有效）", () => {
+    expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "1" }))).toBe(1);
+    expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "24" }))).toBe(24);
+    expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: " 8 " }))).toBe(8);
+    // 0 是合法值（永不重验），不与「非法回退 0」歧义
+    expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "0" }))).toBe(0);
+  });
+
+  it("缺失 / 空串 → 缺省 0（对齐 docs/guide/deploy.md 变量表）", () => {
+    expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: undefined }))).toBe(0);
+    expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "" }))).toBe(0);
+    expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "   " }))).toBe(0);
+  });
+
+  it("负数 / 非整数 / 非法 → 回退 0（先解析，不轻信输入）", () => {
+    expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "-1" }))).toBe(0);
+    expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "-0.5" }))).toBe(0);
+    expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "2.5" }))).toBe(0);
+    expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "abc" }))).toBe(0);
   });
 });
 

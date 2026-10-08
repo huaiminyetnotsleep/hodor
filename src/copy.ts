@@ -1,5 +1,6 @@
 /**
- * 用户 / 管理员可见文案的唯一集中点（T23 / T24 / T26 + 阶段 4 T27/T29/T34/T35）。
+ * 用户 / 管理员可见文案的唯一集中点（T23 / T24 / T26 + 阶段 4 T27/T29/T34/T35
+ * + 阶段 5 T31/T32/T36/T37）。
  *
  * fork 可整体改写本模块（含多语言）——除本文件外，任何模块不得散落
  * 硬编码用户文案（PRD 约束）。文案定稿来源：docs/guide/features.md。
@@ -18,7 +19,10 @@ export const DEFAULT_WELCOME_TEXT = `你好，欢迎使用 hodor 私聊机器人
 
 项目地址：https://github.com/huaiminyetnotsleep/hodor`;
 
-/** formatPinnedInfo 所需的用户字段子集（users 行展示列 + 建档时间） */
+/** 置顶验证行的三态（T31 开关交付起布尔真值升为三态） */
+export type PinnedVerifyState = "verified" | "unverified" | "disabled";
+
+/** formatPinnedInfo 所需的用户字段子集（users 行展示列 + 建档时间 + 治理行） */
 export interface PinnedInfoUser {
   id: number;
   first_name?: string;
@@ -26,19 +30,35 @@ export interface PinnedInfoUser {
   username?: string;
   /** users.first_seen_at（ISO-8601 UTC 文本） */
   firstSeenAt: string;
-  /** 验证真值（users.is_verified）：置顶验证行随状态迁移同步（T27/T29） */
-  isVerified: boolean;
+  /**
+   * 验证行三态（T31）：verified / unverified 按库内真值（users.is_verified），
+   * disabled = 验证开关关闭期间（恒「未启用」，覆盖真值——此时无从谈验证状态）
+   */
+  verify: PinnedVerifyState;
+  /** 高危标记（users.is_risk，T37）：true → 追加「高危：⚠️ 高危用户」行 */
+  isRisk?: boolean;
+  /** 管理员备注（topics.note，T36）：非空 → 追加「备注：<text>」行 */
+  note?: string | null;
 }
 
+/** 三态验证行文案（disabled 无 emoji——验证未启用时绝不伪称任何状态） */
+const VERIFY_STATUS_TEXT: Record<PinnedVerifyState, string> = {
+  verified: "✅ 已验证",
+  unverified: "❌ 未验证",
+  disabled: "未启用",
+};
+
 /**
- * 置顶的用户信息（T24 + 阶段 4 验证行两态）：
- * 昵称（含 @username 括注）/ 用户 ID / 首次聊天（截到分钟）/ 验证状态。
+ * 置顶的用户信息（T24 + 阶段 4 验证行 + 阶段 5 高危 / 备注行）：
+ * 昵称（含 @username 括注）/ 用户 ID / 首次聊天（截到分钟）/ 验证状态
+ * （三态）/ 高危（仅 isRisk）/ 备注（仅非空）。
  *
  * - 昵称回退链：first+last_name → @username → ID_<id>；括注只在展示名来自
  *   姓名且存在 @username 时携带（否则会与回退名重复）
- * - 验证行两态真值（阶段 4 交付验证起）：isVerified → ✅ 已验证 / ❌ 未验证
- *   （阶段 3 的「未启用」成为历史；答对 / 超限降级时 editMessageText 同步）
- * - 高危 / 备注行阶段 5 起才展示（阶段边界）
+ * - 验证行三态（T31 开关交付起）：✅ 已验证 / ❌ 未验证 / 未启用
+ *   （开关关闭期间恒「未启用」；答对 / 超限降级 / TTL 过期时 editMessageText 同步）
+ * - 高危行仅 isRisk=true 时出现（`高危：⚠️ 高危用户`）；备注行仅 note 非空
+ *   时出现——两行都在验证行之后，行序固定
  * - firstSeenAt 为 ISO 文本截到分钟（`YYYY-MM-DD HH:mm`）：D1 默认值与
  *   nowIso() 同构（`YYYY-MM-DDTHH:mm:ss.sssZ`），前 16 位切片即所需
  */
@@ -51,12 +71,16 @@ export function formatPinnedInfo(user: PinnedInfoUser): string {
     fromNames ?? (user.username ? `@${user.username}` : `ID_${user.id}`);
   const handle = fromNames && user.username ? `（@${user.username}）` : "";
   const firstSeen = `${user.firstSeenAt.slice(0, 10)} ${user.firstSeenAt.slice(11, 16)}`;
-  return [
+  const lines = [
     `昵称：${displayName}${handle}`,
     `用户 ID：${user.id}`,
     `首次聊天：${firstSeen} (UTC)`,
-    `验证状态：${user.isVerified ? "✅ 已验证" : "❌ 未验证"}`,
-  ].join("\n");
+    `验证状态：${VERIFY_STATUS_TEXT[user.verify]}`,
+  ];
+  if (user.isRisk) lines.push("高危：⚠️ 高危用户");
+  const note = user.note?.trim();
+  if (note) lines.push(`备注：${user.note}`);
+  return lines.join("\n");
 }
 
 /**
@@ -88,11 +112,17 @@ export function formatVerifyQuestion(expression: string): string {
 }
 
 /**
- * 答错重出正文（T27）：错误提示 + 新题——编辑到**同一题面消息**
- * （无新推送，天然不占提示频控），expression 为新算式。
+ * 答错重出的错误提示前缀（T27 + T32 模式化）：与 buildChallenge 产出的
+ * 模式化题面拼接成重出正文（编辑到**同一题面消息**——无新推送，天然不占
+ * 提示频控）。math 模式下拼接产物与下方 formatVerifyRetryQuestion 逐字一致。
+ */
+export const VERIFY_RETRY_PREFIX = "回答错误，请再试一次。\n\n";
+
+/**
+ * 答错重出正文（T27，math 模式定稿形态）：错误提示 + 新题（题头 + 算式）。
  */
 export function formatVerifyRetryQuestion(expression: string): string {
-  return `回答错误，请再试一次。\n\n${VERIFY_QUESTION_HEADER}\n${expression}`;
+  return `${VERIFY_RETRY_PREFIX}${formatVerifyQuestion(expression)}`;
 }
 
 /** 答错 toast（answerCallbackQuery 弹出，T27） */
@@ -115,19 +145,60 @@ export function formatRateLimitVerifyQuestion(limit: number, expression: string)
   return `发送过快，每分钟最多 ${limit} 条消息，本条未送达。请重新完成验证：\n\n${VERIFY_QUESTION_HEADER}\n${expression}`;
 }
 
+/**
+ * 超限合并消息正文——纯按钮模式变体（T29 + T32）：限频提示前缀与数学题
+ * 形态逐字一致（超限语义不随模式变化），题面换为纯按钮引导文案 + 单按钮
+ * （按钮本体由 buildChallenge 组装，本函数只管文字）。
+ */
+export function formatRateLimitVerifyButton(limit: number): string {
+  return `发送过快，每分钟最多 ${limit} 条消息，本条未送达。请重新完成验证：\n\n${formatVerifyButtonQuestion()}`;
+}
+
 /** 禁言提示（T35）：封禁门拦截用户消息时经提示频控发给用户 */
 export const BAN_NOTICE = "你已被禁言，消息无法送达客服。如有疑问请通过其他方式联系。";
 
 /**
- * /help 文案（T34）：只列**已交付**命令（阶段 4：/help /ban /unban）；
- * 后续阶段新增命令时在此增行，未交付命令绝不提前展示。
+ * /help 文案（T34 + T32 动态化）：只列**已交付**命令；验证段随当前开关与
+ * 模式变化——只展示「可操作的那个」开关命令（开 → /verifyoff，关 →
+ * /verifyon），未交付命令绝不提前展示。后续阶段新增命令时在此增行。
  */
-export const HELP_TEXT = `可用命令：
-/help - 显示本帮助
-/ban - 禁言当前话题对应用户
-/unban - 解除当前话题对应用户的禁言
+export interface HelpSettings {
+  verifyEnabled: boolean;
+  verifyMode: "math" | "button";
+}
 
-说明：以 / 开头的消息不会中继给用户。`;
+/** 验证模式的帮助侧中文名（/verifymode 行与切换确认共用） */
+export function verifyModeLabel(mode: "math" | "button"): string {
+  return mode === "math" ? "数学题" : "纯按钮";
+}
+
+export function formatHelpText(settings: HelpSettings): string {
+  const lines = [
+    "可用命令：",
+    "/help - 显示本帮助",
+    "/ban - 禁言当前话题对应用户",
+    "/unban - 解除当前话题对应用户的禁言",
+    "/note <内容> - 添加用户备注",
+    "/unnote - 清除用户备注",
+    "/risk - 标记高危用户",
+    "/unrisk - 取消高危标记",
+    "",
+    "验证：",
+  ];
+  if (settings.verifyEnabled) {
+    // 开 → 唯一可操作的是关（/verifyon 不展示，避免管理员误以为未开）
+    lines.push("/verifyoff - 临时关闭人机验证（已验证记录保留）");
+  } else {
+    lines.push("/verifyon - 开启人机验证", "当前验证已关闭。");
+  }
+  lines.push(
+    `/verifymode - 切换验证模式（当前：${verifyModeLabel(settings.verifyMode)}）`,
+    "纯按钮模式防护较弱，bot 可直接调 API 点击，仅建议受信任场景使用。",
+    "",
+    "说明：以 / 开头的消息不会中继给用户。",
+  );
+  return lines.join("\n");
+}
 
 /** 未知命令提示（T34）：回 topic 引导管理员查看 /help，绝不发用户 */
 export const UNKNOWN_COMMAND_NOTICE = "未知命令，发送 /help 查看可用命令。";
@@ -143,13 +214,22 @@ export const NOT_ADMIN_COMMAND_NOTICE = "该命令仅客服管理员可用。";
  * 管理命令菜单（T34 真机验收增量，2026-09-30）：setwebhook 时经
  * setMyCommands 注册进 Telegram 命令菜单（客服群输入框可直接点选，不用
  * 手敲）。scope 恒为客服群 chat——用户私聊菜单不受影响。command 一律
- * 小写无斜杠（Telegram BotCommand 规范）；阶段 5 新命令在此扩展，
- * 并与 HELP_TEXT 的「已交付命令」清单保持同步。
+ * 小写无斜杠（Telegram BotCommand 规范）。菜单**恒全量注册**（不随开关
+ * 动态变化——Telegram 菜单是客户端缓存，动态化弊大于利；帮助文本才是
+ * 动态面），并与 formatHelpText 的「已交付命令」清单保持同步。已部署
+ * 实例需重跑 setwebhook 刷新菜单。
  */
 export const ADMIN_COMMAND_MENU: readonly { command: string; description: string }[] = [
   { command: "help", description: "查看管理命令帮助" },
   { command: "ban", description: "封禁本话题用户" },
   { command: "unban", description: "解封本话题用户" },
+  { command: "note", description: "添加用户备注" },
+  { command: "unnote", description: "清除用户备注" },
+  { command: "risk", description: "标记高危用户" },
+  { command: "unrisk", description: "取消高危标记" },
+  { command: "verifyon", description: "开启人机验证" },
+  { command: "verifyoff", description: "临时关闭人机验证" },
+  { command: "verifymode", description: "切换验证模式" },
 ];
 
 /** /ban 确认（T35）：回 topic，携带目标用户 ID 便于管理员核对 */
@@ -161,3 +241,79 @@ export function formatBanConfirmed(userId: number): string {
 export function formatUnbanConfirmed(userId: number): string {
   return `已解除用户 ${userId} 的禁言。`;
 }
+
+/* ------------------------------------------------------------------ */
+/* 阶段 5：备注（T36）/ 高危（T37）/ 验证开关与模式（T31/T32）文案        */
+/* ------------------------------------------------------------------ */
+
+/** /note 确认（T36）：回 topic，回显写入的备注便于管理员核对 */
+export function formatNoteConfirmed(note: string): string {
+  return `已添加备注：${note}`;
+}
+
+/** /unnote 确认（T36）：回 topic */
+export function formatUnnoteConfirmed(): string {
+  return "已清除备注。";
+}
+
+/** /note 缺参数的用法提示（T36）：绝不误写空备注 */
+export const NOTE_USAGE_NOTICE = "用法：/note <内容>（备注将展示在置顶信息中）";
+
+/**
+ * /risk 确认（T37）：回 topic，携带目标用户 ID + 提醒一次性行为说明
+ *（重新标记后下一条消息会再提醒一次）。
+ */
+export function formatRiskConfirmed(userId: number): string {
+  return `已标记用户 ${userId} 为高危用户：其来信将在话题内醒目提醒（24 小时内不重复）。`;
+}
+
+/** /unrisk 确认（T37）：回 topic */
+export function formatUnriskConfirmed(userId: number): string {
+  return `已取消用户 ${userId} 的高危标记。`;
+}
+
+/**
+ * 高危用户来信提醒（T37）：发到 topic 内的醒目提示（⚠️ 前后缀 + 展示名），
+ * 24 小时窗口内仅一条；displayName 为用户昵称（置顶信息同款回退链产物）。
+ * 中继 / 账本照常——提醒只是附着物，不影响主链。
+ */
+export function formatRiskTopicNotice(displayName: string): string {
+  return `⚠️ 高危用户来信提醒 ⚠️\n${displayName} 已被标记为高危用户，请注意甄别、谨慎处理。`;
+}
+
+/**
+ * /verifyon 确认（T31）：含「已验证记录不受影响」说明——重开后已验证
+ *（且未过期）用户照常通行，绝不误重验。
+ */
+export function formatVerifyOnConfirmed(): string {
+  return "人机验证已开启。此前已验证的用户不受影响，无需重新验证。";
+}
+
+/**
+ * /verifyoff 确认（T31）：含验证记录保留、重新开启后按记录与有效期判定
+ * 的说明——关闭只是「整门跳过」，不动任何验证记录。
+ */
+export function formatVerifyOffConfirmed(): string {
+  return "人机验证已临时关闭：新消息不再要求验证。已验证记录全部保留，重新开启后按记录与有效期判定，已验证且未过期的用户无需重验。";
+}
+
+/**
+ * /verifymode 确认（T32）：携带切换后的新模式；纯按钮附防护较弱说明
+ *（bot 可直接调 API 点击）。
+ */
+export function formatVerifyModeConfirmed(mode: "math" | "button"): string {
+  return mode === "math"
+    ? "验证模式已切换为数学题。"
+    : "验证模式已切换为纯按钮。注意：纯按钮模式防护较弱，bot 可直接调 API 点击，仅建议受信任场景使用。";
+}
+
+/**
+ * 纯按钮模式题面（T32）：单按钮 + 引导文案（与数学题共用「为确认你是
+ * 真人」句式，保持验证语义一致）。
+ */
+export function formatVerifyButtonQuestion(): string {
+  return "为确认你是真人，请点击下方按钮确认你不是机器人。";
+}
+
+/** 纯按钮模式的唯一按钮文案（T32）：点击即提交答案 0 */
+export const VERIFY_BUTTON_LABEL = "我不是机器人";

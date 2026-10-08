@@ -51,6 +51,10 @@ beforeAll(async () => {
   `Cloudflare.Env`;tsconfig 的 `types` 必须是 `["@cloudflare/vitest-pool-workers/types"]`
   (自 0.22 起 `cloudflare:test` 环境模块位于该子路径导出中),并且生成的
   `worker-configuration.d.ts` 要包含在 `include` 里。
+- **影响行为的 env 变量必须在 `vitest.config.ts` 的 `miniflare.bindings` 钉死
+  为默认值**(先例:`MAX_MESSAGES_PER_MINUTE`、`VERIFY_TTL_HOURS`):测试基座会
+  读到本机 `.dev.vars`,真机调试临时改值会静默破坏无关用例的确定性
+  (如 TTL=1 让已验证种子用户凭空触发重验)。
 
 ### 4. 校验与错误矩阵
 

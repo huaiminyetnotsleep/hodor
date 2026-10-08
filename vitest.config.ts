@@ -36,6 +36,11 @@ export default defineConfig(async () => {
         // 让依赖缺省 20 的路径静默漂移（构造 env 覆盖的用例不受影响，
         // trellis-check P2#4）
         MAX_MESSAGES_PER_MINUTE: "20",
+        // 阶段 5 验证有效期（T33）：钉死默认值 0 = 永不重验——.dev.vars /
+        // 远端真机 E2E 会临时调成 1，不钉死同样经 .dev.vars 泄漏进 worker
+        // env，让无关用例的已验证用户凭空触发重验（TTL 边界用例用构造 env
+        // 对象覆盖，env.test.ts 同模式）
+        VERIFY_TTL_HOURS: "0",
       },
     },
   };
