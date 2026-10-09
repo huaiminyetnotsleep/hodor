@@ -1,7 +1,6 @@
 # 部署流程
 
-本页是首次部署的唯一完整指南：前置条件 → 环境变量 → 三条部署路径 → 部署后收尾与验收。
-更新已有实例见[发布与更新](/guide/release.md)，日常运维与排障见[运维手册](/guide/ops.md)。
+本页是首次部署的唯一完整指南：前置条件 → 环境变量 → 三条部署路径 → 部署后收尾与验收。更新已有实例见[发布与更新](/guide/release.md)，日常运维与排障见[运维手册](/guide/ops.md)。
 
 ## 前置条件
 
@@ -19,7 +18,7 @@
 
 | 变量 | 是什么 | 获取方法 |
 | --- | --- | --- |
-| `SUPPORT_CHAT_ID` | 客服超级群组的 chat_id（`-100` 开头负数） | bot 进群后往群里随便发一条消息，浏览器打开 `https://api.telegram.org/bot<BOT_TOKEN>/getUpdates`，记下返回中的 `chat.id`；也可邀请 [@getidsbot](https://t.me/getidsbot) 等工具 bot 进群后发 `/id` |
+| `SUPPORT_CHAT_ID` | 客服超级群组的 chat_id（`-100` 开头负数） | bot 进群后往群里随便发一条消息，浏览器打开 `https://api.telegram.org/bot<BOT_TOKEN>/getUpdates`，记下返回中的 `chat.id`；也可邀请 [@sc_ui_bot](https://t.me/sc_ui_bot)、[@getidsbot](https://t.me/getidsbot) 等工具 bot 进群后发 `/id` |
 | `ADMIN_IDS` | 管理员的 Telegram 用户 ID（逗号分隔，可多个） | 同上 getUpdates 返回中你那条消息的 `from.id`；或在 Telegram 内向 [@getidsbot](https://t.me/getidsbot) 等工具 bot 发任意消息直接读出自己的 user ID |
 
 ## 环境变量（共 9 个，权威清单）
@@ -40,11 +39,17 @@
 三个 Secret（`TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` / `ADMIN_SECRET`）请使用**互不相同**的长随机串。
 :::
 
-**配置入口**统一为 Cloudflare 面板 → Worker → 设置 → **变量和机密**：3 个 Secret 用「机密（Secret）」类型，`SUPPORT_CHAT_ID` / `ADMIN_IDS` 与 4 条选填用「文本（Text）」类型。仓库已开启 `keep_vars`，面板配置的变量跨部署保留（Secret 本就不因部署删除）；变量值一律不进仓库。本地调试可选 `cp .dev.vars.example .dev.vars` 后填值（git 忽略，与面板互不影响）。
+**配置入口**统一为 Cloudflare 面板 → Worker → 设置 → **变量和机密**：3 个 Secret 用「机密（Secret）」类型，`SUPPORT_CHAT_ID` / `ADMIN_IDS` 与 4 条选填用「文本（Text）」类型。
+
+仓库已开启 `keep_vars`，面板配置的变量跨部署保留（Secret 本就不因部署删除）；变量值一律不进仓库。
+
+本地调试可选 `cp .dev.vars.example .dev.vars` 后填值（git 忽略，与面板互不影响）。
 
 ## 部署方式（三选一）
 
-三条路径共用同一套仓库声明式配置（`wrangler.jsonc` + `.dev.vars.example`）。D1 数据库的创建、`HODOR_DB` 绑定与表迁移全部自动化，**无需在 dashboard 手动建库**；真实 database_id 不进仓库（仓库内恒为占位符，部署管线按名字解析并注入构建工作区，不改你的仓库）。
+三条路径共用同一套仓库声明式配置（`wrangler.jsonc` + `.dev.vars.example`）。
+
+D1 数据库的创建、`HODOR_DB` 绑定与表迁移全部自动化，**无需在 dashboard 手动建库**；真实 database_id 不进仓库（仓库内恒为占位符，部署管线按名字解析并注入构建工作区，不改你的仓库）。
 
 ### 路径一（推荐）：fork 后部署（Workers Builds，全程浏览器）
 

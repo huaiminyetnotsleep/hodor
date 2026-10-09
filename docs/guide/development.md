@@ -12,7 +12,9 @@ cp .dev.vars.example .dev.vars # .dev.vars 已被 git 忽略，不会进入提�
 ```
 
 ::: tip
-测试所需的变量已由 `vitest.config.ts` 显式注入（不依赖本地 `.dev.vars`，不同机器结果一致）；`.dev.vars` 供 `wrangler dev` 手动运行使用——模板条目默认全部注释，复制后逐条取消注释并填值（必填 5 条必须启用，选填按需），真机联调时再填入真实 token。
+测试所需的变量已由 `vitest.config.ts` 显式注入（不依赖本地 `.dev.vars`，不同机器结果一致）。
+
+`.dev.vars` 供 `wrangler dev` 手动运行使用——模板条目默认全部注释，复制后逐条取消注释并填值（必填 5 条必须启用，选填按需），真机联调时再填入真实 token。
 :::
 
 文档站（本站）的依赖独立装在 `docs/` 下，首次运行会自动安装：
@@ -54,7 +56,9 @@ it("settings 读写", async () => {
 });
 ```
 
-**HTTP 行为**——用 `SELF.fetch` 走完整 fetch 入口（范例：[`test/health.test.ts`](https://github.com/huaiminyetnotsleep/hodor/blob/main/test/health.test.ts)）。这类测试不碰数据库，无需应用迁移：
+**HTTP 行为**——用 `SELF.fetch` 走完整 fetch 入口（范例：[`test/health.test.ts`](https://github.com/huaiminyetnotsleep/hodor/blob/main/test/health.test.ts)）。
+
+这类测试不碰数据库，无需应用迁移：
 
 ```ts
 import { SELF } from "cloudflare:test";
@@ -101,10 +105,19 @@ npx wrangler d1 execute hodor --local --command "SELECT * FROM settings"
 ```
 
 ::: tip
-`wrangler.jsonc` 中的 `database_id` 只是占位符，**不影响本地模式**——本地状态按 `database_name`（`hodor`）键控。只有 `--remote` 操作（如 `npm run db:migrate:remote`）才需要真实 id，见[部署流程](./deploy.md)。
+`wrangler.jsonc` 中的 `database_id` 只是占位符，**不影响本地模式**——本地状态按 `database_name`（`hodor`）键控。
+
+只有 `--remote` 操作（如 `npm run db:migrate:remote`）才需要真实 id，见[部署流程](./deploy.md)。
 :::
 
-当前已交付（完整 v1）：`POST /webhook`（文本 + 7 类媒体双向中继、人机验证、限频、全套管理命令）、`GET /health`（存活探针）、`GET /selfcheck`（完整自检）、`/setwebhook/<ADMIN_SECRET>` 与 `/deletewebhook/<ADMIN_SECRET>`（绑定 / 解绑 + 命令菜单注册）。本地 `wrangler dev` 无法接收 Telegram 推送（公网不可达），真机联调需部署后绑定 webhook，见[部署流程](./deploy.md)。
+当前已交付（完整 v1）：
+
+- `POST /webhook`（文本 + 7 类媒体双向中继、人机验证、限频、全套管理命令）
+- `GET /health`（存活探针）
+- `GET /selfcheck`（完整自检）
+- `/setwebhook/<ADMIN_SECRET>` 与 `/deletewebhook/<ADMIN_SECRET>`（绑定 / 解绑 + 命令菜单注册）
+
+本地 `wrangler dev` 无法接收 Telegram 推送（公网不可达），真机联调需部署后绑定 webhook，见[部署流程](./deploy.md)。
 
 ## 命令速查
 

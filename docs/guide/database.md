@@ -55,7 +55,11 @@ UNIQUE `(bot_id, user_id)` **和** UNIQUE `(bot_id, thread_id)` 双向唯一：
 | `created_at` / `closed_at` | TEXT | |
 
 ::: tip 设计意图
-`topics.status` 表示 Telegram topic 开关状态：由原生 close/reopen service message 同步，也由 `/archive` 关闭、用户回访恢复。`users.status='deleted'` 表示 `/archive` 的软归档状态；users/topics/messages 行仍在。`/deluser` 是硬删除，会移除对应 users/topics/messages 行及 Telegram topic；不删除用户与 bot 的私聊窗口历史。
+`topics.status` 表示 Telegram topic 开关状态：由原生 close/reopen service message 同步，也由 `/archive` 关闭、用户回访恢复。
+
+`users.status='deleted'` 表示 `/archive` 的软归档状态；users/topics/messages 行仍在。
+
+`/deluser` 是硬删除，会移除对应 users/topics/messages 行及 Telegram topic；不删除用户与 bot 的私聊窗口历史。
 :::
 
 ## messages — 消息账本
@@ -74,7 +78,13 @@ UNIQUE `(bot_id, user_id)` **和** UNIQUE `(bot_id, thread_id)` 双向唯一：
 
 索引：`(thread_id, created_at)`、`(user_id, created_at)`。
 
-`/purgemsg` 完成后（含部分失败）会删除该 topic 的全部账本行——账本与群内实况对齐；删除失败的消息不再被追踪，可手动删除。原生删除 topic 后自愈只清旧 topics 绑定行，历史账本行保留（`thread_id` 悬空无害）。`/deluser` 物理删除则会删除该用户对应账本行；Telegram 私聊消息不在删除范围内。`/wipealldata` 确认后先按本表删除全部群内话题（General 除外），成功后清空全表。
+`/purgemsg` 完成后（含部分失败）会删除该 topic 的全部账本行——账本与群内实况对齐；删除失败的消息不再被追踪，可手动删除。
+
+原生删除 topic 后自愈只清旧 topics 绑定行，历史账本行保留（`thread_id` 悬空无害）。
+
+`/deluser` 物理删除则会删除该用户对应账本行；Telegram 私聊消息不在删除范围内。
+
+`/wipealldata` 确认后先按本表删除全部群内话题（General 除外），成功后清空全表。
 
 ## settings — 运行时开关
 
@@ -106,7 +116,9 @@ PK `(bot_id, prompt_msg_id)`：一条确认按钮消息一行，`prompt_msg_id` 
 | `status` | TEXT | `pending` / `cancelled` / `confirmed`；取消与确认各用单条原子 `UPDATE ... WHERE status='pending'` 裁决，先到先得 |
 | `confirm_callback_id` | TEXT | 确认获胜的 callback id；仅该 id 的后续 webhook 重推可继续执行（TG 已删而 D1 清理失败的收敛），其他回调一律拒绝 |
 
-确认 `UPDATE` 的 `WHERE` 同时要求 topics 当前仍存在该 `(bot_id, user_id, thread_id)` 双向绑定。`/deluser` 删除用户时随 users 一并清理该表行；`/wipealldata` 确认后全表清空（清库前先按 topics 表删除全部群内话题）。
+确认 `UPDATE` 的 `WHERE` 同时要求 topics 当前仍存在该 `(bot_id, user_id, thread_id)` 双向绑定。
+
+`/deluser` 删除用户时随 users 一并清理该表行；`/wipealldata` 确认后全表清空（清库前先按 topics 表删除全部群内话题）。
 
 ## 表间关系
 

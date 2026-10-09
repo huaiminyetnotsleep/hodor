@@ -66,8 +66,15 @@ flowchart LR
 
 - 一个 Telegram Bot（[@BotFather](https://t.me/BotFather) 创建）
 - 一个开启话题（Topics）的**私有**超级群组，Bot 授予四项权限：**管理话题 / 发送消息 / 删除消息 / 置顶消息**
-- 客服群 `chat_id` 与管理员 `user_id`（获取方法见[部署指南](docs/guide/deploy.md)）
+- 客服群 `chat_id` 与管理员 `user_id`（获取方法见下表）
 - 一个 Cloudflare 账户（免费套餐即可运行，用量受配额约束）
+
+**获取两个 Telegram ID**
+
+| 变量 | 获取方法 |
+| --- | --- |
+| 客服群 `chat_id`（`-100` 开头负数） | Bot 进群后往群里随便发一条消息，浏览器打开 `https://api.telegram.org/bot<BOT_TOKEN>/getUpdates`，记下返回中的 `chat.id`；或邀请 [@sc_ui_bot](https://t.me/sc_ui_bot)、[@getidsbot](https://t.me/getidsbot) 等工具 bot 进群后发 `/id` |
+| 管理员 `user_id` | 同上 `getUpdates` 返回中你那条消息的 `from.id`；或在 Telegram 内向 [@getidsbot](https://t.me/getidsbot) 私聊发任意消息，直接读出自己的 user ID |
 
 ### 方式一：fork 后部署（推荐）
 
@@ -77,6 +84,11 @@ flowchart LR
 2. 打开 Cloudflare 面板 → Workers & Pages → Create → Workers → **Import a repository**，授权 GitHub 后选中你的 fork
 3. 向导保持默认（项目名 `hodor`、构建命令留空、部署命令 `npx wrangler deploy`），保存后自动完成首次部署
 4. 此后每次 push 到 `main` 即自动发布新版本
+
+> [!TIP]
+> fork 后可选开启**自动跟随更新**：在你 fork 仓库的 GitHub 页面 → **Actions** 启用 **Sync fork from upstream** 工作流，即可每周自动快进到官方最新版并触发重新部署；也可随时点 **Run workflow** 立即同步。
+>
+> 默认关闭，不影响手动跟随；行为边界见[发布与更新](docs/guide/release.md)。
 
 ### 方式二：Deploy 按钮
 
@@ -96,7 +108,13 @@ npm run deploy
 > [!TIP]
 > 三条路径共用同一套仓库配置：D1 建库、绑定与表迁移自动完成；变量值一律不进仓库，部署后在 Cloudflare 面板「变量和机密」配置。
 
-部署后统一收尾：配置 9 个环境变量（`/selfcheck` 会逐条点名缺失项）→ 绑定 webhook → 复检全绿 → 试聊验收。
+部署后统一收尾：
+
+1. 配置 9 个环境变量（`/selfcheck` 会逐条点名缺失项）
+2. 绑定 webhook
+3. 复检全绿
+4. 试聊验收
+
 完整分步说明见 **[部署指南](docs/guide/deploy.md)**；日常更新与回滚见[发布与更新](docs/guide/release.md)。
 
 ## 关键配置与命令

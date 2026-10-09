@@ -16,6 +16,7 @@ Worker 会把 `TELEGRAM_WEBHOOK_SECRET` 作为官方 `secret_token` 一并注册
 
 ::: tip
 访问返回 `401`「无效的管理密钥」表示 URL 路径段与 env 中的值不一致（刚更换过，或复制有误）：核对 dashboard 中的 `ADMIN_SECRET` 后用新链接重试即可。错误提示不区分「不存在 / 不正确」，避免枚举探测。
+
 `ADMIN_SECRET` 泄漏的唯一影响是别人能替你重绑 webhook；随时可在 dashboard 换新值，消息流不受影响。
 :::
 
@@ -65,7 +66,11 @@ bot 身份（bot_id）不变，所有数据继续有效：
 
 部署后或每次更新后建议访问一次，确认服务存活并核对版本号。
 
-**`GET /selfcheck` — 完整自检**。按 环境变量 → 数据库七表 → Webhook 绑定 的固定顺序逐项检查：全部通过返回 `200 {"status":"ok","version":"…"}`；有未通过项返回 503 与 `failed` 数组，逐条给出中文失败原因（不回显任何密钥值）。刚部署、变量还没配齐的新实例也能访问它定位缺失项。
+**`GET /selfcheck` — 完整自检**。按 环境变量 → 数据库七表 → Webhook 绑定 的固定顺序逐项检查：
+
+全部通过返回 `200 {"status":"ok","version":"…"}`；有未通过项返回 503 与 `failed` 数组，逐条给出中文失败原因（不回显任何密钥值）。
+
+刚部署、变量还没配齐的新实例也能访问它定位缺失项。
 
 常见 `failed` 项与处置：
 
@@ -85,7 +90,9 @@ bot 身份（bot_id）不变，所有数据继续有效：
 
 在 Cloudflare dashboard → Storage & Databases → hodor 数据库 → Console 中直接粘贴执行（`123456789` 替换为目标 user_id）。
 
-完整的运维查询包见仓库 `scripts/d1-console.sql`：总览计数、单用户全档案、topic 绑定与归档清单、消息账本（按用户 / 按 topic）、失败 update、settings / bots、孤儿检测，以及隔离在「危险区」段的维护语句。以下只保留最常用的三条速查，内容与该文件对应条目一致。
+完整的运维查询包见仓库 `scripts/d1-console.sql`：总览计数、单用户全档案、topic 绑定与归档清单、消息账本（按用户 / 按 topic）、失败 update、settings / bots、孤儿检测，以及隔离在「危险区」段的维护语句。
+
+以下只保留最常用的三条速查，内容与该文件对应条目一致。
 
 **查用户（users 全部状态列 + topic 绑定与备注）**：
 
@@ -126,7 +133,9 @@ LIMIT 20;
 ```
 
 ::: warning 维护语句不在此页
-清理类 SQL（重置失败 update、按用户清理、一键全清）**没有确认步骤，粘贴执行即生效**，全文集中在 `scripts/d1-console.sql` 的「危险区」段（带醒目警告与影响范围说明）。日常清理优先使用带两步危险确认的 topic 内命令 `/deluser` / `/wipealldata`（见[功能介绍](/guide/features.md)）。
+清理类 SQL（重置失败 update、按用户清理、一键全清）**没有确认步骤，粘贴执行即生效**，全文集中在 `scripts/d1-console.sql` 的「危险区」段（带醒目警告与影响范围说明）。
+
+日常清理优先使用带两步危险确认的 topic 内命令 `/deluser` / `/wipealldata`（见[功能介绍](/guide/features.md)）。
 :::
 
 ## 故障排查

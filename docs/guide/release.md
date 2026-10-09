@@ -41,7 +41,9 @@
 
 ### 可选：自动跟随更新
 
-仓库自带 `Sync fork from upstream` workflow（`.github/workflows/sync-fork.yml`），提供可选的每周定时同步 + 手动触发。默认**关闭**——GitHub 对 fork 仓库的 Actions 与定时工作流默认禁用，不主动启用就不会运行，对手动跟随的用户零影响。
+仓库自带 `Sync fork from upstream` workflow（`.github/workflows/sync-fork.yml`），提供可选的每周定时同步 + 手动触发。
+
+默认**关闭**——GitHub 对 fork 仓库的 Actions 与定时工作流默认禁用，不主动启用就不会运行，对手动跟随的用户零影响。
 
 **开启**（自己 fork 的 GitHub 页面，三步）：
 
