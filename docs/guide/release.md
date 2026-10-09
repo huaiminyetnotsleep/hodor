@@ -20,7 +20,17 @@
 
 ### 发布新版本（维护者）
 
-1. 正常开发提交，commit message 使用约定式格式：`feat:` 新功能（升 MINOR）、`fix:` 修复（升 PATCH）、标注 `BREAKING CHANGE` 的提交升 MAJOR
+普通功能 PR 只采用 **Squash and merge**，PR 标题使用约定式提交格式，例如 `feat: ...` 或 `fix: ...`。
+
+合并时将 squash commit title 设为 PR 标题。这样每个 PR 在 `main` 上只有一个供 Release Please 解析的提交，分支内的提交不会分别计入 changelog。
+
+仓库管理员需在 **Settings → General → Pull Requests** 中仅开启 **Allow squash merging**，并关闭 **Allow merge commits** 与 **Allow rebase merging**。
+
+同时将 **Squash merge commit title** 设为 **Pull request title**。PR 模板仅作提醒，不会强制校验标题或合并方式。
+
+Release Please 的版本映射保持不变：`feat:` 升 MINOR，`fix:` 升 PATCH，`BREAKING CHANGE` 升 MAJOR。PR 标题应准确表达该 PR 的版本级别。
+
+1. 按上述约定提交并合并普通 PR
 2. push 到 main 后，release-please 自动开出（或更新）一个 **Release PR**，内容为版本号 bump + CHANGELOG
 3. 此时 CF 已用最新代码完成部署（**代码先上线**）；合并 Release PR 即完成发布：
    - Actions 自动打 tag `vX.Y.Z`、发布 GitHub Release（正文即 changelog）

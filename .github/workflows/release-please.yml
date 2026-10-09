@@ -1,5 +1,6 @@
 # Release Please —— 版本号自动维护，对应 docs/guide/release.md「发布与更新」：
-#   约定式提交（feat: 升 MINOR / fix: 升 PATCH / 标注 BREAKING CHANGE 升 MAJOR）
+#   普通 PR 仅采用 Squash and merge，squash commit title 使用 PR 标题；Release Please 解析 main 上每个 PR 的单一提交
+#   （feat: 升 MINOR / fix: 升 PATCH / 标注 BREAKING CHANGE 升 MAJOR）
 #   → push main 后自动开出（或更新）Release PR（package.json 版本 bump + CHANGELOG）
 #   → 维护者合并 Release PR → 自动打 tag vX.Y.Z 并发布 GitHub Release（正文即 changelog）
 #   → main 版本号变更再次触发 CF Workers Builds 部署，/health 显示新版本。
