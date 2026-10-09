@@ -71,7 +71,7 @@ npm run typecheck
    - 构建命令：**留空**；部署命令：**保持向导默认 `npx wrangler deploy`，无需改动**——置备（创建/复用同名 D1 → 注入 database_id 到构建工作区，**不改动你的仓库** → 幂等迁移）由 `npm install` 的 postinstall 钩子自动完成，先于部署执行
    - 关闭「启用预览构建」（Phase 1 无 preview 分支部署需求）
 3. 部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"status":"ok","version":"…"}`；再 `curl https://hodor.<你的子域>.workers.dev/selfcheck` 做完整自检——刚部署、变量未配时预期 503 与 `failed` 数组（逐条点名缺失的 5 条必填变量，不回显任何密钥值），据此到面板 Worker → 设置 → 变量和机密 补齐（3 个 Secret 用机密类型，`SUPPORT_CHAT_ID` / `ADMIN_IDS` 用文本；4 条选填按需、均有默认值）；然后访问 `/setwebhook/<ADMIN_SECRET>` 完成绑定，再开一次 `/selfcheck` 应全绿返回 200，即可真机聊天
-4. 此后 **push 你的 fork 即自动构建部署**；上游更新 → fork 页点 **Sync fork** → 自动部署
+4. 此后 **push 你的 fork 即自动构建部署**；上游更新 → fork 页点 **Sync fork** → 自动部署。另有可选的定时自动同步 workflow（默认关闭，开启方法见 [发布与更新](docs/guide/release.md) 的「自动跟随更新」）
 
 > 排错：报 `The database … could not be found (7404 / 10181)` = 自动置备未生效——先查构建日志**安装阶段**的 `[provision]` 输出；兜底：把部署命令改为 `npm run deploy`（显式置备后部署）再重建。
 > 部署后变量丢失：确认部署所用代码包含 `keep_vars: true`（本仓库已配置，wrangler.jsonc）；仍丢失时检查变量是否加在了别的 Worker 上。

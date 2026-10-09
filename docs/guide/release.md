@@ -39,6 +39,27 @@
 3. 自己的 Cloudflare 随即自动构建、执行数据库迁移并部署
 4. 访问 `/selfcheck` 复查自检全绿、`/health` 版本号已更新
 
+### 可选：自动跟随更新
+
+仓库自带 `Sync fork from upstream` workflow（`.github/workflows/sync-fork.yml`），提供可选的每周定时同步 + 手动触发。默认**关闭**——GitHub 对 fork 仓库的 Actions 与定时工作流默认禁用，不主动启用就不会运行，对手动跟随的用户零影响。
+
+**开启**（自己 fork 的 GitHub 页面，三步）：
+
+1. 点开 **Actions** 标签
+2. 首次会提示 fork 未启用 Actions，点 **I understand my workflows, go ahead and enable them**
+3. 左侧列表找到 **Sync fork from upstream**，进入后点 **Enable workflow**，即开启每周定时同步
+
+**关闭**：同一页面该 workflow 右侧 **⋯ → Disable workflow**（设置随上游同步持久保留，日后想恢复再 Enable 即可）。
+
+**手动立即同步**：该 workflow 页面右上 **Run workflow** 按钮，不必等每周定时。
+
+行为边界：
+
+- 同步用 `git merge --ff-only` 快进：**改过自己 fork 的 main**（有本地提交）时同步失败并明确报错，绝不自动制造合并提交或解冲突——按上一节手动流程处理，或自行解冲突后再同步
+- GitHub 对 **60 天无活动**的仓库会自动停用定时工作流（邮件通知），到 Actions 页重新 Enable 即恢复
+- workflow 用 GITHUB_TOKEN 推送不会重触发 GitHub Actions 的 `on:push`，但会触发 Cloudflare Workers Builds 构建部署；极端未触发时手动点一次 **Sync fork** 兜底
+- 同步只动代码：D1 数据、面板「变量和机密」等部署产物不受影响
+
 ## 发布回归清单
 
 阶段 7 起每次发版的固定检查面（维护者执行）：

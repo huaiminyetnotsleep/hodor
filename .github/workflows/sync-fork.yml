@@ -1,0 +1,43 @@
+# fork 可选的自动跟随上游更新工作流：定时把 fork 的 main 快进到官方仓库
+# （huaiminyetnotsleep/hodor）的 main，push 触发 Cloudflare 自动构建部署。
+# 默认关闭——GitHub 对 fork 仓库的 Actions 与定时工作流默认禁用，不主动启用
+# 即不会运行，对不启用它的 fork 零影响。
+# 开启 / 关闭 / 手动触发方法见 docs/guide/release.md「可选：自动跟随更新」。
+name: Sync fork from upstream
+
+on:
+  schedule:
+    - cron: '23 2 * * 1' # 每周一 UTC 02:23（错开整点，避开高峰拥堵）
+  workflow_dispatch: {} # 手动触发：Actions 页 → Run workflow，立即同步一次
+
+# 最小授权：仅推送 main 所需的写权限
+permissions:
+  contents: write
+
+# 防重入：上一次同步未结束时跳过新触发，不取消进行中的那次
+concurrency:
+  group: sync-fork
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0 # ff-only 快进需要完整提交历史
+
+      # --ff-only 是安全边界：fork 的 main 一旦有自己的提交（改过），同步立即
+      # 失败并明确报错，绝不自动制造合并提交或解冲突——此时按文档手动处理。
+      - name: Fetch upstream and fast-forward main
+        run: |
+          git remote add upstream https://github.com/huaiminyetnotsleep/hodor.git
+          git fetch upstream main
+          git merge --ff-only upstream/main
+
+      # GITHUB_TOKEN 推送不会重触发本仓库的 on:push 工作流（防递归），
+      # 但会触发 GitHub App webhook——Cloudflare Workers Builds 照常构建部署；
+      # 极端情况下未触发时，到 fork 页手动点一次 Sync fork 兜底。
+      - name: Push origin main
+        run: git push origin main
