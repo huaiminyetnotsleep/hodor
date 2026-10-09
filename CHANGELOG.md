@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.8.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.7.0...v1.8.0) (2026-10-09)
+
+
+### Features
+
+* add admin broadcast workflow ([0f11ec7](https://github.com/huaiminyetnotsleep/hodor/commit/0f11ec736fcb5208d03fdf945b29bc715e70145a))
+* add admin broadcast workflow ([f791b5f](https://github.com/huaiminyetnotsleep/hodor/commit/f791b5f2f5aaa99135ef19e2f832bec29949a001))
+* **deploy:** derive D1 database name from Worker name for multi-instance isolation ([f30e1c2](https://github.com/huaiminyetnotsleep/hodor/commit/f30e1c2e71dda033c62bbdd975ec1308f9093bd1))
+
 ## [1.7.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.6.0...v1.7.0) (2026-10-09)
 
 
