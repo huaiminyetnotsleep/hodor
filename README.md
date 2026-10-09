@@ -17,6 +17,10 @@
 </div>
 
 <p align="center">
+  <img src="docs/public/social-preview.png" alt="Hodor Telegram 话题式客服机器人：一人一话题，消息不串线" width="860" />
+</p>
+
+<p align="center">
   <img src="docs/public/prototype.svg" alt="Hodor 功能示意：用户私聊验证后转发到客服群话题，管理员回复直达用户私聊" width="860" />
 </p>
 

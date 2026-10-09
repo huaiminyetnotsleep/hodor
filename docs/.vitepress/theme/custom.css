@@ -12,3 +12,56 @@
     font-size: 40px;
   }
 }
+
+.home-hero-images {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  max-width: 520px;
+}
+
+.home-hero-icon {
+  flex: 0 0 80px;
+  width: 80px;
+  height: 80px;
+  border: 2px solid var(--vp-c-divider);
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.home-hero-banner {
+  display: block;
+  flex: 1 1 0;
+  min-width: 0;
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+}
+
+@media (max-width: 959px) {
+  .VPHomeHero .image-container {
+    height: auto;
+  }
+
+  .VPHomeHero .image {
+    margin-bottom: 16px;
+  }
+
+  .home-hero-images {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .home-hero-banner {
+    flex: 0 0 auto;
+  }
+}
+
+@media (min-width: 960px) {
+  .home-hero-icon {
+    flex-basis: 112px;
+    width: 112px;
+    height: 112px;
+  }
+}

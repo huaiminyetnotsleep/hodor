@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#061225"/>
+      <stop offset="0.55" stop-color="#0a1c38"/>
+      <stop offset="1" stop-color="#07152a"/>
+    </linearGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#93dcff"/>
+    </linearGradient>
+    <linearGradient id="phone" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#142c4c"/>
+      <stop offset="1" stop-color="#09182c"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#30b7ff"/>
+      <stop offset="1" stop-color="#1479e8"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd27a"/>
+      <stop offset="1" stop-color="#f48132"/>
+    </linearGradient>
+    <radialGradient id="glowBlue">
+      <stop offset="0" stop-color="#1267bc" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#1267bc" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowOrange">
+      <stop offset="0" stop-color="#f47a2f" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#f47a2f" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" fill="none" stroke="#2e6aa4" stroke-opacity="0.15" stroke-width="1"/>
+    </pattern>
+    <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000814" flood-opacity="0.42"/>
+    </filter>
+  </defs>
+  <rect width="1280" height="640" fill="url(#bg)"/>
+  <ellipse cx="260" cy="300" rx="410" ry="350" fill="url(#glowBlue)"/>
+  <ellipse cx="970" cy="300" rx="430" ry="350" fill="url(#glowOrange)"/>
+  <rect y="380" width="1280" height="260" fill="url(#grid)" opacity="0.65"/>
+
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M303 383H414C450 383 449 465 504 465H655" stroke="#269cff" stroke-width="3" stroke-opacity="0.9"/>
+    <path d="M780 448C850 448 850 156 922 156H968" stroke="#31aaff" stroke-width="3" stroke-opacity="0.9"/>
+    <path d="M780 448C850 448 850 253 922 253H968" stroke="#2ed6d1" stroke-width="3" stroke-opacity="0.88"/>
+    <path d="M780 448C850 448 850 350 922 350H968" stroke="#9b79ff" stroke-width="3" stroke-opacity="0.88"/>
+    <path d="M780 448C850 448 850 447 922 447H968" stroke="#ff9f50" stroke-width="3" stroke-opacity="0.9"/>
+  </g>
+  <g filter="url(#softGlow)">
+    <circle cx="414" cy="383" r="6" fill="#55c6ff"/>
+    <circle cx="655" cy="465" r="6" fill="#55c6ff"/>
+    <circle cx="922" cy="156" r="5" fill="#56c3ff"/>
+    <circle cx="922" cy="253" r="5" fill="#4ce5dc"/>
+    <circle cx="922" cy="350" r="5" fill="#b29aff"/>
+    <circle cx="922" cy="447" r="5" fill="#ffc078"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="65" y="91" width="250" height="420" rx="36" fill="#071323" stroke="#3caeff" stroke-width="2"/>
+    <rect x="77" y="105" width="226" height="392" rx="27" fill="url(#phone)"/>
+    <rect x="145" y="112" width="90" height="12" rx="6" fill="#050e1c"/>
+    <circle cx="190" cy="166" r="24" fill="url(#blue)"/>
+    <path d="M179 166L201 154L195 177L189 170L184 174Z" fill="#fff"/>
+    <circle cx="109" cy="242" r="16" fill="#176fc0"/>
+    <circle cx="109" cy="238" r="5" fill="#c8ecff"/>
+    <path d="M100 250C101 242 117 242 118 250" fill="#c8ecff"/>
+    <rect x="133" y="216" width="146" height="74" rx="17" fill="url(#blue)"/>
+    <rect x="150" y="237" width="106" height="8" rx="4" fill="#d8f3ff" fill-opacity="0.92"/>
+    <rect x="150" y="254" width="82" height="7" rx="3.5" fill="#d8f3ff" fill-opacity="0.75"/>
+    <rect x="150" y="270" width="60" height="6" rx="3" fill="#d8f3ff" fill-opacity="0.58"/>
+    <circle cx="109" cy="342" r="16" fill="#183d65"/>
+    <circle cx="109" cy="338" r="5" fill="#9bbfe0"/>
+    <path d="M100 350C101 342 117 342 118 350" fill="#9bbfe0"/>
+    <rect x="133" y="315" width="133" height="58" rx="15" fill="#213b5b"/>
+    <rect x="149" y="334" width="93" height="7" rx="3.5" fill="#a8c3de" fill-opacity="0.72"/>
+    <rect x="149" y="350" width="70" height="6" rx="3" fill="#a8c3de" fill-opacity="0.52"/>
+    <rect x="95" y="448" width="184" height="31" rx="15.5" fill="#0c1e35" stroke="#274b71" stroke-width="1"/>
+    <circle cx="260" cy="463.5" r="13" fill="url(#blue)"/>
+    <path d="M254 464L267 457L263 471L259 466L255 468Z" fill="#fff"/>
+  </g>
+
+  <text x="365" y="194" fill="url(#title)" font-family="Arial, Helvetica, sans-serif" font-size="92" font-weight="800" letter-spacing="-3">Hodor</text>
+  <text x="369" y="248" fill="#d9e9fa" font-family="Arial, Helvetica, sans-serif" font-size="29" font-weight="600">Telegram Customer Support Bot</text>
+  <text x="370" y="297" fill="#e9f3ff" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="500">One user. One topic. <tspan fill="#45c7ff" font-weight="700">No crossed messages.</tspan></text>
+
+  <g filter="url(#shadow)">
+    <rect x="968" y="122" width="250" height="68" rx="19" fill="#0c2039" stroke="#238fef" stroke-width="2"/>
+    <rect x="968" y="219" width="250" height="68" rx="19" fill="#0c2039" stroke="#22c7c5" stroke-width="2"/>
+    <rect x="968" y="316" width="250" height="68" rx="19" fill="#0c2039" stroke="#8d6bea" stroke-width="2"/>
+    <rect x="968" y="413" width="250" height="68" rx="19" fill="#0c2039" stroke="#f08a40" stroke-width="2"/>
+  </g>
+  <g>
+    <circle cx="1008" cy="156" r="20" fill="#176fc0"/>
+    <circle cx="1008" cy="151" r="6" fill="#d9f2ff"/>
+    <path d="M997 164C999 154 1017 154 1019 164" fill="#d9f2ff"/>
+    <rect x="1040" y="145" width="87" height="8" rx="4" fill="#7392b5"/>
+    <rect x="1040" y="160" width="60" height="6" rx="3" fill="#496a90"/>
+    <rect x="1152" y="140" width="46" height="33" rx="10" fill="#102b49" stroke="#278fe8"/>
+    <path d="M1163 149H1188V163H1173L1167 168V163H1163Z" fill="none" stroke="#53bcff" stroke-width="2" stroke-linejoin="round"/>
+    <circle cx="1170" cy="156" r="1.5" fill="#53bcff"/><circle cx="1176" cy="156" r="1.5" fill="#53bcff"/><circle cx="1182" cy="156" r="1.5" fill="#53bcff"/>
+
+    <circle cx="1008" cy="253" r="20" fill="#118b91"/>
+    <circle cx="1008" cy="248" r="6" fill="#d8ffff"/>
+    <path d="M997 261C999 251 1017 251 1019 261" fill="#d8ffff"/>
+    <rect x="1040" y="242" width="87" height="8" rx="4" fill="#7392b5"/>
+    <rect x="1040" y="257" width="60" height="6" rx="3" fill="#496a90"/>
+    <rect x="1152" y="237" width="46" height="33" rx="10" fill="#102b49" stroke="#20bfc0"/>
+    <path d="M1175 244L1178 249L1184 250L1180 255L1180 261L1175 258L1170 261L1170 255L1166 250L1172 249Z" fill="none" stroke="#65e6dd" stroke-width="2" stroke-linejoin="round"/>
+
+    <circle cx="1008" cy="350" r="20" fill="#674fc0"/>
+    <circle cx="1008" cy="345" r="6" fill="#eee8ff"/>
+    <path d="M997 358C999 348 1017 348 1019 358" fill="#eee8ff"/>
+    <rect x="1040" y="339" width="87" height="8" rx="4" fill="#7392b5"/>
+    <rect x="1040" y="354" width="60" height="6" rx="3" fill="#496a90"/>
+    <rect x="1152" y="334" width="46" height="33" rx="10" fill="#102b49" stroke="#8b70df"/>
+    <rect x="1163" y="342" width="24" height="17" rx="3" fill="none" stroke="#c1b0ff" stroke-width="2"/>
+    <path d="M1163 347H1187" stroke="#c1b0ff" stroke-width="2"/>
+
+    <circle cx="1008" cy="447" r="20" fill="#b8632d"/>
+    <circle cx="1008" cy="442" r="6" fill="#fff0d9"/>
+    <path d="M997 455C999 445 1017 445 1019 455" fill="#fff0d9"/>
+    <rect x="1040" y="436" width="87" height="8" rx="4" fill="#7392b5"/>
+    <rect x="1040" y="451" width="60" height="6" rx="3" fill="#496a90"/>
+    <rect x="1152" y="431" width="46" height="33" rx="10" fill="#102b49" stroke="#e78b48"/>
+    <path d="M1175 438L1186 458H1164Z" fill="none" stroke="#ffc078" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M1175 445V451M1175 454.5V455" stroke="#ffc078" stroke-width="2" stroke-linecap="round"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <ellipse cx="720" cy="497" rx="62" ry="13" fill="#0b2240" stroke="#1789ec" stroke-width="2"/>
+    <path d="M658 497V521C658 529 686 536 720 536S782 529 782 521V497" fill="#0a1c35" stroke="#1789ec" stroke-width="2"/>
+    <path d="M658 508C658 516 686 523 720 523S782 516 782 508" fill="none" stroke="#125da9" stroke-width="2"/>
+    <ellipse cx="720" cy="497" rx="62" ry="13" fill="#102e55" stroke="#42b5ff" stroke-width="2"/>
+    <path d="M702 494L715 475L725 475L713 496L730 496L713 515L718 501L697 501Z" fill="url(#orange)" filter="url(#softGlow)"/>
+  </g>
+
+  <rect x="395" y="565" width="490" height="38" rx="19" fill="#0b1d35" stroke="#244a70" stroke-width="1"/>
+  <text x="640" y="590" text-anchor="middle" fill="#87bde8" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="700" letter-spacing="2">SELF-HOSTED · CLOUDFLARE WORKERS + D1</text>
+</svg>
