@@ -37,8 +37,7 @@
 
 1. **Fork 本仓库**
 2. **连接 Git**：dashboard → Workers & Pages → Create → Workers → 连接你 fork 的仓库，生产分支选 `main`
-3. **配置环境变量**：Settings → Variables 中按上方表格逐项配置
-4. **部署**：保存后自动触发首次部署；之后每次 push 到 `main` 即自动发布新版本
+3. **部署**：保存后自动触发首次部署；之后每次 push 到 `main` 即自动发布新版本。向导不出现变量表单（`.dev.vars.example` 条目全部注释 = 零提示），变量统一部署后面板配置——按下方「部署后收尾」以 `/selfcheck` 为对照补齐
 
 D1 数据库的创建与绑定（变量名 `HODOR_DB`）、数据表迁移全部由部署脚本自动完成，无需在 dashboard 手动操作。环境变量在 dashboard 配置后不会被后续部署覆盖（wrangler 配置开启了 `keep_vars`）。
 
@@ -47,7 +46,7 @@ D1 数据库的创建与绑定（变量名 `HODOR_DB`）、数据表迁移全部
 按以下顺序收尾，逐步把自检清零：
 
 1. **存活确认**：浏览器打开 `https://<worker-url>/health`，应返回 `{"status":"ok","version":"…"}`（存活探针 + 版本号）
-2. **完整自检**：浏览器打开 `https://<worker-url>/selfcheck`。变量未配齐时返回 503 与 `failed` 数组，逐条列出缺失 / 非法的变量等待修复项（不回显密钥值）——据此回到 Settings → Variables 补齐 5 条必填变量
+2. **完整自检**：浏览器打开 `https://<worker-url>/selfcheck`。变量未配齐时返回 503 与 `failed` 数组，逐条列出缺失 / 非法的变量等待修复项（不回显密钥值）——据此回到 Settings → Variables 补齐 5 条必填变量（`TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` / `ADMIN_SECRET` 用**机密（Secret）**类型，`SUPPORT_CHAT_ID` / `ADMIN_IDS` 用**文本（Text）**类型；4 条选填按需配置，均有内置默认值）
 3. **绑定 webhook**：浏览器打开 `https://<worker-url>/setwebhook/<你的 ADMIN_SECRET>`，回显 bot 身份即成功（详见[运维手册](/guide/ops.md)）
 4. **复查自检**：再次打开 `/selfcheck`，应全绿返回 `{"status":"ok","version":"…"}`
 5. **聊天验收**：用 Telegram 账号直接给 bot 发文本（无需 `/start`）→ 收到欢迎语 + 数学题验证码 → 点对答案 → 群组出现该用户的 topic（置顶含 ✅ 已验证）且消息中继；管理员在 topic 回复，用户私聊收到

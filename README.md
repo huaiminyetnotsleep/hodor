@@ -24,7 +24,7 @@ Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题�
 
 **环境变量**
 
-7. 部署后在面板 Worker → 设置 → 变量和机密 配置 5 条必填项（模板与说明见 `.dev.vars.example`，一次即可，`keep_vars: true` 已保证跨部署持久）；本地调试可选：`cp .dev.vars.example .dev.vars` 后 `npx wrangler dev`
+7. 部署后在面板 Worker → 设置 → 变量和机密 配置 5 条必填项（部署向导 / Deploy 按钮不再代收变量——表单零提示，统一部署后面板配置；模板与说明见 `.dev.vars.example`，一次即可，`keep_vars: true` 已保证跨部署持久）；本地调试可选：`cp .dev.vars.example .dev.vars` 后 `npx wrangler dev`
 
 ## 环境变量说明（模板与注释见 `.dev.vars.example`）
 
@@ -38,11 +38,12 @@ Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题�
 | `MAX_MESSAGES_PER_MINUTE` | 选填 | 每用户每分钟转发上限，超限触发重验（阶段 4 生效） | 否 | `20` |
 | `VERIFY_TTL_HOURS` | 选填 | 验证有效期小时数，0=永久（阶段 5 生效） | 否 | `0` |
 | `MAX_ATTEMPTS` | 选填 | 同一 update 处理失败重试上限，超限标记 failed 跳过 | 否 | `3` |
+| `WELCOME_TEXT` | 选填 | 自定义欢迎语（字面 `\n` 解释为换行） | 否 | 内置默认文案 |
 
 注入方式（⚠️ 2026-09-28 实测与官方文档核实）：`wrangler deploy` 默认按配置重置绑定，但本仓库已设 **`keep_vars: true`**——面板「变量和机密」配置的变量（Text 或机密均可）**跨部署持久**；官方文档另明确 **Secrets 永不因部署删除**。
 
-- **全部 8 个**：5 条必填先配（当前阶段即用），3 条选填按需（对应功能阶段生效）；3 个 Secret 建议用「机密」类型
-- **本地调试（可选）**：`cp .dev.vars.example .dev.vars` 后 `npx wrangler dev`（`.dev.vars` 已被 git 忽略），与面板互不影响
+- **全部 9 个**：5 条必填先配（当前阶段即用），4 条选填按需；3 个 Secret 建议用「机密」类型
+- **本地调试（可选）**：`cp .dev.vars.example .dev.vars` 后逐行取消注释并填值（必填 5 条必须启用），再 `npx wrangler dev`（`.dev.vars` 已被 git 忽略），与面板互不影响
 - 也可用 `npx wrangler secret put <NAME>`（Secret 类型，等价持久）
 
 ## 开发流程
@@ -66,10 +67,10 @@ npm run typecheck
 1. Fork `huaiminyetnotsleep/hodor` 到自己的 GitHub 账号
 2. Cloudflare 面板 → **Workers & Pages → Create → Workers → Import a repository** → 授权 Cloudflare GitHub App → 选中**你的 fork**，向导逐项配置：
    - 项目名称：`hodor`
-   - 变量表单：5 条必填值在此一次填齐（向导按 `.dev.vars.example` 生成表单项）；`keep_vars: true` 已在仓库配置，这些值**跨部署持久，fork 使用者零代码改动**（3 个 Secret 建议机密类型）
+   - 变量表单：**不出现**（`.dev.vars.example` 条目全部注释 = 零提示，见该文件头部说明）；所有变量统一部署后在面板「设置 → 变量和机密」配置（见第 3 步 `/selfcheck` 指引），`keep_vars: true` 已在仓库配置，配好的值**跨部署持久，fork 使用者零代码改动**
    - 构建命令：**留空**；部署命令：**保持向导默认 `npx wrangler deploy`，无需改动**——置备（创建/复用同名 D1 → 注入 database_id 到构建工作区，**不改动你的仓库** → 幂等迁移）由 `npm install` 的 postinstall 钩子自动完成，先于部署执行
    - 关闭「启用预览构建」（Phase 1 无 preview 分支部署需求）
-3. 部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"status":"ok","version":"…"}`；再 `curl https://hodor.<你的子域>.workers.dev/selfcheck` 做完整自检——全部通过返回 200，有未通过项返回 503 与 `failed` 数组（逐条列出待修复项，未配置变量的新实例也能用它定位缺失项，不回显任何密钥值）；最后访问 `/setwebhook/<ADMIN_SECRET>` 完成绑定
+3. 部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"status":"ok","version":"…"}`；再 `curl https://hodor.<你的子域>.workers.dev/selfcheck` 做完整自检——刚部署、变量未配时预期 503 与 `failed` 数组（逐条点名缺失的 5 条必填变量，不回显任何密钥值），据此到面板 Worker → 设置 → 变量和机密 补齐（3 个 Secret 用机密类型，`SUPPORT_CHAT_ID` / `ADMIN_IDS` 用文本；4 条选填按需、均有默认值）；然后访问 `/setwebhook/<ADMIN_SECRET>` 完成绑定，再开一次 `/selfcheck` 应全绿返回 200，即可真机聊天
 4. 此后 **push 你的 fork 即自动构建部署**；上游更新 → fork 页点 **Sync fork** → 自动部署
 
 > 排错：报 `The database … could not be found (7404 / 10181)` = 自动置备未生效——先查构建日志**安装阶段**的 `[provision]` 输出；兜底：把部署命令改为 `npm run deploy`（显式置备后部署）再重建。
@@ -88,7 +89,7 @@ npm run typecheck
 
 - 副本仓库名默认取项目名——你的账号下已有同名仓库会报「已存在具有该名称的存储库」（仓库所有者部署请走路径一直接导入现有仓库）
 - 报「无法获取存储库内容」多为瞬时失败：确认 URL 为标准 HTTPS 地址（非 `git@…` SSH 形式）、仓库 Public，稍后重试或改走路径一
-- 其余置备项（D1 / 6 变量 / 部署命令）与路径一相同；`.dev.vars.example` 一职两用（本地开发模板 + 表单清单）
+- 其余置备项（D1 / 部署命令）与路径一相同；表单零变量提示，变量与路径一相同，部署后面板配置（见路径一第 3 步）；`.dev.vars.example` 是本地开发模板（其表单清单用途现为零提示设计）
 
 ### 路径三：手工 wrangler（不依赖 GitHub，救急/本地验证用）
 
@@ -108,7 +109,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 |---|---|---|
 | **配置即资源**（IaC in repo）：平台按声明置备并回写 | Render `render.yaml`、CF 模板向导/按钮 | wrangler.jsonc 即声明式资源描述；路径二（按钮）由平台置备 D1 |
 | **置备/迁移是部署管线的独立阶段** | Heroku release phase、Render `preDeployCommand`、Fly `release_command` | `scripts/deploy.mjs`：云端经 postinstall 钩子（`WORKERS_CI=1` 门控）自动执行，本地 `npm run deploy` 显式执行，均先于部署 |
-| **平台侧建库 + env 注入引用**（连接信息不进仓库） | Vercel Marketplace、Heroku Add-ons（`DATABASE_URL` 模式） | 9 个变量全部走表单/Secret；D1 是同平台 binding（真实 id 不进仓库，构建时按名字解析注入），故用前两种模式 |
+| **平台侧建库 + env 注入引用**（连接信息不进仓库） | Vercel Marketplace、Heroku Add-ons（`DATABASE_URL` 模式） | 9 个变量全部走面板「变量和机密」/ Secret（部署表单零提示）；D1 是同平台 binding（真实 id 不进仓库，构建时按名字解析注入），故用前两种模式 |
 
 业界同样没有的第四种——让用户手改配置文件里的资源 ID——正是本方案要消除的。
 

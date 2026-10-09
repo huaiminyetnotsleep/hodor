@@ -10,7 +10,7 @@ cp .dev.vars.example .dev.vars # .dev.vars 已被 git 忽略，不会进入提�
 ```
 
 ::: tip
-测试所需的变量已由 `vitest.config.ts` 显式注入（不依赖本地 `.dev.vars`，不同机器结果一致）；`.dev.vars` 供 `wrangler dev` 手动运行使用，值可先用 `.dev.vars.example` 模板，真机联调时再填入真实 token。
+测试所需的变量已由 `vitest.config.ts` 显式注入（不依赖本地 `.dev.vars`，不同机器结果一致）；`.dev.vars` 供 `wrangler dev` 手动运行使用——模板条目默认全部注释，复制后逐条取消注释并填值（必填 5 条必须启用，选填按需），真机联调时再填入真实 token。
 :::
 
 文档站（本站）的依赖独立装在 `docs/` 下，首次运行会自动安装：
