@@ -1,4 +1,4 @@
-// 七表齐备 + 关键约束生效 + settings 读写冒烟（T04）
+// 八表齐备 + 关键约束生效 + settings 读写冒烟（T04；0005 broadcasts 随全用户广播任务加入）
 // 原则：本阶段尚无 store 层，直接用 env.HODOR_DB 裸 SQL 断言 schema 本身
 import { applyD1Migrations, env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -8,8 +8,8 @@ beforeAll(async () => {
   await applyD1Migrations(env.HODOR_DB, env.TEST_MIGRATIONS);
 });
 
-describe("schema: 七表齐备", () => {
-  it("sqlite_master 恰好包含七张业务表", async () => {
+describe("schema: 八表齐备", () => {
+  it("sqlite_master 恰好包含八张业务表", async () => {
     const { results } = await env.HODOR_DB.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table'" +
         // 排除内部表：sqlite_%（SQLite 内部）、d1_migrations（wrangler 迁移台账）、
@@ -19,6 +19,7 @@ describe("schema: 七表齐备", () => {
     ).all<{ name: string }>();
     expect(results.map((row) => row.name)).toEqual([
       "bots",
+      "broadcasts",
       "delete_confirmations",
       "messages",
       "processed_updates",
@@ -105,5 +106,72 @@ describe("schema: settings 读写冒烟", () => {
       "SELECT value FROM settings WHERE key = 'verify_enabled'",
     ).first<{ value: string }>();
     expect(row?.value).toBe("0");
+  });
+});
+
+describe("schema: broadcasts 约束（迁移 0005）", () => {
+  // 部分唯一索引以 bot_id 为维度且文件内 D1 共享——每个用例独占一个 bot，
+  // 避免用例间草稿 / sending 占用互相冲突
+  const insert = (
+    botId: number,
+    sourceUpdateId: number,
+    status = "preparing",
+    overrides: Record<string, number> = {},
+  ) => {
+    const columns = Object.keys(overrides).map((c) => `, ${c}`);
+    const placeholders = Object.keys(overrides).map(() => ", ?").join("");
+    return env.HODOR_DB.prepare(
+      `INSERT INTO broadcasts (bot_id, source_update_id, initiator_user_id, support_chat_id, message_html, status, expires_at${columns})
+       VALUES (?, ?, 9, -100, '<b>x</b>', ?, ?${placeholders})`,
+    ).bind(
+      botId,
+      sourceUpdateId,
+      status,
+      new Date(Date.now() + 60_000).toISOString(),
+      ...Object.values(overrides),
+    ).run();
+  };
+
+  it("status 非法值被 CHECK 拒绝；七态枚举全部可插入", async () => {
+    // 每态独占一个 bot（草稿 / sending 部分唯一索引以 bot 为维度，不能并存）
+    for (const [i, status] of [
+      "preparing",
+      "pending",
+      "sending",
+      "completed",
+      "cancelled",
+      "expired",
+      "failed",
+    ].entries()) {
+      await insert(101 + i, 1000 + i, status);
+    }
+    await expect(insert(199, 2000, "bogus")).rejects.toThrow();
+  });
+
+  it("计数 CHECK 非负：负数 expected/success/failure 被拒", async () => {
+    await expect(insert(102, 3001, "preparing", { expected_count: -1 })).rejects.toThrow();
+    await expect(insert(102, 3002, "preparing", { success_count: -1 })).rejects.toThrow();
+    await expect(insert(102, 3003, "preparing", { failure_count: -1 })).rejects.toThrow();
+  });
+
+  it("UNIQUE (bot_id, source_update_id)：同一发起 update 重复插入被拒", async () => {
+    await insert(103, 4001);
+    await expect(insert(103, 4001)).rejects.toThrow();
+    // 其他 bot 同 update_id 不冲突（bot 维度隔离）
+    await insert(104, 4001);
+  });
+
+  it("部分唯一索引：每 Bot 恰一份 sending、恰一份 preparing/pending 草稿", async () => {
+    // sending 唯一：第二份 sending 被拒；终态行并存无碍
+    await insert(105, 5001, "sending");
+    await expect(insert(105, 5002, "sending")).rejects.toThrow();
+    await insert(105, 5003, "completed");
+    // 草稿唯一：preparing 与 pending 同占一份（跨状态并存被拒）
+    await insert(105, 5004, "preparing");
+    await expect(insert(105, 5005, "pending")).rejects.toThrow();
+    // sending 与草稿可并存（design：草稿可与发送中任务并存）——需独立 bot
+    //（105 已同时占用两份名额）
+    await insert(106, 5006, "sending");
+    await insert(106, 5007, "preparing");
   });
 });

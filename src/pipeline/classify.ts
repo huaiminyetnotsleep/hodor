@@ -4,19 +4,21 @@
  * 输入是 webhook 解析出的 JSON（不可信），所以一切字段先做运行时形态校验，
  * 任何不完整 / 非预期形态一律 'ignore'（安全忽略，零副作用）。
  *
- * 规则（design.md「出站管线/入站管线」）：
+ * 规则（design.md「出站管线/入站管线」+ 全用户广播 2026-10-09）：
  * - callback_query 存在 → 回调形态（id / from.id / message.message_id /
  *   message.chat.id 数值全合法）后按 chat 归属：
  *   chat.type === 'private' → callback（私聊题面按钮，T27）；
- *   chat.id === SUPPORT_CHAT_ID → group_callback（客服群内按钮，T38/T40 确认）；
+ *   chat.id === SUPPORT_CHAT_ID → group_callback（客服群内按钮，T38/T40/T 广播确认）；
  *   其他群 / 畸形 → ignore
  * - 客服群 message 带 forum_topic_closed / forum_topic_reopened + 合法 thread → topic_event
+ * - 客服群无 thread（General）且 text 首 token 为 /broadcast → broadcast（专用入口，
+ *   General 其他消息继续 ignore——不扩大中继范围）
  * - 无 message 且无 callback_query（edited_message / channel_post 等）→ ignore
  * - chat.type === 'private' → inbound（用户私聊）
  * - chat.id === SUPPORT_CHAT_ID 且带 message_thread_id → outbound（topic 内发言）
- * - chat.id === SUPPORT_CHAT_ID 且无 thread（General / 非 topic）→ ignore
  * - 其他 chat → ignore
  */
+import { isBroadcastCommand } from "../copy";
 
 export type UpdateClassification =
   | "inbound"
@@ -24,6 +26,7 @@ export type UpdateClassification =
   | "callback"
   | "group_callback"
   | "topic_event"
+  | "broadcast"
   | "ignore";
 
 /** update.message.from 的最小子集（入站建档 / 出站管理员判定用） */
@@ -151,7 +154,19 @@ export function classifyUpdate(
     if (hasTopicEvent) {
       return validMessageId && validThread && hasClosedEvent !== hasReopenedEvent ? "topic_event" : "ignore";
     }
-    return validThread ? "outbound" : "ignore";
+    if (validThread) return "outbound";
+    // General（无 thread 字段）：仅专用 /broadcast 命令进入广播路径；其余照旧 ignore。
+    // message_thread_id 存在但非法时属于畸形 update，不能误降级成 General。
+    // text 缺失 / 非字符串视同非命令。
+    const hasThreadField = Object.prototype.hasOwnProperty.call(message, "message_thread_id");
+    if (
+      !hasThreadField &&
+      validMessageId &&
+      isBroadcastCommand(typeof message.text === "string" ? message.text : undefined)
+    ) {
+      return "broadcast";
+    }
+    return "ignore";
   }
   return "ignore";
 }

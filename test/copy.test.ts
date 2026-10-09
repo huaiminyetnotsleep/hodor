@@ -28,8 +28,12 @@ import { describe, expect, it } from "vitest";
 import {
   ADMIN_COMMAND_MENU,
   BAN_NOTICE,
+  BROADCAST_FALLBACK_SIGNATURE,
+  BROADCAST_USAGE_NOTICE,
   DEFAULT_WELCOME_TEXT,
   formatBanConfirmed,
+  formatBroadcastControlText,
+  formatBroadcastDoneText,
   formatHelpText,
   formatNoteConfirmed,
   formatPinnedInfo,
@@ -46,6 +50,7 @@ import {
   formatVerifyOnConfirmed,
   formatVerifyQuestion,
   formatVerifyRetryQuestion,
+  isBroadcastCommand,
   isStartCommand,
   NOTE_USAGE_NOTICE,
   UNBOUND_TOPIC_NOTICE,
@@ -307,7 +312,7 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
       const text = formatHelpText(settings);
       for (const command of [
         "/help", "/ban", "/unban", "/note", "/unnote", "/risk", "/unrisk", "/verifymode",
-        "/archive", "/deluser", "/purgemsg", "/wipealldata",
+        "/broadcast", "/archive", "/deluser", "/purgemsg", "/wipealldata",
       ]) {
         expect(text).toContain(command);
       }
@@ -343,7 +348,7 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
     expect(menuCommands).toEqual([
       "help", "ban", "unban", "note", "unnote", "risk", "unrisk",
       "verifyon", "verifyoff", "verifymode",
-      "archive", "deluser", "purgemsg", "wipealldata",
+      "archive", "deluser", "purgemsg", "broadcast", "wipealldata",
     ]);
 
     for (const settings of [
@@ -405,5 +410,39 @@ describe("copy: 阶段 5 新文案定稿（T36/T37/T31/T32）", () => {
     expect(question).toContain("点击下方按钮");
     expect(question).toContain("机器人");
     expect(VERIFY_BUTTON_LABEL).toBe("我不是机器人");
+  });
+});
+
+describe("copy: 全用户广播文案（2026-10-09 任务）", () => {
+  it("isBroadcastCommand 矩阵：命令形态 ✓ / 前缀巧合与其他命令 ✗（isStartCommand 同款口径）", () => {
+    expect(isBroadcastCommand("/broadcast")).toBe(true);
+    expect(isBroadcastCommand("/broadcast@hodor_bot")).toBe(true);
+    expect(isBroadcastCommand("/broadcast 维护通知\n正文")).toBe(true);
+    expect(isBroadcastCommand("/broadcast ")).toBe(true);
+    expect(isBroadcastCommand("/broadcasts")).toBe(false);
+    expect(isBroadcastCommand("/start")).toBe(false);
+    expect(isBroadcastCommand("")).toBe(false);
+    expect(isBroadcastCommand(undefined)).toBe(false);
+    expect(isBroadcastCommand("/BROADCAST")).toBe(false);
+  });
+
+  it("落款回退定稿（2026-10-09 用户变更）：getMe 无显示名 → Hodor（不再是客服公告）", () => {
+    expect(BROADCAST_FALLBACK_SIGNATURE).toBe("Hodor");
+  });
+
+  it("控制消息 / 完成统计文案：预计人数、有效期、成功仅 API 接收、失败不补发逐字体现", () => {
+    const control = formatBroadcastControlText(120, 5);
+    expect(control).toContain("（未发送）");
+    expect(control).toContain("120 名");
+    expect(control).toContain("5 分钟");
+
+    const done = formatBroadcastDoneText(300, 7);
+    expect(done).toContain("成功 300，失败 7");
+    expect(done).toContain("不代表用户已阅读");
+    expect(done).toContain("不自动补发");
+
+    expect(BROADCAST_USAGE_NOTICE).toContain("/broadcast");
+    expect(BROADCAST_USAGE_NOTICE).toContain("标题");
+    expect(BROADCAST_USAGE_NOTICE).toContain("正文");
   });
 });

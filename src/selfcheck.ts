@@ -3,7 +3,7 @@
  * design.md §1——文案即对外契约）。三个函数各自只返回 failed 文案数组
  * （空数组 = 通过），本身不发请求、不写库：
  * - checkEnv：环境变量存在性 / 格式 / 互异 / 选填值域（纯本地计算）
- * - checkTables：一次 sqlite_master 查询比对七表期望集
+ * - checkTables：一次 sqlite_master 查询比对八表期望集
  * - checkWebhook：消费 getWebhookInfo 结果（null = 缺 token，未发起调用）
  *
  * 与 src/env.ts 的分工（design.md 定稿，不抽公共函数强行统一）：env.ts 的
@@ -17,7 +17,7 @@
 import { parseSupportChatId } from "./env";
 import type { TelegramResult, WebhookInfo } from "./telegram/types";
 
-/** 当前 schema 的全部业务表（0001 六表 + 0004 delete_confirmations），与 migrations 目录同评审 */
+/** 当前 schema 的全部业务表（0001 六表 + 0004 delete_confirmations + 0005 broadcasts），与 migrations 目录同评审 */
 const EXPECTED_TABLES = [
   "users",
   "topics",
@@ -26,6 +26,7 @@ const EXPECTED_TABLES = [
   "processed_updates",
   "bots",
   "delete_confirmations",
+  "broadcasts",
 ] as const;
 
 /** 五条必填变量（数组顺序 = 缺失点名顺序） */
@@ -133,7 +134,7 @@ export function checkEnv(env: Cloudflare.Env): string[] {
 }
 
 /**
- * 数据库检查：一次 sqlite_master 全表查询，与七表期望集比对。
+ * 数据库检查：一次 sqlite_master 全表查询，与八表期望集比对。
  * 查询抛错（HODOR_DB 绑定不可用 / D1 故障）→ 单条「不可用」；缺表按
  * EXPECTED_TABLES 顺序逐张列出。sqlite 内部表（sqlite_% / _cf_METADATA /
  * d1_migrations）无需排除——只判期望表的存在性，多余表与自检无关。

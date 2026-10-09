@@ -91,6 +91,17 @@ export interface SendMessageParams {
   message_thread_id?: number;
   /** inline 键盘（T27 验证题按钮）；中继等既有路径不传 */
   reply_markup?: InlineKeyboardMarkup;
+  /**
+   * 受限解析模式（全用户广播专用，2026-10-09 任务）：仅广播公告传 "HTML"
+   * （标签全部由系统生成、内容已转义，见 pipeline/broadcastFormat.ts）；
+   * 普通中继等既有路径不传——保持纯文本语义零变化。
+   */
+  parse_mode?: "HTML";
+  /**
+   * 最小回复参数（广播控制消息回复预览消息用）：只透传 message_id，
+   * 其余 Telegram 字段（quote 系）不暴露——键名即 API 蛇形原样。
+   */
+  reply_parameters?: { message_id: number };
 }
 
 /** sendMessage 出参：新消息 ID */

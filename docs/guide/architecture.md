@@ -21,7 +21,7 @@
                              │ SQL
                              ▼
                        ┌──────────┐
-                       │  D1 数据库 │ （七张表）
+                       │  D1 数据库 │ （八张表）
                        └──────────┘
 ```
 
@@ -41,7 +41,7 @@
 | `/setwebhook/<ADMIN_SECRET>` | GET | `ADMIN_SECRET`（路径段） | 绑定 webhook，token 从 env 读取 |
 | `/deletewebhook/<ADMIN_SECRET>` | GET | 同上 | 解绑 webhook |
 | `/health` | GET | 无 | 存活探针 + 版本号 |
-| `/selfcheck` | GET | 无 | 完整自检：环境变量 / 七张表 / webhook 指向；有未通过项 503 + `failed[]` |
+| `/selfcheck` | GET | 无 | 完整自检：环境变量 / 八张表 / webhook 指向；有未通过项 503 + `failed[]` |
 
 ::: info 鉴权失败的响应约定
 管理端点的所有鉴权失败（secret 缺失、不存在、不正确）一律返回 `401` + 「无效的管理密钥」，**不区分具体原因**，避免给探测者反馈某个 secret 是否存在过。
@@ -56,7 +56,7 @@
 | 检查项 | 内容 |
 | --- | --- |
 | 环境变量 | 5 条必填变量已配置且格式合法（`SUPPORT_CHAT_ID` 为 `-100` 开头整数、`ADMIN_IDS` 可解析出至少一个合法 ID）；三个 Secret 互异；选填变量（`MAX_ATTEMPTS` / `MAX_MESSAGES_PER_MINUTE` / `VERIFY_TTL_HOURS`）已配置但值非法也可定位 |
-| 数据库 | `HODOR_DB` 绑定可用、当前 schema 全部七张表存在（users / topics / messages / settings / processed_updates / bots / delete_confirmations，迁移已执行） |
+| 数据库 | `HODOR_DB` 绑定可用、当前 schema 全部八张表存在（users / topics / messages / settings / processed_updates / bots / delete_confirmations / broadcasts，迁移已执行） |
 | Webhook 绑定 | 通过 `getWebhookInfo` 确认 webhook 已指向本 Worker 的 `/webhook`；未绑定、指向错误地址、Telegram 调用失败均可定位 |
 
 - 全部通过：`200 {"status":"ok","version":"x.y.z"}`
@@ -113,11 +113,36 @@ update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
  │      否 + 普通文本 → 静默忽略
  │ ③ 内容抽取（支持集之外安全忽略）
  │ ④ 管理员 / 开头 → 命令管线（/help /ban /unban /note /unnote /risk /unrisk
- │      /archive /deluser /purgemsg /wipealldata /verifyon /verifyoff /verifymode；
+ │      /broadcast（仅提示去 General）/archive /deluser /purgemsg /wipealldata
+ │      /verifyon /verifyoff /verifymode；
  │      命令不中继不账本；归档/物理删除需绑定，其余按命令语义授权）
  │ ⑤ thread_id 反查 topics → user；native closed topic 不接受新群消息，原生 reopen 服务事件同步 DB
  │ ⑥ open topic 的管理员消息 per-type send 私聊送达 → 成功后写 messages 账本 → 返回 200
 ```
+
+### 全员广播（General → 全体用户私聊）
+
+`/broadcast` 是 General 的专用入口（classify 独立分类；General 其他消息照旧忽略），数据流：
+
+```
+General /broadcast 输入
+  → 管理员鉴权 → 解析标题/正文（CRLF 归一化）→ getMe 取本次落款
+  → 组装冻结 HTML 公告 + 最终可见文本 ≤4096 校验
+  → D1 建 preparing 行（惰性清理过期草稿/滞留任务；UNIQUE (bot_id, source_update_id) 幂等复用）
+  → General 发送 HTML 公告预览 → 回复控制消息（b:y/b:n 按钮）→ pending
+
+发起管理员点击确认（callback b:y:<id>）
+  → 再鉴权（管理员 + 发起人 + 控制消息 ID + 5 分钟窗口）
+  → 冻结收件人 JSON 数组（≤500）→ 原子 pending → sending（每 Bot 恰一份 sending）
+  → 发送前一次性资格复核（整查询交集）
+  → 每位开始发送前检查任务仍为 sending；清库 / 中断时停止剩余收件人
+  → 同一回调请求内顺序逐位私聊发送（HTML；不写 messages 账本、不改用户/话题状态）
+  → 一次 UPDATE 写完成统计（仅 sending 可完成）→ 控制消息改最终统计 → 删行（General 消息是唯一历史）
+```
+
+可靠性语义：任务状态全部落在 broadcasts 表（preparing → pending → sending → 终态删行），webhook 重推按状态幂等续做或修复（completed 重跑只重做统计编辑与删行；未陈旧的 sending 重跑只回 toast，绝不并发第二份发送）。发送循环三态消费：ok 计成功；permanent（含 403 拉黑）计失败继续；429 有界等待（≤10s）后重试恰一次，仍失败计失败继续。
+
+已接受的非原子窗口（Telegram API 与 D1 不能原子提交）：预览 / 控制消息发出后落库失败按补偿文案提示并重推；运行时中断使循环停在半路时，滞留行由惰性清理（超 10 分钟）置 failed 并标记「中断，结果未知」——不自动补发。单次规模建议数百以内；确认与发送在回调请求内完成，无 Cron / Queues / 后台执行器。
 
 ## 验证状态机
 
@@ -167,7 +192,7 @@ update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
 src/
   index.ts          # fetch 入口（路由层分发）
   routes/           # webhook / admin（setwebhook·deletewebhook，含命令菜单注册）/ health 各端点
-  selfcheck.ts      # /selfcheck 的纯检查函数（env / 七表 / webhook，供路由消费）
+  selfcheck.ts      # /selfcheck 的纯检查函数（env / 八表 / webhook，供路由消费）
   pipeline/
     inbound.ts      # 入站管线：三门（封禁/验证/限频）→ topic → 中继 → 账本
     outbound.ts     # 出站管线：命令分流 → 反查绑定 → 中继 → 账本 / 无绑定提示
@@ -177,12 +202,14 @@ src/
     wipe.ts         # /wipealldata（两步确认 → 先删全部群话题 → 清库）
     pinned.ts       # 用户信息置顶卡的建立与刷新
     content.ts      # 内容抽取（文本 + 7 类媒体）与 per-type 中继分发
+    broadcast.ts        # 全用户广播：预览创建、确认回调、同请求内顺序发送循环
+    broadcastFormat.ts  # 公告组装纯函数（/broadcast 解析、HTML 转义、长度校验）
     topicEvents.ts  # 原生话题 close/reopen 同步与删除自愈
-    classify.ts     # update 分类（分流到入站 / 出站 / 回调）
+    classify.ts     # update 分类（分流到入站 / 出站 / 回调 / General 广播）
     errors.ts       # 错误分类（可重试 / 永久）
   copy.ts           # 用户可见文案唯一集中点（欢迎语 / 置顶 / 验证 / 命令 / 提示）
   store/            # users / topics / messages / settings / processedUpdates /
-                    # deleteConfirmations / bots 按表分模块；wipe（跨表清空）/ util（共享工具）
+                    # deleteConfirmations / broadcasts / bots 按表分模块；wipe（跨表清空）/ util（共享工具）
   telegram/         # client.ts：API 调用与错误分类的唯一出口
 ```
 

@@ -99,6 +99,16 @@ export function isStartCommand(text: string | undefined): boolean {
   return /^\/start(@\S+)?(\s|$)/.test(text ?? "");
 }
 
+/**
+ * /broadcast 命令判定（全用户广播）：`/broadcast` 本身、`/broadcast@bot`、
+ * 带参数形态均算；`/broadcasts` 这类前缀巧合不算。undefined / 非命令 → false。
+ * 仅客服群 General（无 message_thread_id）由 classify 据此分流到广播管线。
+ */
+export function isBroadcastCommand(text: string | undefined): boolean {
+  if (text === "/broadcast") return true;
+  return /^\/broadcast(@\S+)?(\s|$)/.test(text ?? "");
+}
+
 /* ------------------------------------------------------------------ */
 /* 阶段 4：验证（T27）/ 限频（T29）/ 封禁（T35）/ 命令（T34）文案        */
 /* ------------------------------------------------------------------ */
@@ -182,6 +192,7 @@ export function formatHelpText(settings: HelpSettings): string {
     "/unnote - 清除用户备注",
     "/risk - 标记高危用户",
     "/unrisk - 取消高危标记",
+    "/broadcast - 向全部用户群发公告（在客服群 General 中使用，需预览确认）",
     "/archive - 软归档当前用户（关闭话题，保留绑定、历史与备注）",
     "/deluser - 物理删除当前用户及群内话题（需二次确认；不删除私聊历史）",
     "/purgemsg - 清理本话题可追踪群消息并重置置顶（话题关闭时先在 Telegram 重开）",
@@ -239,6 +250,7 @@ export const ADMIN_COMMAND_MENU: readonly { command: string; description: string
   { command: "archive", description: "软归档本话题用户" },
   { command: "deluser", description: "物理删除用户及本话题（需确认）" },
   { command: "purgemsg", description: "清理本话题可追踪群消息" },
+  { command: "broadcast", description: "向全部用户群发公告（General 使用）" },
   { command: "wipealldata", description: "删除全部话题并清空数据（两步确认）" },
 ];
 
@@ -419,3 +431,125 @@ export const WIPE_TOAST_CANCELLED = "已取消，未清空任何数据。";
 
 /** wipe 回调 toast：确认后开始执行 */
 export const WIPE_TOAST_RUNNING = "已确认，正在清空…";
+
+/* ------------------------------------------------------------------ */
+/* 全用户广播（2026-10-09 任务）：输入提示 / 控制消息状态 / 结束统计文案  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * getMe 成功但无显示名（first_name 空白）时的落款回退（PRD R6，2026-10-09
+ * 用户变更：不再回退「客服公告」）。获取失败仍不出可确认预览、不用库存旧名。
+ */
+export const BROADCAST_FALLBACK_SIGNATURE = "Hodor";
+
+/**
+ * /broadcast 用法提示（PRD R7/R8）：在 General 中回发；标题与正文均必填、
+ * 超长拒绝后引导修改。
+ */
+export const BROADCAST_USAGE_NOTICE =
+  "用法：在客服群 General 中发送一条完整消息——\n/broadcast 公告标题\n\n正文（可含空行，按普通文字发送）\n\n标题与正文均必填，二者以第一个换行分隔。";
+
+/** Topic 内发起只提示去 General（design §3.1）：不创建广播、绝不中继给该用户 */
+export const BROADCAST_TOPIC_REDIRECT =
+  "广播请在客服群 General 中发起：到 General 发送 /broadcast + 标题与正文（首行命令，换行后为正文）。";
+
+/** 非管理员发起（General 回发；与既有命令提示同语义） */
+export const BROADCAST_NOT_ADMIN_NOTICE = "该命令仅客服管理员可用。";
+
+/** 预计收件人为 0：只提示，不提供可确认广播（PRD R8） */
+export const BROADCAST_EMPTY_RECIPIENTS_NOTICE =
+  "当前没有符合资格的用户（需有话题绑定且未被禁言），未创建广播。";
+
+/** 预计人数超过 500 上限（design §5.2）：拒绝启动，不截断 */
+export function formatBroadcastTooManyRecipients(limit: number): string {
+  return `符合资格的用户超过 ${limit} 人上限，本次广播未创建。当前版本不支持分组收件人，请联系维护者评估扩容方案。`;
+}
+
+/** 最终可见文本超过 4096（PRD R8）：超长拒绝并提示修改，不截断、不拆分 */
+export function formatBroadcastTooLong(limit: number): string {
+  return `公告全文（含标题、落款与空行）超过 ${limit} 字符上限，请精简后重新发起。`;
+}
+
+/** getMe 失败：不生成可确认预览，不用库存旧名称（PRD R6） */
+export const BROADCAST_GETME_FAILED_NOTICE =
+  "暂时无法获取 Bot 名称，本次广播未发起。请稍后重新发送 /broadcast。";
+
+/** 预览已发出但落库失败（design §7.1 补偿）：尽力回发提示后抛出交重推 */
+export const BROADCAST_PREVIEW_CREATE_FAILED_NOTICE =
+  "预览创建失败，本次广播未发送，请忽略上方消息。";
+
+/** 控制消息发送 permanent（design §7.1 补偿）：按钮无效，任务终止 */
+export const BROADCAST_CONTROL_CREATE_FAILED_NOTICE =
+  "控制消息创建失败，按钮无效：本次广播未发送，请重新发起 /broadcast。";
+
+/** 同 Bot 已有草稿/待确认（design §3.2 / R10）：同一时间只留一份草稿 */
+export const BROADCAST_DRAFT_EXISTS_NOTICE =
+  "已有广播待确认或发送中草稿未过期，请先完成处理或等待其过期后再发起新广播。";
+
+/** 控制消息初始文案（design §3.3「待确认（未发送）」）：预计人数 + 有效期 */
+export function formatBroadcastControlText(expectedCount: number, ttlMinutes: number): string {
+  return [
+    "📋 广播确认（未发送）",
+    `预计收件用户：${expectedCount} 名`,
+    `请在 ${ttlMinutes} 分钟内确认；超时未确认自动作废。仅发起人可操作。`,
+  ].join("\n");
+}
+
+/** 控制消息按钮文案（callback_data 由 pipeline 组装为 b:y|n:<id>） */
+export const BROADCAST_CONFIRM_LABEL = "确认发送";
+export const BROADCAST_CANCEL_LABEL = "取消";
+
+/** 发送中（design §7.3）：移除按钮；编辑为 best-effort，失败不阻断主循环 */
+export const BROADCAST_SENDING_TEXT = "📤 正在发送…";
+
+/** 已取消（未发送） */
+export const BROADCAST_CANCELLED_TEXT = "已取消（未发送）。";
+
+/** 已过期（未发送） */
+export const BROADCAST_EXPIRED_TEXT = "已过期（未发送）。";
+
+/** 确认时资格人数变为 0（design §7.2）：原子改 cancelled，不因人数变化复活 */
+export const BROADCAST_NO_RECIPIENTS_TEXT = "当前无可发送用户，本次广播已取消（未发送）。";
+
+/**
+ * 完成统计（PRD R3）：成功仅表示 Telegram API 接收 + 系统记录成功，不代表
+ * 已读；失败含 API 失败与发送前资格变化，不自动补发。
+ */
+export function formatBroadcastDoneText(successCount: number, failureCount: number): string {
+  return [
+    `✅ 广播完成：成功 ${successCount}，失败 ${failureCount}。`,
+    "成功仅表示 Telegram 已接收，不代表用户已阅读；失败不自动补发。",
+  ].join("\n");
+}
+
+/** 中断（design §7.4 诚实边界）：滞留行陈旧判定后统一文案，不承诺补发 */
+export const BROADCAST_INTERRUPTED_TEXT = "⚠️ 广播中断，结果未知；未自动补发。";
+
+/* ----- 回调 toast（answerCallbackQuery；均 best-effort，失败不阻断） ----- */
+
+/** 非管理员点击（再次鉴权） */
+export const BROADCAST_TOAST_NOT_ADMIN = "该操作仅客服管理员可用。";
+
+/** 点击者不是发起人（R9：只有发起管理员本人可以确认或取消） */
+export const BROADCAST_TOAST_NOT_INITIATOR = "只有发起本次广播的管理员可以确认或取消。";
+
+/** 已有广播正在发送（R10：不自动排多个广播，pending 保留至自然过期） */
+export const BROADCAST_TOAST_BUSY = "已有广播正在发送，请稍后再试。";
+
+/** 重复点击 / 已被并发方裁决 / 行已删除（孤立按钮） */
+export const BROADCAST_TOAST_ALREADY_HANDLED = "该广播已处理或不存在。";
+
+/** 重推重跑看到 sending 未陈旧：绝不并发第二份发送（design §7.4） */
+export const BROADCAST_TOAST_SENDING = "正在发送中，请稍候。";
+
+/** 取消成功 */
+export const BROADCAST_TOAST_CANCELLED = "已取消，未发送。";
+
+/** 过期 */
+export const BROADCAST_TOAST_EXPIRED = "预览已过期，请重新发起 /broadcast。";
+
+/** 确认成功、开始发送 */
+export const BROADCAST_TOAST_CONFIRMED = "已确认，开始发送。";
+
+/** 完成修复路径（重投重跑见 completed） */
+export const BROADCAST_TOAST_DONE = "广播已完成。";

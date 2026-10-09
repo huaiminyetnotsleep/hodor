@@ -10,7 +10,7 @@ export default {
     if (request.method === "GET" && pathname === "/health") return handleHealth();
 
     // 完整自检（T07，阶段 7）：公开只读（与 /health 同无鉴权），逐项检查
-    // env / 七表 / webhook 绑定；非 GET 自然落 404（极薄路由，逻辑在 routes 层）
+    // env / 八表 / webhook 绑定；非 GET 自然落 404（极薄路由，逻辑在 routes 层）
     if (request.method === "GET" && pathname === "/selfcheck") {
       return handleSelfCheck(request, env);
     }

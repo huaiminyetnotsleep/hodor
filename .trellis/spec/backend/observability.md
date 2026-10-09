@@ -12,7 +12,7 @@
 
 - 新增 / 修改 `/health`、`/selfcheck` 的响应形状或检查项
 - 新增环境变量（env-config 规范）后需纳入自检
-- schema 变更后七表期望集 `EXPECTED_TABLES` 需增删（与 database.md 同步契约联动）
+- schema 变更后八表期望集 `EXPECTED_TABLES` 需增删（与 database.md 同步契约联动）
 
 ### 2. 签名
 
@@ -32,7 +32,7 @@ checkWebhook(result: TelegramResult<WebhookInfo> | null, expectedUrl: string): s
 | 端点 | 行为 | 响应 |
 |------|------|------|
 | `GET /health` | 零外部依赖（不查 D1、不调 Telegram） | 恒 200 `{"status":"ok","version":"…"}`（**字节级不变**，uptime 监控依赖） |
-| `GET /selfcheck` | env → 七表 → webhook 顺序，三项独立、env 失败不阻断 | 全过 200 `{"status":"ok","version":"…"}`；有失败 503 `{"status":"error","version":"…","failed":[…]}` |
+| `GET /selfcheck` | env → 八表 → webhook 顺序，三项独立、env 失败不阻断 | 全过 200 `{"status":"ok","version":"…"}`；有失败 503 `{"status":"error","version":"…","failed":[…]}` |
 
 - 两者均无鉴权（用户决策）；**任何输出不回显密钥值**——只允许变量名、表名、非密钥原值（webhook URL、Telegram 错误原文）、client 已消毒概要。
 - 缺 `TELEGRAM_BOT_TOKEN` 时不得发起 Telegram 调用（不建 client）。

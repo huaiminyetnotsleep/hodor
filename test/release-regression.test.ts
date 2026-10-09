@@ -644,7 +644,7 @@ describe("发布回归（T11）：真实部署链路顺序场景", () => {
     expect(healthText).toBe(JSON.stringify({ status: "ok", version: VERSION }));
     const healthVersion = JSON.parse(healthText).version;
 
-    // /selfcheck：env（钉死全合法）+ 七表（已迁移）+ webhook（桩指向正确）全过
+    // /selfcheck：env（钉死全合法）+ 八表（已迁移）+ webhook（桩指向正确）全过
     const check = await SELF.fetch("https://example.com/selfcheck");
     expect(check.status).toBe(200);
     const checkBody = (await check.json()) as { status: string; version: string };
