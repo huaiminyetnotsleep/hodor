@@ -23,7 +23,7 @@
 - [x] **T09** Release Please 限定官方仓库运行，自动维护 Release PR、tag 与 GitHub Release；fork 手动同步更新。
 - [x] **T10** `scripts/d1-console.sql` 运维查询包，覆盖用户、topic、消息与失败 update 排障。（2026-10-08 验收：全部语句本地 D1 冒烟通过；ops.md「常用 SQL」精选速查与之对应）
 - [x] **T11** 发布集成回归：既有功能、部署、更新、配置保留与数据兼容；功能测试随各阶段完成。（2026-10-08 验收：release-regression.test.ts 9 场景——鉴权 / 入站 / 出站 / 幂等 / 命令 / 限频 / 防毒丸 / 版本——全绿，既有分域测试零退化；部署自动化保护面由 deploy-config 既有用例承载，fork / 升级真机面随 T05/T06/T12 验收）
-- [ ] **T12** README 与功能、部署、运维文档同步，按实际实现核验状态，从零部署及更新流程验收。
+- [x] **T12** README 与功能、部署、运维文档同步，按实际实现核验状态，从零部署及更新流程验收。（2026-10-09 验收：README / architecture / ops / deploy / release 与实现逐项核对同步（含 `/selfcheck` 契约与零变量部署表单）；真机从零部署（A 线：fork → Import → 零表单 → 面板配置 → selfcheck 驱动收尾 → 双向聊天）与已有实例升级（B 线：v1.5.0 / v1.6.0 两轮 Release 链路，数据完好）均通过；过程踩坑回流 ops.md 排查表）
 
 ### Webhook 接入与可靠性
 
