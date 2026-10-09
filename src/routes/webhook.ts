@@ -24,6 +24,7 @@
  */
 import { parseMaxAttempts, parseSupportChatId, timingSafeEqualStrings } from "../env";
 import { classifyUpdate, type TelegramCallbackQueryRef, type TelegramMessageRef } from "../pipeline/classify";
+import { handleBroadcastCallback, handleBroadcastCommand } from "../pipeline/broadcast";
 import { handleInbound } from "../pipeline/inbound";
 import { handleOutbound } from "../pipeline/outbound";
 import { handleVerifyCallback } from "../pipeline/verify";
@@ -129,8 +130,13 @@ export async function handleWebhook(
         if (kind === "callback") {
           await handleVerifyCallback(env, botId, callbackQuery);
         } else {
+          // 客服群按钮按载荷前缀路由：d: 删除确认（T38）/ b: 广播确认（2026-10-09）
+          // / 其余 w: 清库确认（T40）——前缀互斥，非本仓库载荷一律落 wipe 分支
+          //（毒丸防护由各 handler 的载荷解析兜底）
           if (callbackQuery.data?.startsWith("d:")) {
             await handleDeluserCallback(env, botId, callbackQuery);
+          } else if (callbackQuery.data?.startsWith("b:")) {
+            await handleBroadcastCallback(env, botId, callbackQuery);
           } else {
             await handleWipeCallback(env, botId, callbackQuery);
           }
@@ -138,6 +144,11 @@ export async function handleWebhook(
       } else {
         console.warn(`[webhook] update ${updateId}: classify=${kind} 但 callback_query 缺失`);
       }
+    } else if (kind === "broadcast") {
+      // 全用户广播（2026-10-09）：客服群 General 专用 /broadcast——update_id 是
+      // 广播行的幂等锚点（source_update_id），随消息一并传入
+      const message = update.message as TelegramMessageRef | undefined;
+      if (message) await handleBroadcastCommand(env, botId, updateId, message);
     } else {
       const message = update.message as TelegramMessageRef | undefined;
       if (!message) {

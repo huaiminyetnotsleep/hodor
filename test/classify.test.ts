@@ -1,6 +1,7 @@
 /**
- * classifyUpdate 纯函数直测（T15 分流规则 + fail-closed 决策 + T27 callback 分流）：
- * 私聊 / 客服群带 thread / 客服群无 thread（General）/ 其他群 / 超级群非客服 /
+ * classifyUpdate 纯函数直测（T15 分流规则 + fail-closed 决策 + T27 callback 分流
+ * + General /broadcast 专用分类）：私聊 / 客服群带 thread / 客服群无 thread
+ * （General：仅 /broadcast 进入广播路径，其余 ignore）/ 其他群 / 超级群非客服 /
  * 私聊 callback_query（验证题按钮）→ callback、群内 / 畸形 callback → ignore、
  * 无 message 且无 callback_query（edited_message）/ 畸形形态 /
  * supportChatId === null → 全部 ignore（部署配置坏了零副作用）。
@@ -68,9 +69,64 @@ describe("classify: 标准分流", () => {
     expect(classifyUpdate(update(msg), SUPPORT_CHAT_ID)).toBe("ignore");
   });
 
-  it("其他群组 → ignore", () => {
+  it("客服群无 thread 且首 token 为 /broadcast → broadcast（全用户广播专用入口）", () => {
+    const supportGeneral = (text: string) =>
+      message({
+        from: { id: 111111111, first_name: "Admin" },
+        chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+        text,
+      });
+    expect(classifyUpdate(update(supportGeneral("/broadcast")), SUPPORT_CHAT_ID)).toBe("broadcast");
+    expect(classifyUpdate(update(supportGeneral("/broadcast@hodor_bot 标题\n正文")), SUPPORT_CHAT_ID)).toBe("broadcast");
+    expect(classifyUpdate(update(supportGeneral("/broadcast 标题")), SUPPORT_CHAT_ID)).toBe("broadcast");
+    // thread 字段若存在但非法，不能误降级为 General 广播
+    expect(
+      classifyUpdate(
+        update({ ...supportGeneral("/broadcast 标题"), message_thread_id: 0 }),
+        SUPPORT_CHAT_ID,
+      ),
+    ).toBe("ignore");
+    expect(
+      classifyUpdate(
+        update({ ...supportGeneral("/broadcast 标题"), message_thread_id: "100" }),
+        SUPPORT_CHAT_ID,
+      ),
+    ).toBe("ignore");
+    // 前缀巧合 / 非命令 / 普通 General 消息仍 ignore
+    expect(classifyUpdate(update(supportGeneral("/broadcasts xx")), SUPPORT_CHAT_ID)).toBe("ignore");
+    expect(classifyUpdate(update(supportGeneral("普通群聊")), SUPPORT_CHAT_ID)).toBe("ignore");
+    // text 缺失（非字符串）→ ignore
+    const noText = message({
+      from: { id: 111111111, first_name: "Admin" },
+      chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+    });
+    expect(classifyUpdate(update(noText), SUPPORT_CHAT_ID)).toBe("ignore");
+    // 带 thread 的 /broadcast 走 outbound（命令管线在 topic 内只提示去 General）
+    const inTopic = message({
+      from: { id: 111111111, first_name: "Admin" },
+      chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+      text: "/broadcast 标题\n正文",
+      message_thread_id: 100,
+    });
+    expect(classifyUpdate(update(inTopic), SUPPORT_CHAT_ID)).toBe("outbound");
+  });
+
+  it("私聊中的 /broadcast 仍是 inbound（不会进入客服群广播分类）", () => {
+    const privateCommand = message({
+      chat: { id: 7001, type: "private" },
+      text: "/broadcast 标题\n正文",
+    });
+    expect(classifyUpdate(update(privateCommand), SUPPORT_CHAT_ID)).toBe("inbound");
+  });
+
+  it("其他群组 → ignore（含其他群的 /broadcast：广播绝不从外群发起）", () => {
     const msg = message({ chat: { id: -1009876543210, type: "supergroup" } });
     expect(classifyUpdate(update(msg), SUPPORT_CHAT_ID)).toBe("ignore");
+    const foreignBroadcast = message({
+      chat: { id: -1009876543210, type: "supergroup" },
+      text: "/broadcast 标题\n正文",
+    });
+    expect(classifyUpdate(update(foreignBroadcast), SUPPORT_CHAT_ID)).toBe("ignore");
   });
 
   it("非客服的普通 group → ignore", () => {

@@ -19,20 +19,23 @@
 --   - 所有表带 bot_id 维度（多 bot 预留）；v1 为单 bot 主线，以下查询未带
 --     bot_id 过滤，多 bot 场景需自行追加 WHERE bot_id = <目标 bot>。
 --   - 时间戳为 ISO-8601 UTC 文本，「今日」按 UTC 计算。
---   - 一至七为只读查询，可放心执行；「八、维护」为 DELETE，粘贴即生效。
+--   - 一至八为只读查询，可放心执行；「九、维护」为 DELETE，粘贴即生效。
 
 -- ----------------------------------------------------------------------------
 -- 一、总览
 -- ----------------------------------------------------------------------------
 
--- 1.1 核心计数一览：用户 / 消息 / 今日消息 / topic / 失败 update
---     （今日消息按 UTC；失败 update 即毒丸台账，正常应接近 0）
+-- 1.1 核心计数一览：用户 / 消息 / 今日消息 / topic / 失败 update / 活跃广播任务
+--     （今日消息按 UTC；失败 update 即毒丸台账，正常应接近 0；
+--       活跃广播 = 草稿 / 待确认 / 发送中，正常应 ≤ 2——草稿与发送中各至多一份）
 SELECT
   (SELECT COUNT(*) FROM users)                                        AS [用户数],
   (SELECT COUNT(*) FROM topics)                                       AS [topic数],
   (SELECT COUNT(*) FROM messages)                                     AS [消息总数],
   (SELECT COUNT(*) FROM messages WHERE date(created_at) = date('now')) AS [今日消息数UTC],
-  (SELECT COUNT(*) FROM processed_updates WHERE status = 'failed')    AS [失败update数];
+  (SELECT COUNT(*) FROM processed_updates WHERE status = 'failed')    AS [失败update数],
+  (SELECT COUNT(*) FROM broadcasts WHERE status IN ('preparing','pending','sending'))
+                                                                      AS [活跃广播数];
 
 -- ----------------------------------------------------------------------------
 -- 二、用户
@@ -123,7 +126,7 @@ LIMIT 50;
 
 -- 5.1 失败 update 明细（毒丸排查）：attempts 达到 MAX_ATTEMPTS（env，默认 3）后
 --     置 failed 跳过；created_at 为最近认领时间。配合 wrangler tail 的报错日志
---     定位失败原因；确认要重试时见「八、维护」的重置语句。
+--     定位失败原因；确认要重试时见「九、维护」的重置语句。
 SELECT
   update_id, attempts, created_at
 FROM processed_updates
@@ -177,10 +180,27 @@ LEFT JOIN topics t ON t.bot_id = u.bot_id AND t.user_id = u.user_id
 WHERE t.user_id IS NULL
 ORDER BY u.last_seen_at DESC;
 
+-- ----------------------------------------------------------------------------
+-- 八、广播任务（/broadcast 全员广播）
+-- ----------------------------------------------------------------------------
+
+-- 8.1 广播任务清单：status 为 preparing（建行中）/ pending（待确认）/ sending
+--     （发送中）/ completed / cancelled / expired / failed（终态；行在控制消息
+--     收尾后删除，正常不应长期存在）。expected 为确认时冻结人数；success /
+--     failure 为完成统计。updated_at 距今超过 10 分钟的 sending 行 = 执行中断
+--     残留（任意一次广播操作会将其标记为 failed，结果未知、不自动补发）
+SELECT
+  id, status, initiator_user_id, expected_count,
+  success_count, failure_count,
+  expires_at, confirmed_at, created_at, updated_at
+FROM broadcasts
+ORDER BY id DESC
+LIMIT 20;
+
 -- ============================================================================
 -- ============================================================================
 --
---  危 险 区（八、维护）——以下全部是 DELETE 语句
+--  危 险 区（九、维护）——以下全部是 DELETE 语句
 --
 --  · 无任何确认步骤：粘贴执行立即生效，删错只能连备份一起承担后果
 --  · 日常清理优先使用 topic 内命令（带二次确认，且同步处理 Telegram 侧）：
@@ -191,7 +211,7 @@ ORDER BY u.last_seen_at DESC;
 -- ============================================================================
 -- ============================================================================
 
--- 8.1 重置失败 update（毒丸重试）
+-- 9.1 重置失败 update（毒丸重试）
 -- 警告：DELETE 语句，无确认步骤，粘贴执行立即生效。
 -- 用途：清除 processed_updates 中 status='failed' 的行，让 Telegram 后续重推
 --       这些 update_id 时重新处理（配合已修复的代码 / 配置使用）。
@@ -200,7 +220,7 @@ ORDER BY u.last_seen_at DESC;
 --   SELECT COUNT(*) FROM processed_updates WHERE status = 'failed';
 DELETE FROM processed_updates WHERE status = 'failed';
 
--- 8.2 按用户清理（/deluser 的数据库面）
+-- 9.2 按用户清理（/deluser 的数据库面）
 -- 警告：DELETE 语句，无确认步骤，粘贴执行立即生效；日常优先用命令 /deluser。
 -- 与 /deluser 命令的差别：只清数据库行，不走 Telegram 侧——群内对应话题不会被
 --   删除（需手动关闭或删除）；用户私聊窗口历史同样不在删除范围（命令也不删）。
@@ -215,15 +235,17 @@ DELETE FROM topics              WHERE user_id = 123456789;
 DELETE FROM users               WHERE user_id = 123456789;
 DELETE FROM delete_confirmations WHERE user_id = 123456789;
 
--- 8.3 全清（/wipealldata 的数据库面）
+-- 9.3 全清（/wipealldata 的数据库面）
 -- 警告：全表 DELETE（无 WHERE），无确认步骤，粘贴执行立即生效；日常优先用
 --       命令 /wipealldata（带两步确认）。
 -- 与 /wipealldata 命令的差别：不删群内任何话题——群内会残留全部用户话题，
---   需要手动逐个处理；命令版会先删除群内全部话题（General 除外）再清库。
--- 影响范围：users / topics / messages / delete_confirmations 四表全部清空；
---   保留 settings（验证开关与模式不重置）、processed_updates（幂等台账，
---   清了会导致 Telegram 重推时重放全部历史 update，绝不可清）、bots（bot 身份）。
+--   需要手动逐个处理；命令版会先将活跃广播标为取消/结果未知，再删除群内全部话题
+--   （General 除外）后清库。发送循环会在下一位收件人前停止，已进入 Telegram 的单条请求仍可能送达。
+-- 影响范围：users / topics / messages / delete_confirmations / broadcasts
+--   五表全部清空（broadcasts 残留行一并清除）；保留 settings（验证开关与模式不重置）、
+--   processed_updates（幂等台账，清了会导致 Telegram 重推时重放全部历史 update，绝不可清）、bots（bot 身份）。
 DELETE FROM messages;
 DELETE FROM topics;
 DELETE FROM users;
 DELETE FROM delete_confirmations;
+DELETE FROM broadcasts;

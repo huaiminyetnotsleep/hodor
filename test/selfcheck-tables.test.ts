@@ -42,11 +42,12 @@ describe("/selfcheck 数据库检查", () => {
         "数据库缺表：processed_updates（迁移可能未执行，请在构建日志确认 migrations 步骤）",
         "数据库缺表：bots（迁移可能未执行，请在构建日志确认 migrations 步骤）",
         "数据库缺表：delete_confirmations（迁移可能未执行，请在构建日志确认 migrations 步骤）",
+        "数据库缺表：broadcasts（迁移可能未执行，请在构建日志确认 migrations 步骤）",
       ],
     });
   });
 
-  it("应用迁移后复测 → 200 ok（七表齐全，三项全过）", async () => {
+  it("应用迁移后复测 → 200 ok（八表齐全，三项全过）", async () => {
     await applyD1Migrations(env.HODOR_DB, env.TEST_MIGRATIONS);
     const res = await SELF.fetch("https://example.com/selfcheck");
     expect(res.status).toBe(200);

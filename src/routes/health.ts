@@ -3,7 +3,7 @@
  * 零外部依赖（不查 env / D1 / Telegram），供 uptime 监控高频访问；
  * version 由构建时从 package.json 注入（src/generated/version.ts，T08）。
  *
- * GET /selfcheck — 完整自检（T07，阶段 7）：按 env → 七表 → webhook 固定
+ * GET /selfcheck — 完整自检（T07，阶段 7）：按 env → 八表 → webhook 固定
  * 顺序逐项检查，三项独立执行（env 失败不阻断后续）；全过 200 ok，任何
  * 失败 503 + failed 文案数组（文案表见任务 design.md §1，本层只做装配，
  * 检查逻辑全在 src/selfcheck.ts）。缺 TELEGRAM_BOT_TOKEN 时不建 client、

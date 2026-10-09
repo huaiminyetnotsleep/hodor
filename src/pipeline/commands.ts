@@ -16,6 +16,7 @@ import {
   ARCHIVE_PREPARING_TEXT,
   ARCHIVE_SUCCESS_TEXT,
   ARCHIVE_USER_NOTICE,
+  BROADCAST_TOPIC_REDIRECT,
   DELUSER_WARNING_TEXT,
   formatBanConfirmed,
   formatHelpText,
@@ -407,6 +408,14 @@ export async function handleCommand(
       threadId,
       formatPurgeConfirmed({ deleted, gone, failed, pinnedReset }),
     );
+    return;
+  }
+
+  /* ------------- 全用户广播（2026-10-09）：Topic 内只提示去 General ------------- */
+  // General 的 /broadcast 由 classify 专用分类直接派发（不走本管线）；此处兜住
+  // Topic 内的误发——只回复跳转提示，绝不创建任务、绝不把命令或正文中继给用户
+  if (name === "/broadcast") {
+    await replyInTopic(env, chatId, threadId, BROADCAST_TOPIC_REDIRECT);
     return;
   }
 

@@ -9,11 +9,12 @@
  * 2. **再次鉴权**：from.id ∈ ADMIN_IDS 否 → toast 拒绝，零 DB 写；
  * 3. 超过 60 秒窗口 → toast + 原消息改写移除键盘（话题仍在，可重新发起）；
  * 4. 取消 → toast + 编辑原消息移除键盘（best-effort）；
- * 5. 确认 → toast「正在清空」→ **先删客服群内全部话题**（topics 表为清单源，
- *    topic-gone 视为已删；存在其他 permanent 失败则不清库、toast 报数，重发起
- *    续删）→ 全部成功后 wipeAllUserData（users/topics/messages/
- *    delete_confirmations；settings / processed_updates / bots 永不清）→ 完成
- *    反馈以 toast 为主（警告消息所在话题已被删，edit 失败 warn 吞）。
+ * 5. 确认 → toast「正在清空」→ **先停止活跃广播任务，再删客服群内全部话题**
+ *    （preparing/pending 置 cancelled；sending 置 failed，逐位发送循环会在下一位前
+ *    观察并停止；已进入 Telegram 的单条请求不能撤回；topic-gone 视为已删；存在
+ *    其他 permanent 失败则不清库、toast 报数，重发起续删）→ 全部成功后
+ *    wipeAllUserData（users/topics/messages/delete_confirmations/broadcasts；settings /
+ *    processed_updates / bots 永不清）→ 完成反馈以 toast 为主（警告消息所在话题已被删，edit 失败 warn 吞）。
  *
  * 重放 / 重复点击：清库后 topics 清单为空 → 零删除调用、DELETE 幂等（空表无害）；
  * answerCallbackQuery 对已消费 id 会 permanent → warn 吞（verify.ts 同款姿态）。
@@ -31,6 +32,7 @@ import {
   WIPE_WARNING_TEXT,
 } from "../copy";
 import { parseAdminIds } from "../env";
+import { cancelActiveBroadcasts } from "../store/broadcasts";
 import { listAllTopicThreads, wipeAllUserData } from "../store/wipe";
 import { createTelegramClient } from "../telegram/client";
 import type { InlineKeyboardMarkup, TelegramClient } from "../telegram/types";
@@ -141,10 +143,13 @@ export async function handleWipeCallback(
     return;
   }
 
-  // 5. 确认：先删客服群内全部话题（用户决策：数据清空后残留话题无意义），
+  // 5. 确认：清库前先停止活跃广播任务——preparing/pending 置 cancelled，sending 置
+  //    failed（结果未知）；发送循环在每位收件人前检查并停止后续发送。检查与 Telegram
+  //    请求无法原子化，已进入发送窗口的单条请求仍可能送达。随后删客服群内全部话题，
   //    全部成功才清库。警告消息所在话题也会被删 → 完成反馈以 toast 为主，
   //    完成 edit 失败按 warn 吞。General 话题不在 topics 表内，天然排除。
   await answerQuery(client, callback.id, WIPE_TOAST_RUNNING);
+  await cancelActiveBroadcasts(env.HODOR_DB, botId);
   const threads = await listAllTopicThreads(env.HODOR_DB);
   let failedTopics = 0;
   for (const threadId of threads) {

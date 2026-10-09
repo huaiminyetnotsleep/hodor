@@ -1,6 +1,6 @@
 # 数据表
 
-hodor 只依赖一个 D1 数据库，共七张表。
+hodor 只依赖一个 D1 数据库，共八张表。
 
 **全局约定**：
 
@@ -120,6 +120,40 @@ PK `(bot_id, prompt_msg_id)`：一条确认按钮消息一行，`prompt_msg_id` 
 
 `/deluser` 删除用户时随 users 一并清理该表行；`/wipealldata` 确认后全表清空（清库前先按 topics 表删除全部群内话题）。
 
+## broadcasts — 全用户广播任务
+
+`/broadcast`（客服群 General 发起）的任务表：**一份广播一行**，行只存活于任务期间——终态（completed / cancelled / expired / failed）行在控制消息收尾后删除，客服群 General 中的公告与状态消息是唯一历史。
+
+UNIQUE `(bot_id, source_update_id)`：同一发起 update 重推不新建第二份广播（幂等复用）。
+
+部分唯一索引（每 Bot 维度）：
+
+- `status = 'sending'` 恰一份——并发确认由「pending → sending」原子 UPDATE + 该索引裁决
+- `status IN ('preparing','pending')` 恰一份——同一时间只留一份草稿/待确认；草稿可与发送中任务并存
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | INTEGER PK | 自增；callback 载荷只携带短 ID（`b:y:<id>` / `b:n:<id>`） |
+| `bot_id` | INTEGER | 数据归属 |
+| `source_update_id` | INTEGER | 发起命令的 update ID；UNIQUE `(bot_id, source_update_id)` 幂等锚点 |
+| `initiator_user_id` | INTEGER | 发起管理员；仅此管理员可确认 / 取消 |
+| `support_chat_id` | INTEGER | 客服群 General 消息归属与 callback 核对 |
+| `preview_msg_id` / `control_msg_id` | INTEGER | General 公告预览与关联控制消息 ID；准备阶段可为空，控制消息落库并进入 pending 后按钮才可确认 |
+| `message_html` | TEXT | 已转义、冻结的最终公告（HTML parse_mode；预览与逐位发送共用同一份） |
+| `recipient_ids_json` | TEXT | 确认时冻结的收件人 user ID JSON 数组（升序、去重、≤500）；pending 时为 `[]` |
+| `status` | TEXT | `preparing`（建行中）/ `pending`（待确认）/ `sending`（发送中）/ `completed` / `cancelled` / `expired` / `failed`（终态，收尾后删行） |
+| `expected_count` | INTEGER | 冻结名单长度 |
+| `success_count` / `failure_count` | INTEGER | 聚合统计；发送循环内存累计，结束一次写入 |
+| `expires_at` | TEXT | 预览确认截止时间（创建 + 5 分钟）；超时的 preparing/pending 由惰性清理置 expired |
+| `confirmed_at` | TEXT | 确认时刻 |
+| `created_at` / `updated_at` | TEXT | 生命周期时间；sending 超 10 分钟未更新视为崩溃残留，惰性清理置 failed |
+
+状态机：`preparing → pending → sending → completed`（终态删行）；pending 可 cancelled / expired；滞留 sending 陈旧判定后置 failed（结果未知，不自动补发）。
+
+收件人资格语义（预计人数与冻结名单同语义）：topics 映射存在 + users 行存在 + 未封禁；**不**按 topic status、users status（软归档）、验证状态或 TTL 过滤。发送前对冻结名单做一次性资格复核，资格已变化者计失败不发送。
+
+`/wipealldata` 确认后先取消 preparing/pending 行，并把 sending 行标为 failed（结果未知，发送循环会在下一位收件人前停止），再随清库删除整表；已进入 Telegram 的单条请求无法撤回。`/deluser` 不改广播行（冻结名单中的被删用户由发送前复核剔除并计失败）。
+
 ## 表间关系
 
 ```
@@ -127,5 +161,5 @@ bots ──1:n── users ──1:1── topics
               │              │
               └──1:n── messages ──┘   （messages 同时归属 user 与 topic）
 
-settings、processed_updates、delete_confirmations 为独立表
+settings、processed_updates、delete_confirmations、broadcasts 为独立表
 ```
