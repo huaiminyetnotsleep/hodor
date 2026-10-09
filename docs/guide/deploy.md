@@ -103,6 +103,21 @@ curl https://hodor.<你的子域>.workers.dev/health
 
 D1 数据库名自动随 Worker 名派生（Worker 名 `hodor-shop` → 数据库 `hodor-shop`），建库、绑定、迁移全部自动完成；首个实例（Worker 名 `hodor`）与本地 `npm run deploy` 的行为不受影响。
 
+多实例也是当前推荐的换 Bot / 换群组方案：新实例先准备好，按需切换入口，旧实例保留旧数据与历史。
+
+它提供服务过渡，不会自动复制 D1 记录或把 Telegram 旧话题搬到新群；新实例中的用户需要重新验证，并建立新话题。
+
+| 场景 | 实例与切换方式 | 用户看到的变化 |
+| --- | --- | --- |
+| 多个独立 Bot | 各 Bot 绑定各自 Worker，建议各用独立客服群 | 各实例独立建档和话题 |
+| 更换 Bot | 旧、新 Bot 分别绑定旧、新实例；先通知用户，再引导其主动启动新 Bot | 新 Bot 的私聊窗口和话题从头开始；未切换用户仍可联系旧 Bot |
+| 同一 Bot 更换客服群 | 新实例配置新群；准备完成后将该 Bot 的 webhook 改绑到新实例 | 私聊入口不变，新群创建新话题；旧群历史保留 |
+| 同时更换 Bot 与客服群 | 新 Bot、新群使用新实例；旧实例在过渡期继续运行 | 用户主动进入新 Bot 后重新建档和建话题 |
+
+同一个 Bot 同时只能指向一个 webhook，因此“同一 Bot 更换客服群”有明确切换点。切换后不要访问旧实例的 `deletewebhook`，否则会解绑该 Bot 当前指向新实例的 webhook；回退时应在旧实例重新执行 `setwebhook`。
+
+两个 Bot 共用同一客服群的话题归属与命令隔离尚未实现，过渡期建议使用不同客服群。具体操作顺序见[运维手册](/guide/ops.md#switch-bot-or-group)。
+
 ### 操作步骤
 
 1. 在 Cloudflare 面板 → Workers & Pages → Create → Workers → **Import a repository**，再次选中**同一个 fork**

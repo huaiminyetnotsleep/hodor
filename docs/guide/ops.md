@@ -30,21 +30,30 @@ bot 身份（bot_id）不变，所有数据继续有效：
 2. dashboard 把 `TELEGRAM_BOT_TOKEN` 换成新值
 3. 再访问 `setwebhook` 重新绑定
 
-### 情况二：换一个新的 bot
+## 更换 Bot 或客服群 {#switch-bot-or-group}
 
-对系统而言这是全新身份：老用户在新 bot 里 `/start` 会创建新记录、新 topic；旧 topic 的绑定仍挂在旧 bot 下，**消息与用户不会自动迁移**（迁移能力属 P2）。
+推荐使用[多个独立实例](/guide/deploy.md#部署多个实例)承接切换，保留旧 Worker、D1 和群组供过渡与查阅。
 
-::: warning 严格按顺序操作
-否则两个 bot 会同时把 update 推到同一个 URL，而 update 本身不带 bot 身份，Worker 将无法区分消息属于哪个 bot。
+新实例不会自动复制用户资料、备注、验证状态、话题绑定或消息账本；旧资料留在旧 D1，旧 Telegram 消息仍留在原聊天中。
 
-```
-① 旧 token 还在 env 时 → deletewebhook（解绑旧 bot）
-② dashboard 改 TELEGRAM_BOT_TOKEN 为新 bot
-③ setwebhook（绑定新 bot）
-④ 在旧 bot 里人工广播「客服已迁移，请添加新 Bot @xxx」
-   （这步只能人工：换 env 后旧 token 已不在系统里）
-```
-:::
+### 换一个新的 Bot
+
+1. 为新 Bot 部署独立实例并配置独立 D1、客服群和密钥；确认新 Bot 在群内具有所需权限。
+2. 给新实例执行 `setwebhook`，核对回显身份和 `/selfcheck`；旧 Bot 的 webhook 保持原样，旧实例继续服务未切换用户。
+3. 在旧实例仍可用时，通过现有客服对话或其他已有渠道通知用户新 Bot 地址，引导用户主动启动新 Bot。新 Bot 无法主动私聊尚未启动它的用户。
+4. 按需要保留旧实例供未切换用户使用或查阅历史；决定停用时再解绑**旧 Bot** 的 webhook。
+
+新 Bot 中会重新建档、验证和创建话题。建议新旧 Bot 使用不同客服群；同群两个 Bot 对话题、管理命令的隔离尚未实现，不能把它当作已支持的过渡模式。
+
+### Bot 不变，只换客服群
+
+1. 为同一个 Bot 准备新实例与独立 D1，在新实例配置新客服群，并确认 Bot 已加入新群且有话题等必要权限。先不要在新实例执行 `setwebhook`。
+2. 安排切换时间；在新实例执行 `setwebhook`，使该 Bot 的唯一 webhook 指向新 Worker。用新实例的 `/selfcheck` 和私聊试消息确认新群能建话题并双向回复。
+3. 旧实例和旧群保留供查阅历史。若需回退，在旧实例重新执行 `setwebhook`；**不要**在切换后执行旧实例的 `deletewebhook`，它会删除 Bot 当前指向新实例的 webhook。
+
+用户私聊入口不变，但新 D1 不认识旧用户，首次联系会重新验证并在新群建话题。旧实例不会继续接收这个 Bot 的 update，旧群话题也不会自动搬到新群。
+
+同时更换 Bot 与客服群时，按“换一个新的 Bot”操作，并让新实例使用新群。
 
 ## 修改密钥的影响
 

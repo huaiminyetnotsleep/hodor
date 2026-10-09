@@ -197,7 +197,7 @@ src/
 | 媒体 file_id 直传，不落盘 | `sendPhoto`/`sendVideo` 等按 file_id 原样发送（T22 已交付：7 类媒体 + 文本）；零存储成本、零 R2 依赖，部署门槛最低。代价是 Telegram 服务端为唯一存储（可接受，不做本地留存） |
 | token 永不进 URL | URL 会留在浏览器历史、CF 访问日志等处，泄漏即被接管 bot。管理端点用独立的 `ADMIN_SECRET` 鉴权，token 只从 env 读取 |
 | 一人一 topic，archive 后复用、deluser 后删除 | `/archive` 保留绑定 / 历史 / 备注并在回访时重开；`/deluser` 物理删除 topic + Hodor 数据；native close/reopen 服务事件同步 topic 状态 |
-| 全表带 bot_id | v1 单 bot，但数据模型天然支持多 bot：未来按 bot 独立 webhook 路径接入时只改接入层，不动数据 |
+| 业务表记录 bot_id | 标识当前实例的 bot 身份；多个实例各用独立 D1，不能仅凭此列推断可跨实例迁移 |
 | 无框架，原生 fetch | 端点总共只有 5 个，引入 Web 框架收益极低；零运行时依赖也让免费额度占用最小 |
 | 提示回复限频（每用户每分钟 1 次） | 防止攻击者用「垃圾消息 → 触发提示回复」反向刷 CF 请求额度 |
 
@@ -217,7 +217,7 @@ src/
 
 ## 路线图
 
-见 [TODO](/todo/index.md)：P2 多 bot 运行时 / 换绑迁移 / TGuard 验证。
+多个独立实例的部署与切换见[部署多个实例](/guide/deploy.md#部署多个实例)；未来扩展见[TODO](/todo/index.md)。
 
 ## 参考项目
 

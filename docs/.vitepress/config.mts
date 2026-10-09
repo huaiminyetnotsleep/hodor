@@ -37,7 +37,7 @@ export default defineConfig({
         text: '规划（未实现）',
         items: [
           { text: '全量列表', link: '/todo/' },
-          { text: 'P2 扩展', link: '/todo/p2' },
+          { text: 'P2 TGuard', link: '/todo/p2' },
           { text: 'P3 自托管', link: '/todo/p3' },
           { text: 'P1 主线（已交付）', link: '/todo/p1' },
         ],
@@ -50,7 +50,7 @@ export default defineConfig({
           text: '规划（未实现）',
           items: [
             { text: '全量列表', link: '/todo/' },
-            { text: 'P2 扩展', link: '/todo/p2' },
+            { text: 'P2 TGuard', link: '/todo/p2' },
             { text: 'P3 自托管', link: '/todo/p3' },
             { text: 'P1 主线（已交付）', link: '/todo/p1' },
           ],

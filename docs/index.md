@@ -36,6 +36,6 @@ features:
     title: 隐私与安全
     details: 三种密钥各司其职，bot token 永不进 URL；图片、视频、附件全部 Telegram file_id 直传，不落盘、零存储成本。
   - icon: 🧩
-    title: 平滑演进
-    details: 所有数据表预留 bot 维度；多机器人、bot / 群组换绑迁移、TGuard 验证、VPS 自托管为规划中的未来能力（见「规划」），v1 数据无需迁移即可升级。
+    title: 多实例独立运行
+    details: 同一份 fork 可部署多个 Worker，每个实例使用独立 D1、Bot 和客服群；多业务运营或更换 Bot、客服群时可启用新实例，旧数据留在旧实例。
 ---
