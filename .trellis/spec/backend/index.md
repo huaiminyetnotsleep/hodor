@@ -13,6 +13,7 @@
 | [测试基座](./testing.md) | vitest-pool-workers 0.22 + Vitest 4 接线方式、迁移注入 | 已填写(S1) |
 | [数据库(D1)](./database.md) | 表结构改动与 `docs/guide/database.md` 的强制同步契约 | 已填写(S1) |
 | [观测端点](./observability.md) | `/health` 存活探针与 `/selfcheck` 完整自检的双端点契约、严格校验与容错解析分工 | 已填写(S7) |
+| [文档与开源呈现](./docs.md) | README/docs 职责唯一化、交付状态表述、开源 README 样式与同步契约 | 已填写(S8) |
 
 新约定确立后,在此追加新的规范文件(每个主题一个文件,并从本表链接)。
 跨层思维检查清单见 [../guides/index.md](../guides/index.md)。
