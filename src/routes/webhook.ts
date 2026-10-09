@@ -22,7 +22,7 @@
  * 日志纪律：只记 update_id / bot_id / chat id 与已消毒错误摘要，
  * 绝不输出 token / 任何 secret。
  */
-import { parseMaxAttempts, parseSupportChatId, timingSafeEqualStrings } from "../env";
+import { parseMaxAttempts, parsePublicBaseUrl, parseSupportChatId, timingSafeEqualStrings } from "../env";
 import { classifyUpdate, type TelegramCallbackQueryRef, type TelegramMessageRef } from "../pipeline/classify";
 import { handleBroadcastCallback, handleBroadcastCommand } from "../pipeline/broadcast";
 import { handleInbound } from "../pipeline/inbound";
@@ -118,6 +118,9 @@ export async function handleWebhook(
 
   // classify 已做运行时形态校验；此处仅收窄类型（缺字段 = 不可达的防御式兜底，
   // warn 后按毒丸 200 处理，不让畸形信封触发重推）
+  // 可信 origin（Turnstile 任务）：PUBLIC_BASE_URL 有效时优先（固定 canonical
+  // 地址），否则用本请求 origin 下传给入站出题（Mini App 页面地址拼装）
+  const verifyOrigin = parsePublicBaseUrl(env)?.origin ?? new URL(request.url).origin;
   try {
     if (kind === "topic_event") {
       const message = update.message as TelegramMessageRef | undefined;
@@ -154,7 +157,7 @@ export async function handleWebhook(
       if (!message) {
         console.warn(`[webhook] update ${updateId}: classify=${kind} 但 message 缺失`);
       } else if (kind === "inbound") {
-        await handleInbound(env, botId, message);
+        await handleInbound(env, botId, message, verifyOrigin);
       } else {
         await handleOutbound(env, botId, message);
       }

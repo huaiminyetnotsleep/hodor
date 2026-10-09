@@ -31,7 +31,11 @@ UNIQUE `(bot_id, user_id)`
 | `is_banned` | 0/1 | `/ban` 禁言标记 |
 | `is_risk` | 0/1 | `/risk` 高危标记 |
 | `is_verified` / `verified_at` | 0/1, TEXT | 验证状态与通过时间 |
-| `verify_answer` / `verify_msg_id` | INTEGER | 待验证题目的正确答案与验证消息 ID（出题时写入，通过后清空） |
+| `verify_answer` / `verify_msg_id` | INTEGER | 待验证题目的正确答案与验证消息 ID（出题时写入，通过后清空）；Turnstile 模式的网页请求不使用这两列（保持 NULL） |
+| `verify_request_hash` | TEXT | 当前挑战的请求身份摘要（原始随机标识的 SHA-256 十六进制，64 小写字符）。math / button / turnstile 三模式共用的统一栅栏：出题预留时写入，Telegram 送达后回填 `verify_msg_id`、网页通过 / 回调通过、撤销、封禁、全局清题与模式 / 开关真变化时清空。NULL = 当前无有效挑战 |
+| `verify_request_expires_at` | TEXT | 当前请求的到期时间（ISO-8601 UTC 文本）。仅 Turnstile 模式写入（创建 + 600 秒）；math / button 题目不新增超时语义，保持 NULL。到期后请求不能完成，需回 Bot 重新发起 |
+| `verify_request_generation` | INTEGER | 创建当前挑战时的实例验证配置版本（`settings.verify_generation` 快照）。模式 / 开关真变化推进版本并清空全部 pending，旧挑战（含在途网页请求）随之失效，切回原模式不复活 |
+| `verify_submit_not_before` | TEXT | Turnstile 网页提交的下一许可时间（ISO-8601 UTC 文本）。单条条件 UPDATE 原子认领 15 秒提交节流窗口（跨实例防重复请求打上游）；新请求、通过、撤销、封禁与模式 / 开关变化时清空，旧失败不误清新请求、不提前结束冷却 |
 | `rate_window_start` / `rate_count` | TEXT, INTEGER | 60 秒固定窗口限频计数 |
 | `last_notice_at` | TEXT | 提示类回复（欢迎语 / 验证码 / 禁言 / 超限提示）的限频时间戳，每用户每分钟 1 次 |
 | `risk_notice_at` | TEXT | 高危用户 topic 提醒的上次发出时间（24 小时窗口）；提醒发出时写入，`/risk` 重新标记时清空（窗口重置） |
@@ -91,9 +95,11 @@ UNIQUE `(bot_id, user_id)` **和** UNIQUE `(bot_id, thread_id)` 双向唯一：
 | key（PK） | value | 说明 |
 | --- | --- | --- |
 | `verify_enabled` | `1` / `0` | `/verifyon` / `/verifyoff` |
-| `verify_mode` | `math` / `button` | `/verifymode` |
+| `verify_mode` | `math` / `button` / `turnstile` | `/verifymode`（无参数只查看；显式指定模式设置） |
+| `verify_generation` | 非负整数（缺失按 `0` 解释） | 实例验证配置版本。模式 / 开关**真变化**时在同一事务内 +1 并清空全部 pending（含 `verify_request_hash` 等四列）；同模式 / 同值重复设置、无参查看与非法参数不推进版本、不清 pending。保留 `is_verified` / `verified_at`（不强制已验证用户重验） |
 
 存库而非环境变量的原因：命令切换需要即时生效，不改 env、不重新部署。
+模式 / 开关变化与版本推进、pending 清空在一个 D1 batch（事务）内完成，幂等性以事务内的实际状态判定。
 
 ## processed_updates — 幂等与重试
 

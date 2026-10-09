@@ -27,11 +27,14 @@ import {
   formatUnnoteConfirmed,
   formatUnriskConfirmed,
   formatVerifyModeConfirmed,
+  formatVerifyModeCurrent,
+  formatVerifyModeMissingTurnstileConfig,
   formatVerifyOffConfirmed,
   formatVerifyOnConfirmed,
   NOTE_USAGE_NOTICE,
   UNBOUND_TOPIC_NOTICE,
   UNKNOWN_COMMAND_NOTICE,
+  VERIFYMODE_USAGE_NOTICE,
   WIPE_WARNING_TEXT,
 } from "../copy";
 import {
@@ -55,7 +58,6 @@ import {
   listThreadGroupMsgIds,
 } from "../store/messages";
 import {
-  clearAllPendingVerifications,
   markUnverified,
   markUserDeleted,
   setBanned,
@@ -254,18 +256,38 @@ export async function handleCommand(
   }
 
   if (name === "/verifymode") {
-    // 无参循环切换（math ↔ button）。两步 setter **顺序 binding**：先
-    // clearAllPendingVerifications 后 setVerificationMode——清题失败抛出时
-    // settings 未变、旧题继续有效，无半切换态（旧题回调绝不误通过：归属
-    // 判定 verify_msg_id 单道检查不变，被清空即落「题目已失效」分支）。
-    // 两步非原子（D1 无跨语句事务）的已接受权衡：清题成功而 set 失败 →
-    // settings 仍旧模式但旧题已清，用户下一条消息按旧模式出新题，安全
-    // 无害；重推 / 再次执行 /verifymode 均收敛到一致态
-    const { verifyMode } = await getVerificationSettings(env.HODOR_DB);
-    const nextMode = verifyMode === "math" ? "button" : "math";
-    await clearAllPendingVerifications(env.HODOR_DB);
-    await setVerificationMode(env.HODOR_DB, nextMode);
-    await replyInTopic(env, chatId, threadId, formatVerifyModeConfirmed(nextMode));
+    // 无参数只查看（2026-10-09 兼容性变更：原「无参循环切换」废止）——不写
+    // 设置、不清 pending。显式参数设置三模式；非法参数拒绝且不改变任何状态。
+    // 设置走事务化 setVerificationMode（一个 db.batch：真变化才推进
+    // verify_generation + 清全部 pending；同模式幂等——重复执行同值无害）。
+    // 切 turnstile 前置凭据检查：缺失拒绝（点名缺哪些变量），绝不误切、
+    // 绝不清当前有效挑战。
+    const args = parseCommandArgs(params.text);
+    const current = await getVerificationSettings(env.HODOR_DB);
+    if (args === "") {
+      await replyInTopic(env, chatId, threadId, formatVerifyModeCurrent(current));
+      return;
+    }
+    if (args !== "math" && args !== "button" && args !== "turnstile") {
+      await replyInTopic(env, chatId, threadId, VERIFYMODE_USAGE_NOTICE);
+      return;
+    }
+    if (args === "turnstile") {
+      const missing: string[] = [];
+      if (!env.TURNSTILE_SITE_KEY?.trim()) missing.push("TURNSTILE_SITE_KEY");
+      if (!env.TURNSTILE_SECRET_KEY?.trim()) missing.push("TURNSTILE_SECRET_KEY");
+      if (missing.length > 0) {
+        await replyInTopic(
+          env,
+          chatId,
+          threadId,
+          formatVerifyModeMissingTurnstileConfig(missing),
+        );
+        return;
+      }
+    }
+    await setVerificationMode(env.HODOR_DB, args);
+    await replyInTopic(env, chatId, threadId, formatVerifyModeConfirmed(args));
     return;
   }
 

@@ -43,6 +43,9 @@ import { stubTelegramFetch, type TelegramFetchStub } from "./helpers/telegramFet
 const BOT_ID = 42;
 const SUPPORT_CHAT_ID = -1001234567890;
 
+/** 播种 pending 行用的栅栏 hash（Turnstile 任务：预检要求 verify_request_hash 非空） */
+const SEED_HASH = "c".repeat(64);
+
 /** 顺序取值的注入 rng（喂确定性序列；耗尽后恒 0） */
 function seqRng(values: number[]): () => number {
   let index = 0;
@@ -224,14 +227,14 @@ describe("verify: handleVerifyCallback 答题路径", () => {
     stub.restore();
   });
 
-  /** 播种一个未验证用户 + pending 题（answer=5, msgId=4242），可选带 topic 置顶 */
+  /** 播种一个未验证用户 + pending 题（answer=5, msgId=4242，带栅栏），可选带 topic 置顶 */
   async function seedPending(options: { topic?: { threadId: number; pinnedMsgId: number } } = {}) {
     await env.HODOR_DB.prepare(
-      `INSERT INTO users (bot_id, user_id, first_name, username, first_seen_at, last_seen_at, is_verified, verify_answer, verify_msg_id)
-       VALUES (?, 7601, 'Verify', 'verify_hd', '2026-09-01T10:00:00.000Z', '2026-09-01T10:00:00.000Z', 0, 5, 4242)
-       ON CONFLICT (bot_id, user_id) DO UPDATE SET is_verified = 0, verify_answer = 5, verify_msg_id = 4242, verified_at = NULL`,
+      `INSERT INTO users (bot_id, user_id, first_name, username, first_seen_at, last_seen_at, is_verified, verify_answer, verify_msg_id, verify_request_hash, verify_request_generation)
+       VALUES (?, 7601, 'Verify', 'verify_hd', '2026-09-01T10:00:00.000Z', '2026-09-01T10:00:00.000Z', 0, 5, 4242, ?, 0)
+       ON CONFLICT (bot_id, user_id) DO UPDATE SET is_verified = 0, verify_answer = 5, verify_msg_id = 4242, verified_at = NULL, verify_request_hash = ?, verify_request_generation = 0`,
     )
-      .bind(BOT_ID)
+      .bind(BOT_ID, SEED_HASH, SEED_HASH)
       .run();
     if (options.topic) {
       await env.HODOR_DB.prepare(
@@ -318,7 +321,7 @@ describe("verify: handleVerifyCallback 答题路径", () => {
     expect(stub.countOf("sendMessage")).toBe(0); // 绝无新 push（edit 才是重出载体）
   });
 
-  it("答错且 edit permanent（题面已删）→ warn 吞：保留旧题判定（不落库新答案），静默完成", async () => {
+  it("答错且 edit permanent（题面已删）→ warn 吞：新请求栅栏已替换（无 msgId/answer），旧消息回调按已失效收敛", async () => {
     await seedPending();
     stub.always("editMessageText", {
       status: 400,
@@ -328,10 +331,18 @@ describe("verify: handleVerifyCallback 答题路径", () => {
     await expect(
       handleVerifyCallback(env, BOT_ID, callback({ data: "v:3" })),
     ).resolves.toBeUndefined();
-    // 屏幕题面未更新 → 库内答案不换（旧题判定自洽）
+    // 预留发生在 edit 之前：屏幕未更新（edit 失败），库内已是「新请求已预留、
+    // 无题面」形态——旧消息回调的预检（msgId 已空）拦下，下一条消息重新出题
     const row = await readVerifyRow(7601);
-    expect(row!.verify_answer).toBe(5);
-    expect(row!.verify_msg_id).toBe(4242);
+    expect(row!.verify_answer).toBeNull();
+    expect(row!.verify_msg_id).toBeNull();
+    expect(
+      (
+        await env.HODOR_DB.prepare(
+          "SELECT verify_request_hash FROM users WHERE bot_id = ? AND user_id = ?",
+        ).bind(BOT_ID, 7601).first<{ verify_request_hash: string | null }>()
+      )!.verify_request_hash,
+    ).not.toBeNull();
   });
 
   it("旧题回调（verify_msg_id 不匹配）→ 失效 toast，零 edit、零状态变更", async () => {
@@ -432,11 +443,11 @@ describe("verify: handleVerifyCallback 置顶刷新失败语义（best-effort pe
         : { status: 403, json: { ok: false, error_code: 403, description: "Forbidden" } },
     );
     await env.HODOR_DB.prepare(
-      `INSERT INTO users (bot_id, user_id, first_name, first_seen_at, last_seen_at, is_verified, verify_answer, verify_msg_id)
-       VALUES (?, 7603, 'Pin', '2026-09-01T10:00:00.000Z', '2026-09-01T10:00:00.000Z', 0, 5, 4342)
-       ON CONFLICT (bot_id, user_id) DO UPDATE SET is_verified = 0, verify_answer = 5, verify_msg_id = 4342`,
+      `INSERT INTO users (bot_id, user_id, first_name, first_seen_at, last_seen_at, is_verified, verify_answer, verify_msg_id, verify_request_hash, verify_request_generation)
+       VALUES (?, 7603, 'Pin', '2026-09-01T10:00:00.000Z', '2026-09-01T10:00:00.000Z', 0, 5, 4342, ?, 0)
+       ON CONFLICT (bot_id, user_id) DO UPDATE SET is_verified = 0, verify_answer = 5, verify_msg_id = 4342, verify_request_hash = ?, verify_request_generation = 0`,
     )
-      .bind(BOT_ID)
+      .bind(BOT_ID, SEED_HASH, SEED_HASH)
       .run();
     await insertTopic(env.HODOR_DB, { botId: BOT_ID, userId: 7603, threadId: 311, title: "Pin" });
     await env.HODOR_DB.prepare(
@@ -462,11 +473,11 @@ describe("verify: handleVerifyCallback 置顶刷新失败语义（best-effort pe
         : { status: 503, json: { ok: false, description: "unavailable" } },
     );
     await env.HODOR_DB.prepare(
-      `INSERT INTO users (bot_id, user_id, first_name, first_seen_at, last_seen_at, is_verified, verify_answer, verify_msg_id)
-       VALUES (?, 7604, 'Pin2', '2026-09-01T10:00:00.000Z', '2026-09-01T10:00:00.000Z', 0, 5, 4343)
-       ON CONFLICT (bot_id, user_id) DO UPDATE SET is_verified = 0, verify_answer = 5, verify_msg_id = 4343`,
+      `INSERT INTO users (bot_id, user_id, first_name, first_seen_at, last_seen_at, is_verified, verify_answer, verify_msg_id, verify_request_hash, verify_request_generation)
+       VALUES (?, 7604, 'Pin2', '2026-09-01T10:00:00.000Z', '2026-09-01T10:00:00.000Z', 0, 5, 4343, ?, 0)
+       ON CONFLICT (bot_id, user_id) DO UPDATE SET is_verified = 0, verify_answer = 5, verify_msg_id = 4343, verify_request_hash = ?, verify_request_generation = 0`,
     )
-      .bind(BOT_ID)
+      .bind(BOT_ID, SEED_HASH, SEED_HASH)
       .run();
     await insertTopic(env.HODOR_DB, { botId: BOT_ID, userId: 7604, threadId: 312, title: "Pin2" });
     await env.HODOR_DB.prepare(
@@ -500,15 +511,23 @@ describe("verify: 纯按钮模式出题与判卷（T32，阶段 5 M3）", () => 
     return env.HODOR_DB.prepare("DELETE FROM settings").run();
   });
 
-  /** 播种 7605 基准行（题目字段可配；默认归零） */
+  /** 播种 7605 基准行（题目字段可配；默认归零；栅栏 hash 可配——预检要求非空） */
   async function seedUser(options: { answer?: number; msgId?: number } = {}): Promise<void> {
     await env.HODOR_DB.prepare(
-      `INSERT INTO users (bot_id, user_id, first_name, username, first_seen_at, last_seen_at, is_verified, verified_at, verify_answer, verify_msg_id)
-       VALUES (?, 7605, 'Btn', 'btn_hd', '2026-09-01T10:00:00.000Z', '2026-09-01T10:00:00.000Z', 0, NULL, ?, ?)
+      `INSERT INTO users (bot_id, user_id, first_name, username, first_seen_at, last_seen_at, is_verified, verified_at, verify_answer, verify_msg_id, verify_request_hash, verify_request_generation)
+       VALUES (?, 7605, 'Btn', 'btn_hd', '2026-09-01T10:00:00.000Z', '2026-09-01T10:00:00.000Z', 0, NULL, ?, ?, ?, 0)
        ON CONFLICT (bot_id, user_id) DO UPDATE SET
-         is_verified = 0, verified_at = NULL, verify_answer = ?, verify_msg_id = ?`,
+         is_verified = 0, verified_at = NULL, verify_answer = ?, verify_msg_id = ?, verify_request_hash = ?, verify_request_generation = 0`,
     )
-      .bind(BOT_ID, options.answer ?? null, options.msgId ?? null, options.answer ?? null, options.msgId ?? null)
+      .bind(
+        BOT_ID,
+        options.answer ?? null,
+        options.msgId ?? null,
+        options.answer === undefined ? null : SEED_HASH,
+        options.answer ?? null,
+        options.msgId ?? null,
+        options.answer === undefined ? null : SEED_HASH,
+      )
       .run();
   }
 

@@ -333,12 +333,15 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
     expect(off).not.toContain("/verifyoff");
   });
 
-  it("模式两态：/verifymode 行展示当前模式中文名（数学题 / 纯按钮）", () => {
+  it("模式三态：/verifymode 行展示当前模式中文名（数学题 / 纯按钮 / Turnstile）+ 用法", () => {
     expect(formatHelpText({ verifyEnabled: true, verifyMode: "math" })).toContain(
-      "/verifymode - 切换验证模式（当前：数学题）",
+      "/verifymode - 查看当前验证模式；用法：/verifymode math|button|turnstile（当前：数学题）",
     );
     expect(formatHelpText({ verifyEnabled: false, verifyMode: "button" })).toContain(
-      "/verifymode - 切换验证模式（当前：纯按钮）",
+      "（当前：纯按钮）",
+    );
+    expect(formatHelpText({ verifyEnabled: true, verifyMode: "turnstile" })).toContain(
+      "（当前：Turnstile 人机验证）",
     );
   });
 

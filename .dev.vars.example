@@ -1,4 +1,4 @@
-# hodor 环境变量总表（共 9 个变量，对齐 docs/guide/deploy.md）。本文件一职两用：
+# hodor 环境变量总表（基础 9 项 + 可选 Turnstile 3 项，对齐 docs/guide/deploy.md）。本文件一职两用：
 # (a) 本地开发模板：cp .dev.vars.example .dev.vars 后逐行取消注释并填入真值
 #     （5 条必填必须启用，4 条选填按需；.dev.vars 已被 git 忽略，绝不提交）。
 # (b) Deploy 按钮 / Workers 导入向导的变量表单清单：向导按本文件生成表单，未注释条目
@@ -35,3 +35,14 @@
 
 # 【选填 Var】自定义欢迎语（支持换行，字面 \n 解释为换行）；未配置或为空时使用内置默认文案
 # WELCOME_TEXT=你好，欢迎咨询！\n直接发送消息即可与客服对话。
+
+# 【选填 Var】Cloudflare Turnstile Widget 公开 Site Key（可公开非机密，申请流程见 docs/guide/deploy.md#turnstile）；
+# 与 TURNSTILE_SECRET_KEY 必须成对配置，仅 verifymode 切到 turnstile 时必需
+# TURNSTILE_SITE_KEY=0x4AAAAAAAxxxxxxxxxxxxLL
+
+# 【选填 Secret】Cloudflare Turnstile 服务端校验密钥（面板配为机密）；仅服务端 Siteverify 使用，绝不进页面 / 日志
+# TURNSTILE_SECRET_KEY=0x4AAAAAAAxxxxxxxxxxxxkx
+
+# 【选填 Var】验证页面的固定公网地址（HTTPS origin，仅可含根路径，不含凭据 / 查询 / 片段）；
+# 缺省按 webhook 请求的 origin 推导，一般无需配置（多页面域名等特殊部署才需要）
+# PUBLIC_BASE_URL=https://hodor.example.workers.dev

@@ -39,6 +39,8 @@ import {
   formatUnnoteConfirmed,
   formatUnriskConfirmed,
   formatVerifyModeConfirmed,
+  formatVerifyModeCurrent,
+  formatVerifyModeMissingTurnstileConfig,
   formatVerifyOffConfirmed,
   formatVerifyOnConfirmed,
   formatPinnedInfo,
@@ -46,6 +48,7 @@ import {
   NOTE_USAGE_NOTICE,
   UNBOUND_TOPIC_NOTICE,
   UNKNOWN_COMMAND_NOTICE,
+  VERIFYMODE_USAGE_NOTICE,
 } from "../src/copy";
 import { handleOutbound } from "../src/pipeline/outbound";
 import { handleInbound } from "../src/pipeline/inbound";
@@ -797,26 +800,84 @@ describe("commands: /verifyon /verifyoff /verifymode + /help 动态（T31/T32，
     expect(stub.countOf("sendMessage")).toBe(2); // 除两条确认外零调用（无置顶刷新——不涉绑定用户）
   });
 
-  it("/verifymode 循环切换：math → button → math；确认携带新模式（button 附防护较弱说明、math 不附）；零中继零账本", async () => {
+  it("/verifymode 无参只查看：当前模式 + 可选值回 topic，绝不写设置、绝不清 pending（兼容性变更）", async () => {
+    await seedPendingUser(7273, 5, 4242); // pending 题在场
     const before = await countAllLedgerRows();
-    expect((await getVerificationSettings(env.HODOR_DB)).verifyMode).toBe("math"); // 缺省
 
     await handleOutbound(env, BOT_ID, commandMessage("/verifymode", 686, ADMIN_ID, 116));
+
+    const reply = topicReplies(stub, 686)[0].body as Record<string, unknown>;
+    expect(reply.text).toBe(formatVerifyModeCurrent({ verifyEnabled: true, verifyMode: "math" }));
+    expect(reply.text as string).toContain("当前验证模式：数学题");
+    expect(reply.text as string).toContain("math（数学题）、button（纯按钮）、turnstile");
+    // 设置与 pending 零变化（无参 = 只读）
+    const settings = await getVerificationSettings(env.HODOR_DB);
+    expect(settings.verifyMode).toBe("math");
+    expect(settings.verifyGeneration).toBe(0);
+    const pending = await env.HODOR_DB.prepare(
+      "SELECT verify_answer, verify_msg_id FROM users WHERE bot_id = ? AND user_id = ?",
+    ).bind(BOT_ID, 7273).first<{ verify_answer: number | null; verify_msg_id: number | null }>();
+    expect(pending).toEqual({ verify_answer: 5, verify_msg_id: 4242 });
+    expect(await countAllLedgerRows()).toBe(before);
+  });
+
+  it("/verifymode 非法参数：拒绝 + 用法提示，设置与 pending 均不变", async () => {
+    await seedPendingUser(7274, 7, 4244);
+    for (const [text, msgId] of [
+      ["/verifymode TGuard", 117],
+      ["/verifymode math extra", 118],
+      ["/verifymode MATH", 119],
+    ] as const) {
+      await handleOutbound(env, BOT_ID, commandMessage(text, 687, ADMIN_ID, msgId));
+      const reply = topicReplies(stub, 687).at(-1)!.body as Record<string, unknown>;
+      expect(reply.text).toBe(VERIFYMODE_USAGE_NOTICE);
+    }
+    const settings = await getVerificationSettings(env.HODOR_DB);
+    expect(settings.verifyMode).toBe("math");
+    expect(settings.verifyGeneration).toBe(0);
+    const pending = await env.HODOR_DB.prepare(
+      "SELECT verify_answer, verify_msg_id FROM users WHERE bot_id = ? AND user_id = ?",
+    ).bind(BOT_ID, 7274).first<{ verify_answer: number | null; verify_msg_id: number | null }>();
+    expect(pending).toEqual({ verify_answer: 7, verify_msg_id: 4244 });
+  });
+
+  it("/verifymode turnstile 缺配置：拒绝切换（点名缺失变量），设置与 pending 均不变", async () => {
+    // vitest 钉死 TURNSTILE_* 为空串 = 未配置
+    await seedPendingUser(7275, 5, 4245);
+    await handleOutbound(env, BOT_ID, commandMessage("/verifymode turnstile", 688, ADMIN_ID, 120));
+
+    const reply = topicReplies(stub, 688)[0].body as Record<string, unknown>;
+    expect(reply.text).toBe(
+      formatVerifyModeMissingTurnstileConfig(["TURNSTILE_SITE_KEY", "TURNSTILE_SECRET_KEY"]),
+    );
+    const settings = await getVerificationSettings(env.HODOR_DB);
+    expect(settings.verifyMode).toBe("math");
+    expect(settings.verifyGeneration).toBe(0);
+    const pending = await env.HODOR_DB.prepare(
+      "SELECT verify_answer, verify_msg_id FROM users WHERE bot_id = ? AND user_id = ?",
+    ).bind(BOT_ID, 7275).first<{ verify_answer: number | null; verify_msg_id: number | null }>();
+    expect(pending).toEqual({ verify_answer: 5, verify_msg_id: 4245 });
+  });
+
+  it("/verifymode 显式设置 math|button：切换生效 + 确认（button 附防护较弱说明）；零中继零账本", async () => {
+    const before = await countAllLedgerRows();
+
+    await handleOutbound(env, BOT_ID, commandMessage("/verifymode button", 689, ADMIN_ID, 121));
     expect((await getVerificationSettings(env.HODOR_DB)).verifyMode).toBe("button");
-    const firstReply = topicReplies(stub, 686)[0].body as Record<string, unknown>;
+    const firstReply = topicReplies(stub, 689)[0].body as Record<string, unknown>;
     expect(firstReply.text).toBe(formatVerifyModeConfirmed("button"));
     expect(firstReply.text as string).toContain("防护较弱");
 
-    await handleOutbound(env, BOT_ID, commandMessage("/verifymode", 687, ADMIN_ID, 117));
+    await handleOutbound(env, BOT_ID, commandMessage("/verifymode math", 690, ADMIN_ID, 122));
     expect((await getVerificationSettings(env.HODOR_DB)).verifyMode).toBe("math");
-    const secondReply = topicReplies(stub, 687)[0].body as Record<string, unknown>;
+    const secondReply = topicReplies(stub, 690)[0].body as Record<string, unknown>;
     expect(secondReply.text).toBe(formatVerifyModeConfirmed("math"));
     expect(secondReply.text as string).not.toContain("防护较弱");
 
     expect(await countAllLedgerRows()).toBe(before);
   });
 
-  it("/verifymode 切换清题：pending 用户（含多用户）题目字段被清空，已验证用户验证态不受影响", async () => {
+  it("/verifymode 显式切换清题 + 推进版本：跨模式真变化作废全部 pending（含栅栏四列），已验证态保留；同模式幂等不推进版本", async () => {
     await seedPendingUser(7271, 5, 4242);
     await seedPendingUser(7272, 3, 4243);
     await env.HODOR_DB.prepare(
@@ -825,18 +886,29 @@ describe("commands: /verifyon /verifyoff /verifymode + /help 动态（T31/T32，
       .bind(new Date().toISOString(), BOT_ID, 7272)
       .run();
 
-    await handleOutbound(env, BOT_ID, commandMessage("/verifymode", 688, ADMIN_ID, 118));
+    await handleOutbound(env, BOT_ID, commandMessage("/verifymode button", 691, ADMIN_ID, 123));
 
-    const readFields = async (userId: number) =>
+    const readFields = async () =>
       env.HODOR_DB.prepare(
-        "SELECT is_verified, verify_answer, verify_msg_id FROM users WHERE bot_id = ? AND user_id = ?",
-      )
-        .bind(BOT_ID, userId)
-        .first<{ is_verified: number; verify_answer: number | null; verify_msg_id: number | null }>();
-    // 旧题一律作废（verify_answer / verify_msg_id → NULL）——旧题回调落失效分支
-    expect(await readFields(7271)).toEqual({ is_verified: 0, verify_answer: null, verify_msg_id: null });
+        "SELECT is_verified, verify_answer, verify_msg_id, verify_request_hash FROM users WHERE bot_id = ? AND user_id = ?",
+      );
+    // 旧题连同栅栏一并作废——旧题回调 / 切回 math 均无法复活
+    expect(
+      await (await readFields()).bind(BOT_ID, 7271).first<Record<string, unknown>>(),
+    ).toEqual({ is_verified: 0, verify_answer: null, verify_msg_id: null, verify_request_hash: null });
     // 已验证用户的验证态与 verified_at 语义不受切换影响（题目字段本就为空）
-    expect(await readFields(7272)).toMatchObject({ is_verified: 1, verify_answer: null, verify_msg_id: null });
+    expect(
+      await (await readFields()).bind(BOT_ID, 7272).first<Record<string, unknown>>(),
+    ).toMatchObject({ is_verified: 1, verify_answer: null, verify_msg_id: null });
+    expect((await getVerificationSettings(env.HODOR_DB)).verifyGeneration).toBe(1);
+
+    // 同模式重复设置：幂等——版本不再推进、pending 不被误清（先造一份新 pending）
+    await seedPendingUser(7276, 9, 4246);
+    await handleOutbound(env, BOT_ID, commandMessage("/verifymode button", 692, ADMIN_ID, 124));
+    expect((await getVerificationSettings(env.HODOR_DB)).verifyGeneration).toBe(1);
+    expect(
+      await (await readFields()).bind(BOT_ID, 7276).first<Record<string, unknown>>(),
+    ).toEqual({ is_verified: 0, verify_answer: 9, verify_msg_id: 4246, verify_request_hash: null });
   });
 
   it("/help 动态：开关两态 × 模式两态接库内 settings 真值（关 → 含 /verifyon 不含 /verifyoff；开 → 反之；模式行随真值）", async () => {

@@ -174,12 +174,12 @@ export const BAN_NOTICE = "你已被禁言，消息无法送达客服。如有�
  */
 export interface HelpSettings {
   verifyEnabled: boolean;
-  verifyMode: "math" | "button";
+  verifyMode: "math" | "button" | "turnstile";
 }
 
 /** 验证模式的帮助侧中文名（/verifymode 行与切换确认共用） */
-export function verifyModeLabel(mode: "math" | "button"): string {
-  return mode === "math" ? "数学题" : "纯按钮";
+export function verifyModeLabel(mode: "math" | "button" | "turnstile"): string {
+  return mode === "math" ? "数学题" : mode === "button" ? "纯按钮" : "Turnstile 人机验证";
 }
 
 export function formatHelpText(settings: HelpSettings): string {
@@ -206,7 +206,7 @@ export function formatHelpText(settings: HelpSettings): string {
     lines.push("/verifyon - 开启人机验证", "当前验证已关闭。");
   }
   lines.push(
-    `/verifymode - 切换验证模式（当前：${verifyModeLabel(settings.verifyMode)}）`,
+    `/verifymode - 查看当前验证模式；用法：/verifymode math|button|turnstile（当前：${verifyModeLabel(settings.verifyMode)}）`,
     "纯按钮模式防护较弱，bot 可直接调 API 点击，仅建议受信任场景使用。",
     "",
     "危险操作：",
@@ -246,7 +246,7 @@ export const ADMIN_COMMAND_MENU: readonly { command: string; description: string
   { command: "unrisk", description: "取消高危标记" },
   { command: "verifyon", description: "开启人机验证" },
   { command: "verifyoff", description: "临时关闭人机验证" },
-  { command: "verifymode", description: "切换验证模式" },
+  { command: "verifymode", description: "查看/设置验证模式（math/button/turnstile）" },
   { command: "archive", description: "软归档本话题用户" },
   { command: "deluser", description: "物理删除用户及本话题（需确认）" },
   { command: "purgemsg", description: "清理本话题可追踪群消息" },
@@ -320,13 +320,36 @@ export function formatVerifyOffConfirmed(): string {
 }
 
 /**
- * /verifymode 确认（T32）：携带切换后的新模式；纯按钮附防护较弱说明
- *（bot 可直接调 API 点击）。
+ * /verifymode 确认（T32，Turnstile 任务起支持三模式）：携带切换后的新模式；
+ * 纯按钮附防护较弱说明（bot 可直接调 API 点击）；Turnstile 附入口说明。
  */
-export function formatVerifyModeConfirmed(mode: "math" | "button"): string {
-  return mode === "math"
-    ? "验证模式已切换为数学题。"
-    : "验证模式已切换为纯按钮。注意：纯按钮模式防护较弱，bot 可直接调 API 点击，仅建议受信任场景使用。";
+export function formatVerifyModeConfirmed(mode: "math" | "button" | "turnstile"): string {
+  if (mode === "math") return "验证模式已切换为数学题。";
+  if (mode === "button") {
+    return "验证模式已切换为纯按钮。注意：纯按钮模式防护较弱，bot 可直接调 API 点击，仅建议受信任场景使用。";
+  }
+  return "验证模式已切换为 Turnstile 人机验证：未验证用户将通过私聊按钮打开网页完成校验（需已配置 TURNSTILE_SITE_KEY / TURNSTILE_SECRET_KEY）。切换已作废全部旧验证题与网页请求，已验证用户不受影响。";
+}
+
+/**
+ * /verifymode 无参数查看（只读）：当前模式 + 可选值。绝不写设置、不清 pending、
+ * 不循环切换（2026-10-09 用户决策的兼容性变更）。
+ */
+export function formatVerifyModeCurrent(settings: HelpSettings): string {
+  return [
+    `当前验证模式：${verifyModeLabel(settings.verifyMode)}`,
+    "可选值：math（数学题）、button（纯按钮）、turnstile（Turnstile 人机验证）。",
+    "用法：/verifymode <模式>；无参数仅查看，不改变任何设置。",
+  ].join("\n");
+}
+
+/** /verifymode 非法参数：拒绝且不改变任何设置 / pending */
+export const VERIFYMODE_USAGE_NOTICE =
+  "用法：/verifymode math|button|turnstile（无参数仅查看当前模式，不改变设置）。";
+
+/** /verifymode turnstile 但配置缺失：拒绝切换、不清 pending（点名缺哪些变量） */
+export function formatVerifyModeMissingTurnstileConfig(missing: string[]): string {
+  return `无法切换为 Turnstile 模式：缺少必需配置 ${missing.join("、")}。当前设置与待验证用户的题目均未改变；配置完成后请重新执行 /verifymode turnstile。`;
 }
 
 /**
@@ -339,6 +362,26 @@ export function formatVerifyButtonQuestion(): string {
 
 /** 纯按钮模式的唯一按钮文案（T32）：点击即提交答案 0 */
 export const VERIFY_BUTTON_LABEL = "我不是机器人";
+
+/* ------------------------------------------------------------------ */
+/* Turnstile 人机验证模式（2026-10-09 任务）文案                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Turnstile 模式题面：web_app 按钮引导文案（含 10 分钟链接有效期提示——
+ * 请求自创建起 600 秒，过期回 Bot 重新发起）。
+ */
+export function formatVerifyTurnstileQuestion(): string {
+  return "为确认你是真人，请点击下方按钮打开验证页面完成人机验证。\n验证链接 10 分钟内有效，过期请发送任意消息重新获取。";
+}
+
+/** Turnstile 模式超限合并消息前缀（与数学题 / 纯按钮同款限频语义） */
+export function formatRateLimitVerifyTurnstile(limit: number): string {
+  return `发送过快，每分钟最多 ${limit} 条消息，本条未送达。请重新完成验证：\n\n${formatVerifyTurnstileQuestion()}`;
+}
+
+/** Turnstile 模式的唯一按钮文案：打开 Mini App 验证页面 */
+export const VERIFY_TURNSTILE_BUTTON_LABEL = "打开验证页面";
 
 /* ------------------------------------------------------------------ */
 /* 阶段 6：会话维护（T38 archive/deluser / T39 purgemsg / T40 wipe）文案  */

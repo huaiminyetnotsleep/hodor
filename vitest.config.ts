@@ -41,6 +41,12 @@ export default defineConfig(async () => {
         // env，让无关用例的已验证用户凭空触发重验（TTL 边界用例用构造 env
         // 对象覆盖，env.test.ts 同模式）
         VERIFY_TTL_HOURS: "0",
+        // Turnstile 任务（2026-10-09）：三可选变量钉死为空 = 未配置——
+        // turnstile 模式必需检查走构造 env 覆盖的破坏用例；空串避免本地
+        // .dev.vars 临时配了真实凭据泄漏进测试 env
+        TURNSTILE_SITE_KEY: "",
+        TURNSTILE_SECRET_KEY: "",
+        PUBLIC_BASE_URL: "",
       },
     },
   };

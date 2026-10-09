@@ -44,11 +44,16 @@ SELECT
 -- 2.1 单用户全档案：users 全部状态列 + 该用户的 topic 绑定（LEFT JOIN，未建
 --     topic 的未验证用户也能查出）。要点：status 为 active / deleted（deleted
 --     表示 /archive 软归档，行仍在）；is_banned / is_risk / is_verified 为 0/1；
---     verify_answer 非空 = 有进行中的验证题；note（备注）在 topics 表。
+--     verify_answer 非空 = 有进行中的验证题（Turnstile 模式的网页请求不带答案，
+--     看 verify_request_hash 非空）；verify_request_expires_at 到期 = 请求过期；
+--     verify_submit_not_before 在未来 = 15 秒提交节流窗口占用中；
+--     note（备注）在 topics 表。
 SELECT
   u.user_id, u.first_name, u.last_name, u.username,
   u.status, u.is_banned, u.is_risk, u.is_verified, u.verified_at,
   u.verify_answer, u.verify_msg_id,
+  u.verify_request_hash, u.verify_request_expires_at,
+  u.verify_request_generation, u.verify_submit_not_before,
   u.rate_window_start, u.rate_count, u.last_notice_at, u.risk_notice_at,
   u.first_seen_at, u.last_seen_at,
   t.thread_id, t.title AS topic_title, t.status AS topic_status,
@@ -138,8 +143,9 @@ LIMIT 20;
 -- 六、配置与身份
 -- ----------------------------------------------------------------------------
 
--- 6.1 运行时开关当前值：verify_enabled（1/0）、verify_mode（math/button）；
---     行缺失或值非法时运行时回退默认（verify_enabled=1、verify_mode=math）
+-- 6.1 运行时开关当前值：verify_enabled（1/0）、verify_mode（math/button/turnstile）、
+--     verify_generation（配置版本，缺失按 0 解释）；行缺失或值非法时运行时回退
+--     默认（verify_enabled=1、verify_mode=math、verify_generation=0）
 SELECT key, value
 FROM settings;
 

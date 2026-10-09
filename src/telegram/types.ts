@@ -68,11 +68,16 @@ export interface CopyMessageResult {
   message_id: number;
 }
 
-/** inline 键盘按钮：text 为按钮展示，callback_data 为点击回传载荷（验证题 "v:<值>"） */
-export interface InlineKeyboardButton {
-  text: string;
-  callback_data: string;
-}
+/**
+ * inline 键盘按钮（Turnstile 任务起为互斥联合类型）：
+ * - callback_data：题面选项按钮（验证题 "v:<值>"，普通回调）；
+ * - web_app：Mini App 入口按钮（官方约束：仅可用于用户与 Bot 的私聊）——
+ *   Turnstile 验证模式用它在私聊打开 /verify 页面；与 callback_data 互斥，
+ *   绝不混用 sendData 机制。
+ */
+export type InlineKeyboardButton =
+  | { text: string; callback_data: string }
+  | { text: string; web_app: { url: string } };
 
 /**
  * reply_markup 最小子集：inline 键盘（T27 验证题选项按钮）。

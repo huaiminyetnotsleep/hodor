@@ -28,6 +28,12 @@ declare global {
       MAX_ATTEMPTS?: string;
       /** 【选填 Var】自定义欢迎语文案，支持换行（字面 \n 解释为换行）；缺省用内置默认文案 */
       WELCOME_TEXT?: string;
+      /** 【选填 Var】Cloudflare Turnstile Widget 的公开 Site Key（可公开，非机密）；与 TURNSTILE_SECRET_KEY 成对配置 */
+      TURNSTILE_SITE_KEY?: string;
+      /** 【选填 Secret】Cloudflare Turnstile 服务端校验密钥；仅服务端 Siteverify 使用，绝不进页面 / 日志 / 诊断 */
+      TURNSTILE_SECRET_KEY?: string;
+      /** 【选填 Var】验证页面的固定公网地址（HTTPS origin）；缺省按 webhook 请求 origin 推导 */
+      PUBLIC_BASE_URL?: string;
     }
   }
 }
