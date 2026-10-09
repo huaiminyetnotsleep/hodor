@@ -94,7 +94,38 @@ curl https://hodor.<你的子域>.workers.dev/health
 | --- | --- |
 | 构建日志报 `The database … could not be found (7404 / 10181)` | 自动置备未生效：查构建日志**安装阶段**的 `[provision]` 输出；兜底把部署命令改为 `npm run deploy`（显式置备后部署）再重新部署 |
 | 构建令牌无 D1 建库权限 | 在面板手动建好同名 D1 再重跑（脚本按名字复用，仍零仓库改动）；或在面板创建具备 D1 编辑权限的自定义 token 配到 `CLOUDFLARE_API_TOKEN` |
+| 构建日志出现「将按仓库名置备数据库……会绑定共享数据库」告警 | Workers Builds 未把 Worker 名传入安装阶段。Worker 名为 `hodor` 的首实例可忽略；多实例部署按下节决策树，把该 Worker 的部署命令改为 `npm run deploy` 后重新部署 |
 | 部署后变量丢失 | 确认部署所用代码包含 `keep_vars: true`（本仓库已配置）；仍丢失时检查变量是否配在了别的 Worker 上 |
+
+## 部署多个实例
+
+同一份 fork 可以部署出多个完全隔离的机器人实例：每个实例 = 一个 Worker + 一个独立 D1 + 一个 Bot + 一个客服群，各自配置自己的 9 个变量，数据互不可见。全程浏览器操作，不改任何仓库文件。
+
+D1 数据库名自动随 Worker 名派生（Worker 名 `hodor-shop` → 数据库 `hodor-shop`），建库、绑定、迁移全部自动完成；首个实例（Worker 名 `hodor`）与本地 `npm run deploy` 的行为不受影响。
+
+### 操作步骤
+
+1. 在 Cloudflare 面板 → Workers & Pages → Create → Workers → **Import a repository**，再次选中**同一个 fork**
+2. 项目名称起一个**不同的名字**（如 `hodor-shop`，即该实例的 Worker 名）
+3. 其余向导项与首实例完全一致：构建命令留空、部署命令保持默认 `npx wrangler deploy`、关闭预览构建
+4. 部署完成后，进入**该 Worker** 的 设置 → 变量和机密，配置它自己的 9 个变量（见上方「环境变量」）
+5. 访问 `https://<新实例地址>/setwebhook/<你的 ADMIN_SECRET>`，为该实例的 bot 绑定 webhook
+
+### 构建日志核验（决策树）
+
+部署完成后查看构建日志中 `[provision]` 开头的行（告警行以 `[install-hook]` 开头），按下面对照确认：
+
+- 显示 `已创建数据库 hodor-shop`（或 `数据库 hodor-shop 已存在，复用`，即与你起的 Worker 名一致）→ **完成**，该实例已绑定自己的独立数据库
+- 显示的数据库名是 `hodor` 而你的 Worker 名**不是** `hodor` → Workers Builds 未把 Worker 名传给安装阶段：把该 Worker 的**部署命令**改为 `npm run deploy`（其余向导项不变）后重新部署即可，日志应随之显示派生名
+- 名为 `hodor` 的首实例看到上述告警可忽略，属正常现象
+
+::: warning
+多实例部署若忽略该告警，两个 Worker 会**共享同一个 D1 数据库**，数据串库。
+:::
+
+::: tip
+每次 push 会对每个实例各触发一次构建，构建配额随实例数线性消耗；免费套餐下并发构建会排队，属正常现象。多实例的更新传播与回滚边界见[发布与更新](/guide/release.md)。
+:::
 
 ## 部署后收尾
 

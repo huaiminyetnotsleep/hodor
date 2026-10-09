@@ -119,7 +119,7 @@ npm run deploy
 3. 复检全绿
 4. 试聊验收
 
-完整分步说明见 **[部署指南](docs/guide/deploy.md)**；日常更新与回滚见[发布与更新](docs/guide/release.md)。
+完整分步说明见 **[部署指南](docs/guide/deploy.md)**；日常更新与回滚见[发布与更新](docs/guide/release.md)；需要多个相互隔离的机器人实例（一实例一 Worker 一 D1），见[部署多个实例](docs/guide/deploy.md#部署多个实例)。
 
 ## 关键配置与命令
 

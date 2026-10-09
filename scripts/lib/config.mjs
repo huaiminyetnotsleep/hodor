@@ -354,6 +354,45 @@ export function withDatabaseId(text, uuid) {
 }
 
 /**
+ * 将 wrangler 配置中 d1_databases[0].database_name 的值替换为 name。
+ *
+ * 与 withDatabaseId 同构：原文区间替换，注释与其余字段逐字保留。多实例部署
+ * 时把派生数据库名写入 resolved / 构建工作区配置，使 wrangler 读到的
+ * database_name 与迁移、按名查找所用名称自洽。仓库 wrangler.jsonc 永不改写
+ * （唯一豁免见 scripts/deploy.mjs --install-hook）。
+ *
+ * @param {string} text wrangler 配置原文
+ * @param {string} name 数据库名（deriveInstanceNames 的派生结果）
+ * @returns {string} 替换后的配置文本
+ * @throws {Error} 配置缺少 d1_databases[0].database_name，或其值不是字符串字面量
+ */
+export function withDatabaseName(text, name) {
+  return replaceJsoncString(text, "d1_databases[0].database_name", name);
+}
+
+/**
+ * 从构建环境与仓库配置派生实例名：Worker 名 → D1 数据库名（1:1）。
+ *
+ * Cloudflare Workers Builds 会注入 WRANGLER_CI_OVERRIDE_NAME（当前连接的
+ * Worker 名，见官方构建排错文档）。多实例部署（同一 fork 连接多个 Worker
+ * 项目）依赖它区分实例：D1 名随 Worker 名派生，各实例自动各建各库。变量
+ * 缺失 / 空白（本地部署、变量在 install 阶段不可见等情形）一律回退仓库
+ * 配置名——首实例与本地部署行为与历史版本逐字节一致。不做名字清洗/截断：
+ * Worker 名已被 Cloudflare 校验，字符集与 D1 名约束重合；极端不兼容时
+ * `d1 create` 失败即中止，截断反而有碰撞风险。
+ *
+ * @param {Record<string, string | undefined>} env 环境变量快照（如 process.env）
+ * @param {string} configWorkerName 仓库 wrangler.jsonc 的顶层 name
+ * @returns {{ workerName: string, databaseName: string }} 派生的 Worker 名与
+ *   D1 数据库名（两者恒相等；D1_DATABASE_ID 逃生口由调用方在派生之外处理）
+ */
+export function deriveInstanceNames(env, configWorkerName) {
+  const override = (env.WRANGLER_CI_OVERRIDE_NAME ?? "").trim();
+  const workerName = override !== "" ? override : configWorkerName;
+  return { workerName, databaseName: workerName };
+}
+
+/**
  * 判断 postinstall 预置钩子（scripts/deploy.mjs --install-hook）是否应执行。
  *
  * 依据官方文档（developers.cloudflare.com/workers/ci-cd/builds/configuration/）：

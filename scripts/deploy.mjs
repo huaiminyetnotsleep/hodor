@@ -8,10 +8,10 @@
 //      一字不改，真实 database_id 只写入 .wrangler/resolved.wrangler.jsonc
 //      （.wrangler/ 已 gitignore），migrate / deploy 均通过 --config 指向该
 //      临时配置。唯一豁免：--install-hook（postinstall 门控注入，2026-09-30
-//      第三次范围变更）仅在 Workers Builds（WORKERS_CI=1）中把真实 id 就地
-//      注入仓库路径的 wrangler.jsonc——构建工作区是一次性克隆，注入不回传 git
-//      仓库；Workers Builds 官方默认命令 `npx wrangler deploy` 从 cwd 读配置、
-//      不带 --config，注入因此必需。
+//      第三次范围变更）仅在 Workers Builds（WORKERS_CI=1）中把真实 id 与派生
+//      数据库名就地注入仓库路径的 wrangler.jsonc——构建工作区是一次性克隆，
+//      注入不回传 git 仓库；Workers Builds 官方默认命令 `npx wrangler deploy`
+//      从 cwd 读配置、不带 --config，注入因此必需。
 //   2. 迁移失败 → 中止且不部署（T06 契约：不发布不兼容代码），修复后重跑即可。
 //      --install-hook 下即：迁移失败 → npm install 失败 → 构建中止 → 不部署。
 //   3. --install-hook 门控：非 Workers Builds 环境（无 WORKERS_CI=1；本地与
@@ -34,9 +34,15 @@
 // 声明了占位 database_id，info 实际按占位 uuid 调 API，稳定 404（code 7404），
 // 这是 2026-09-30 Workers Builds 生产事故的根因。
 //
-// 纯函数（JSONC 剥注释解析 / database_id 原地替换 / postinstall 门控判定）在
-// scripts/lib/config.mjs，版本模块纯渲染/校验在 scripts/lib/version.mjs——两者
-// 均可被 workerd 沙箱内的测试导入；本文件只做进程与文件编排，不被测试导入。
+// 数据库名称派生（多实例部署，2026-10-09）：D1 名 = Worker 名，优先取
+// WRANGLER_CI_OVERRIDE_NAME（Workers Builds 注入的连接 Worker 名，trim 后
+// 非空才采用），缺失/空白回退 wrangler.jsonc 的 name——首实例与本地部署
+// 回到现状（hodor → hodor）。同一 fork 多个 Worker 项目各自建库，互不串库。
+//
+// 纯函数（JSONC 剥注释解析 / database_id·database_name 原地替换 / 实例名派生 /
+// postinstall 门控判定）在 scripts/lib/config.mjs，版本模块纯渲染/校验在
+// scripts/lib/version.mjs——两者均可被 workerd 沙箱内的测试导入；本文件只做
+// 进程与文件编排，不被测试导入。
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -45,11 +51,13 @@ import { fileURLToPath } from "node:url";
 
 import {
   PLACEHOLDER_DATABASE_ID,
+  deriveInstanceNames,
   isAuthFailure,
   parseWranglerConfig,
   replaceJsoncString,
   shouldRunInstallHook,
   withDatabaseId,
+  withDatabaseName,
 } from "./lib/config.mjs";
 import { renderVersionModule } from "./lib/version.mjs";
 
@@ -99,11 +107,11 @@ function printUsage() {
   --migrate-only     注入版本模块 → 解析数据库 + 应用远端迁移（不部署）
   --install-hook     postinstall 预置钩子（package.json 的 postinstall 自动运行，
                      通常无需手动调用）。仅当 WORKERS_CI=1（Cloudflare Workers
-                     Builds 注入）时执行：解析/创建 D1 → 就地注入真实
-                     database_id 到仓库 wrangler.jsonc → 生成版本模块 → 远端
-                     迁移；随后交由官方默认部署命令（npx wrangler deploy）继续。
-                     其余环境（本地 npm install、GitHub Actions npm ci 等）打印
-                     一行提示后零副作用跳过
+                     Builds 注入）时执行：解析/创建 D1 → 就地注入派生数据库名
+                     与真实 database_id 到仓库 wrangler.jsonc → 生成版本模块 →
+                     远端迁移；随后交由官方默认部署命令（npx wrangler deploy）
+                     继续。其余环境（本地 npm install、GitHub Actions npm ci
+                     等）打印一行提示后零副作用跳过
   --help, -h         显示本帮助
 
 数据库解析顺序（各模式一致）：
@@ -112,11 +120,19 @@ function printUsage() {
   名称查找走账号级列表，不经 d1 info（其会先读配置里的占位
   database_id，必然 404）。
 
+数据库名称派生（各模式一致，多实例隔离的根基）：
+  D1 数据库名 = WRANGLER_CI_OVERRIDE_NAME（Workers Builds 注入的连接
+  Worker 名，trim 后非空才采用）→ wrangler.jsonc 的 name（回退，即
+  首实例与本地部署的现状）。同一 fork 连接多个 Worker 时各按其名建库。
+
 环境变量：
   D1_DATABASE_ID     可选。直接指定数据库 uuid，跳过 wrangler 查询/创建
                      （构建环境 token 无 D1 查询/创建权限时的逃生口）
   WORKERS_CI         由 Workers Builds 自动注入（固定为 1），--install-hook 的
-                     门控信号；其他 CI 环境只有 CI=true，不会命中`);
+                     门控信号；其他 CI 环境只有 CI=true，不会命中
+  WRANGLER_CI_OVERRIDE_NAME
+                     由 Workers Builds 自动注入（当前连接的 Worker 名），D1
+                     数据库名的派生源；缺失/空白时回退 wrangler.jsonc 的 name`);
 }
 
 /**
@@ -441,11 +457,12 @@ async function createDatabase(databaseName) {
 }
 
 /**
- * 读取仓库 wrangler.jsonc，校验并提取 d1_databases[0].database_name。
- * 默认模式与 --install-hook 共用的入口步骤：路径基于脚本位置推导，与 cwd
- * 无关；database_name 缺失属于仓库配置损坏，任何模式下都直接中止。
+ * 读取仓库 wrangler.jsonc，校验并提取 d1_databases[0].database_name 与顶层
+ * name（Worker 名，数据库名派生的回退源）。默认模式与 --install-hook 共用的
+ * 入口步骤：路径基于脚本位置推导，与 cwd 无关；任一字段缺失属于仓库配置
+ * 损坏，任何模式下都直接中止。
  *
- * @returns {{ rawText: string, databaseName: string }}
+ * @returns {{ rawText: string, databaseName: string, workerName: string }}
  */
 function readSourceConfig() {
   const rawText = readFileSync(SOURCE_CONFIG_PATH, "utf8");
@@ -457,18 +474,27 @@ function readSourceConfig() {
     );
     process.exit(1);
   }
+  if (typeof parsed.name !== "string" || parsed.name.trim() === "") {
+    console.error(
+      "[provision] wrangler.jsonc 缺少顶层 name（Worker 名），无法派生数据库名。",
+    );
+    process.exit(1);
+  }
   const databaseName = database.database_name;
+  const workerName = parsed.name;
 
   // 信息性提示：无论当前 database_id 是占位符还是真实 id，都以名称为唯一事实源
+  // （实际解析用的数据库名随 Worker 名派生，见 deriveInstanceNames；具体名称由
+  // 后续 provision 日志给出）
   if (database.database_id === PLACEHOLDER_DATABASE_ID) {
-    log("provision", `配置 database_id 为占位符，将以名称 ${databaseName} 解析真实 id。`);
+    log("provision", "配置 database_id 为占位符，将按派生的数据库名解析真实 id。");
   } else {
     log(
       "provision",
-      `配置 database_id 为 ${database.database_id}，仍以名称 ${databaseName} 为准重新解析。`,
+      `配置 database_id 为 ${database.database_id}，仍以派生的数据库名为准重新解析。`,
     );
   }
-  return { rawText, databaseName };
+  return { rawText, databaseName, workerName };
 }
 
 /**
@@ -523,8 +549,8 @@ function logResolvedSource(databaseName, uuid, source) {
 }
 
 /**
- * 生成 resolved 配置文本：写入真实 uuid，并把 main / migrations_dir 改写为
- * 仓库内绝对路径。
+ * 生成 resolved 配置文本：写入真实 uuid 与派生数据库名，并把 main /
+ * migrations_dir 改写为仓库内绝对路径。
  *
  * 为什么要改写路径：wrangler 对 --config 指定的配置，其中的相对路径以「配置
  * 文件所在目录」为基准解析。resolved 配置位于 .wrangler/ 下，若保留
@@ -533,13 +559,21 @@ function logResolvedSource(databaseName, uuid, source) {
  * 位置。若未来配置新增其他相对路径字段（如 assets.directory），需在此同步
  * 追加改写。
  *
+ * database_name 改写为派生名（deriveInstanceNames 的结果），使 resolved 配置
+ * 中的 D1 声明与迁移/按名查找所用名称自洽。顶层 name 字段刻意不改写：目标
+ * Worker 由 Cloudflare 的 override 机制决定，本脚本只负责 D1 归属。
+ *
  * @param {string} rawText 仓库 wrangler.jsonc 原文
  * @param {string} uuid 已解析的数据库 uuid
+ * @param {string} databaseName 派生的数据库名
  * @returns {string} resolved 配置文本（注释保留）
  */
-export function buildResolvedConfig(rawText, uuid) {
+export function buildResolvedConfig(rawText, uuid, databaseName) {
   const parsed = parseWranglerConfig(rawText);
   let resolved = withDatabaseId(rawText, uuid);
+  if (typeof parsed?.d1_databases?.[0]?.database_name === "string") {
+    resolved = replaceJsoncString(resolved, "d1_databases[0].database_name", databaseName);
+  }
   if (typeof parsed.main === "string") {
     resolved = replaceJsoncString(resolved, "main", path.resolve(REPO_ROOT, parsed.main));
   }
@@ -655,12 +689,17 @@ async function deployWorker() {
  * 等仅有 CI=true，绝不触发远端 D1 查询/创建/迁移等账号级操作。
  *
  * 放行后的执行顺序（任一步失败 exit 1 → npm install 失败 → 构建中止 → 不部署）：
+ *   0. Worker 名缺失告警（fail-open）：WRANGLER_CI_OVERRIDE_NAME 缺失/空白时
+ *      打印「按仓库名置备 + 多实例须改部署命令」告警后照常继续——无法区分
+ *      「主实例恰好叫 hodor」与「多实例但变量不可见」，fail-close 会误伤
+ *      首实例默认流程（决策树见 docs/guide/deploy.md「部署多个实例」）；
  *   1. 解析/创建数据库 uuid（与本地模式共用 resolveDatabaseId：含
- *      D1_DATABASE_ID 逃生口、uuid 校验、d1 list → d1 create、权限引导）；
- *   2. 就地注入：把真实 id 写入仓库路径的 wrangler.jsonc（withDatabaseId 做
- *      原文区间替换，注释逐字保留；重复执行幂等）。这是「本地模式仓库配置
- *      一字不改」不变的唯一豁免场景——Workers Builds 工作区是一次性克隆，
- *      注入不回传 git 仓库；
+ *      D1_DATABASE_ID 逃生口、uuid 校验、d1 list → d1 create、权限引导），
+ *      数据库名取派生名（deriveInstanceNames）；
+ *   2. 就地注入：把真实 id 与派生数据库名写入仓库路径的 wrangler.jsonc
+ *      （withDatabaseId / withDatabaseName 做原文区间替换，注释逐字保留；
+ *      重复执行幂等）。这是「本地模式仓库配置一字不改」不变的唯一豁免
+ *      场景——Workers Builds 工作区是一次性克隆，注入不回传 git 仓库；
  *   3. 生成版本模块（默认部署命令不经过 npm 生命周期，注入时机在此）；
  *   4. `wrangler d1 migrations apply <name> --remote`：不带 --config，读仓库
  *      cwd 中已注入的配置（与用户手动运行的形态一致）。
@@ -685,20 +724,37 @@ async function runInstallHook() {
     process.exit(1);
   }
 
-  const { rawText, databaseName } = readSourceConfig();
+  const { rawText, workerName: configWorkerName } = readSourceConfig();
+  const { databaseName } = deriveInstanceNames(process.env, configWorkerName);
+
+  // 情形 (b) 告警（R3，fail-open）：能走到这里 WORKERS_CI=1 已由门控保证，
+  // 只需检查 override。缺失/空白时按仓库名置备——若用户实际是多实例部署，
+  // 该 Worker 将绑定共享库；不中止的理由：无法区分「主实例恰好叫 hodor」
+  // 与「多实例但变量在 install 阶段不可见」，中止会误伤首实例默认流程。
+  // 最坏后果因此从「静默串库」降为「可见且一步可修」。
+  if ((process.env.WRANGLER_CI_OVERRIDE_NAME ?? "").trim() === "") {
+    log(
+      "install-hook",
+      `告警：未能从构建环境读取 Worker 名（WRANGLER_CI_OVERRIDE_NAME 缺失/空白），` +
+        `本次将按仓库名 ${configWorkerName} 置备数据库。若这是多实例部署（Worker 名不是 ` +
+        `${configWorkerName}），本 Worker 会绑定共享数据库；请把部署命令改为 npm run deploy ` +
+        `后重新部署（详见 docs/guide/deploy.md「部署多个实例」）。`,
+    );
+  }
+
   const { uuid, source } = await resolveDatabaseId(databaseName);
   logResolvedSource(databaseName, uuid, source);
 
-  // 就地注入（豁免理由见函数头注释）。withDatabaseId 对「当前已是该 id」同样
-  // 适用：内容不变则跳过写入，保 mtime，幂等。
-  const injected = withDatabaseId(rawText, uuid);
+  // 就地注入（豁免理由见函数头注释）。withDatabaseId / withDatabaseName 对
+  // 「当前已是目标值」同样适用：内容不变则跳过写入，保 mtime，幂等。
+  const injected = withDatabaseName(withDatabaseId(rawText, uuid), databaseName);
   if (injected === rawText) {
-    log("install-hook", `wrangler.jsonc 的 database_id 已是 ${uuid}，无需注入。`);
+    log("install-hook", "wrangler.jsonc 的 database_id / database_name 已是目标值，无需注入。");
   } else {
     writeFileSync(SOURCE_CONFIG_PATH, injected, "utf8");
     log(
       "install-hook",
-      `已就地注入真实 database_id=${uuid}（仓库路径 ${SOURCE_CONFIG_PATH}）。`,
+      `已就地注入 database_name=${databaseName} 与真实 database_id=${uuid}（仓库路径 ${SOURCE_CONFIG_PATH}）。`,
     );
   }
 
@@ -741,13 +797,16 @@ async function main() {
     process.exit(1);
   }
 
-  const { rawText, databaseName } = readSourceConfig();
+  const { rawText, workerName: configWorkerName } = readSourceConfig();
+  // D1 数据库名随 Worker 名派生（多实例隔离）；无 override 时回退配置 name，
+  // 首实例与本地部署结果与历史版本一致（hodor → hodor）
+  const { databaseName } = deriveInstanceNames(process.env, configWorkerName);
   const { uuid, source } = await resolveDatabaseId(databaseName);
   logResolvedSource(databaseName, uuid, source);
 
   // 真实 id 只写入 .wrangler/ 下的临时配置（仓库文件不动）
   mkdirSync(RESOLVED_CONFIG_DIR, { recursive: true });
-  writeFileSync(RESOLVED_CONFIG_PATH, buildResolvedConfig(rawText, uuid), "utf8");
+  writeFileSync(RESOLVED_CONFIG_PATH, buildResolvedConfig(rawText, uuid, databaseName), "utf8");
   log("provision", `已写入 resolved 配置：${RESOLVED_CONFIG_PATH}`);
 
   if (mode === "provision-only") {

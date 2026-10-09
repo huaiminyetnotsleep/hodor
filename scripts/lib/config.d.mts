@@ -34,6 +34,23 @@ export declare function parseWranglerConfig(text: string): any;
 export declare function withDatabaseId(text: string, uuid: string): string;
 
 /**
+ * 将 d1_databases[0].database_name 的值替换为 name（与 withDatabaseId 同构），
+ * 其余原文（含注释）逐字保留。键缺失或值不是字符串字面量时抛错。
+ */
+export declare function withDatabaseName(text: string, name: string): string;
+
+/**
+ * 从构建环境与仓库配置派生实例名：Worker 名 → D1 数据库名（1:1）。
+ * 优先取 env.WRANGLER_CI_OVERRIDE_NAME（Workers Builds 注入的连接 Worker 名，
+ * trim 后非空才采用），缺失/空白回退 configWorkerName——首实例与本地部署
+ * 行为不变。两个返回值恒相等。
+ */
+export declare function deriveInstanceNames(
+  env: Record<string, string | undefined>,
+  configWorkerName: string,
+): { workerName: string; databaseName: string };
+
+/**
  * 将 keyPath（如 "main"、"d1_databases[0].migrations_dir"）指向的字符串值
  * 替换为 value，其余原文逐字保留。键缺失或值不是字符串字面量时抛错。
  */

@@ -1,17 +1,21 @@
-// scripts/lib/config.mjs 纯函数单元测试（T05/T06 提前交付 + --install-hook 门控注入）
-// 只测 JSONC 剥注释 / 解析 / database_id 原地替换 / postinstall 门控判定，不触碰
-// D1 与 SELF；被 import 的 config.mjs 是纯模块（无 process / node:* 引用），可安全
-// 运行在 workerd 沙箱（vitest cloudflare pool）内——workerd 里无法读文件，故 fixture
-// 以内嵌字符串形式给出，形状与仓库 wrangler.jsonc 同构。
+// scripts/lib/config.mjs 纯函数单元测试（T05/T06 提前交付 + --install-hook 门控注入
+// + 多实例部署的实例名派生，2026-10-09）
+// 只测 JSONC 剥注释 / 解析 / database_id·database_name 原地替换 / 实例名派生 /
+// postinstall 门控判定，不触碰 D1 与 SELF；被 import 的 config.mjs 是纯模块
+// （无 process / node:* 引用），可安全运行在 workerd 沙箱（vitest cloudflare pool）
+// 内——workerd 里无法读文件，故 fixture 以内嵌字符串形式给出，形状与仓库
+// wrangler.jsonc 同构。
 import { describe, expect, it } from "vitest";
 import {
   PLACEHOLDER_DATABASE_ID,
+  deriveInstanceNames,
   isAuthFailure,
   parseWranglerConfig,
   replaceJsoncString,
   shouldRunInstallHook,
   stripJsoncComments,
   withDatabaseId,
+  withDatabaseName,
 } from "../scripts/lib/config.mjs";
 
 // 与仓库 wrangler.jsonc 同构的代表性 fixture：注释（行 + 跨行块）、URL 形
@@ -131,6 +135,79 @@ describe("withDatabaseId", () => {
       "12345",
     );
     expect(() => withDatabaseId(badValue, NEW_UUID)).toThrow(/字符串字面量/);
+  });
+});
+
+describe("withDatabaseName（多实例部署：构建工作区配置的 database_name 注入）", () => {
+  it("改写 d1_databases[0].database_name，注释与其余字段逐字保留", () => {
+    const replaced = withDatabaseName(WRANGLER_JSONC_FIXTURE, "hodor-shop");
+    const parsed = parseWranglerConfig(replaced);
+    expect(parsed.d1_databases[0].database_name).toBe("hodor-shop");
+    // 头部注释、跨行块注释、字段旁注释原样存活（与 withDatabaseId 同样的逐字保留）
+    expect(replaced).toContain("// 编辑器 schema 校验（npm install 后生效）");
+    expect(replaced).toContain("块注释可跨行");
+    expect(replaced).toContain("// 占位符常驻仓库：真实 id 只写入构建工作区临时配置");
+    // 其余字段不受影响
+    expect(parsed.d1_databases[0].database_id).toBe(PLACEHOLDER_DATABASE_ID);
+    expect(parsed.name).toBe("hodor");
+    expect(parsed.main).toBe("src/index.ts");
+  });
+
+  it("与 withDatabaseId 叠加：database_name 与 database_id 同时改写正确", () => {
+    const injected = withDatabaseName(
+      withDatabaseId(WRANGLER_JSONC_FIXTURE, NEW_UUID),
+      "hodor-shop",
+    );
+    const parsed = parseWranglerConfig(injected);
+    expect(parsed.d1_databases[0].database_id).toBe(NEW_UUID);
+    expect(parsed.d1_databases[0].database_name).toBe("hodor-shop");
+    expect(injected).toContain("// 占位符常驻仓库：真实 id 只写入构建工作区临时配置");
+  });
+
+  it("配置缺少 database_name 键时抛错", () => {
+    const noName = WRANGLER_JSONC_FIXTURE.replace(
+      `      "database_name": "hodor",\n`,
+      "",
+    );
+    expect(() => withDatabaseName(noName, "hodor-shop")).toThrow(/database_name/);
+  });
+});
+
+// 实例名派生（多实例部署，2026-10-09）：D1 数据库名 = Worker 名（1:1）。
+// 回归底线（AC1）：无 WRANGLER_CI_OVERRIDE_NAME 时完全回退配置名——首实例
+// 与本地部署的解析结果与历史版本一致（hodor → hodor）。
+describe("deriveInstanceNames（Worker 名 → D1 数据库名派生）", () => {
+  it("AC1 回归：无 WRANGLER_CI_OVERRIDE_NAME 时回退配置名", () => {
+    expect(deriveInstanceNames({}, "hodor")).toEqual({
+      workerName: "hodor",
+      databaseName: "hodor",
+    });
+    expect(
+      deriveInstanceNames({ WRANGLER_CI_OVERRIDE_NAME: undefined }, "hodor").databaseName,
+    ).toBe("hodor");
+  });
+
+  it("AC2 派生：值首尾带空格时 trim 后采用（databaseName = workerName）", () => {
+    const names = deriveInstanceNames(
+      { WRANGLER_CI_OVERRIDE_NAME: " hodor-shop " },
+      "hodor",
+    );
+    expect(names.workerName).toBe("hodor-shop");
+    expect(names.databaseName).toBe("hodor-shop");
+  });
+
+  it("AC2 回退：空串 / 纯空白与缺失同样回退配置名", () => {
+    expect(
+      deriveInstanceNames({ WRANGLER_CI_OVERRIDE_NAME: "" }, "hodor").databaseName,
+    ).toBe("hodor");
+    expect(
+      deriveInstanceNames({ WRANGLER_CI_OVERRIDE_NAME: "   " }, "hodor").databaseName,
+    ).toBe("hodor");
+  });
+
+  it("1:1 派生：databaseName 恒等于 workerName（不引入第二个派生源）", () => {
+    const names = deriveInstanceNames({ WRANGLER_CI_OVERRIDE_NAME: "support-eu" }, "hodor");
+    expect(names.databaseName).toBe(names.workerName);
   });
 });
 

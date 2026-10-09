@@ -19,6 +19,9 @@
   "d1_databases": [
     {
       "binding": "HODOR_DB",
+      // 数据库名不写死：部署管线按 Worker 名派生（WRANGLER_CI_OVERRIDE_NAME，
+      // 缺失时回退顶层 name 字段），并在构建工作区临时改写本字段；仓库内恒为
+      // "hodor"，即首实例与本地部署的既有名称
       "database_name": "hodor",
       // 占位符常驻仓库（fork 用户不能带上部署者的真实 id）：
       // 手动部署时临时替换为真实 id，提交前还原；自动解析属阶段 7。
