@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.5.0...v1.6.0) (2026-10-09)
+
+
+### Features
+
+* stage 7 public release readiness — /selfcheck endpoint, d1-console ops SQL pack, release regression suite, docs sync (T07, T10–T12) ([e49c2b2](https://github.com/huaiminyetnotsleep/hodor/commit/e49c2b25bb705d9b0c5474377be22dd9a5fafbbe))
+
 ## [1.5.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.4.0...v1.5.0) (2026-10-08)
 
 
