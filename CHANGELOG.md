@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.6.0...v1.7.0) (2026-10-09)
+
+
+### Features
+
+* **ci:** optional fork auto-sync workflow (off by default, user opt-in) with release docs ([6a9c695](https://github.com/huaiminyetnotsleep/hodor/commit/6a9c6959d40cf32264252e4391e6d0b88e0e985f))
+* **deploy:** zero-variable deploy forms — configure all vars post-deploy via dashboard, guided by /selfcheck (stage 7 addendum) ([c4b356f](https://github.com/huaiminyetnotsleep/hodor/commit/c4b356f14d09254b8d0ca4d3f60d605c7dd86f0e))
+
 ## [1.6.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.5.0...v1.6.0) (2026-10-09)
 
 

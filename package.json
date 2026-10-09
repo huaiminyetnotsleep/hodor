@@ -1,6 +1,6 @@
 {
   "name": "hodor",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "description": "Telegram 话题式客服消息中继 Bot：一个用户一个话题、双向转发、人机验证与限频，Cloudflare Workers + D1 自部署",
   "type": "module",
