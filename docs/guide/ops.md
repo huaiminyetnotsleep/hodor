@@ -139,7 +139,7 @@ LIMIT 20;
 
 | 现象 | 排查 |
 | --- | --- |
-| ★ `/setwebhook` 回显 `setWebhook HTTP 400: … Failed to resolve host: Temporary failure in name resolution` | Telegram 侧解析不了 webhook 主机名（Hodor 把访问 setwebhook 所用的域名原样注册）：① 确认用的是公开 `https://hodor.<子域>.workers.dev` 地址，而非 localhost / 内网 IP / 自定义域；② 新账号首次启用 workers.dev 子域后 DNS 传播需几分钟，用 `dig <主机名>` 或 dnschecker.org 确认全球可解析后重试 setwebhook（setWebhook 为覆盖式写入，重试安全） |
+| ★ `/setwebhook` 回显 `setWebhook HTTP 400: … Failed to resolve host: Temporary failure in name resolution` | Telegram 侧解析不了 webhook 主机名（Hodor 把访问 setwebhook 所用的域名原样注册）：① 确认 Worker 设置 → 域和路由 中 **workers.dev 路由已启用**，且用的是公开 `https://hodor.<子域>.workers.dev` 地址（而非 localhost / 内网 IP / 自定义域）；② 新启用 / 新注册的 workers.dev 子域需数分钟 DNS 传播，`dig <主机名>` 或 dnschecker.org 确认全球可解析后重试 setwebhook（setWebhook 为覆盖式写入，重试安全；2026-10-09 真机验收实测） |
 | ★ bot 完全无响应 | ① 先确认 webhook 已绑定：访问 `/setwebhook/<ADMIN_SECRET>` 回显身份即已绑定（完整自检 `GET /selfcheck` 已交付：未绑定 / 指向错误会在 `failed` 中逐条点名）；② `npx wrangler tail hodor` 实时日志看请求是否到达、有无 401——secret 头不符说明 `TELEGRAM_WEBHOOK_SECRET` 与注册时不一致，重新 setwebhook；③ 日志无请求 = Telegram 侧未推送，检查 webhook 绑定 |
 | ★ 消息进群但为空 / 报 sendMessage 400 | `wrangler tail` 看具体 API 报错文案；若为「message to copy not found」类，参考 T21 运行时说明（[TODO](/todo/p1.md)） |
 | ★ 验证码收不到 | 用户是否已被 ban（封禁门不发出题）；日志中 sendMessage 是否报 403（用户已停用 / 拉黑 bot）；60 秒内重复消息受提示频控限制（每分钟最多 1 次提示） |
