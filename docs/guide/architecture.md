@@ -25,7 +25,7 @@
                        └──────────┘
 ```
 
-入站（用户 → 群组）与出站（群组 → 用户）共用同一个 `/webhook` 入口，由消息来源分流：私聊消息走入站管线；来自 `SUPPORT_CHAT_ID` 且带 `message_thread_id` 的消息走出站管线。
+入站（用户 → 群组）与出站（群组 → 用户）共用同一个 `/webhook` 入口，由消息来源分流：私聊消息走入站管线；来自 `SUPPORT_CHAT_ID` 且带 `message_thread_id` 的消息走出站管线。用户 / 管理员可见的行为描述（命令、验证、限频、生命周期）见[功能介绍](/guide/features.md)，本页聚焦内部实现。
 
 ## 发布与更新
 
@@ -115,7 +115,7 @@ update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
 
 ## 验证状态机
 
-> 阶段 5 起验证可运行时配置：`/verifyon` / `/verifyoff` 全局开关（settings 表持久化，关闭期间记录保留、TTL 不判定）、`/verifymode` 数学题 ↔ 纯按钮循环切换（切换清空全部 pending 旧题，旧题回调一律失效）。置顶信息验证行三态：✅ 已验证 / ❌ 未验证 / 未启用。
+> 验证可运行时配置：`/verifyon` / `/verifyoff` 全局开关（settings 表持久化，关闭期间记录保留、TTL 不判定）、`/verifymode` 数学题 ↔ 纯按钮循环切换（切换清空全部 pending 旧题，旧题回调一律失效）。置顶信息验证行三态：✅ 已验证 / ❌ 未验证 / 未启用。
 
 ```
           首条消息 / 重新 start
@@ -124,7 +124,7 @@ update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
                               │   限频超限 / VERIFY_TTL 过期
                               └──────────────────────┘
                               ▲
-                              │ /archive（关闭 topic 并清验证；deluser 硬删整条记录，阶段 6）
+                              │ /archive（关闭 topic 并清验证）；/deluser 硬删整条记录
                               └──────────────────────┘
 ```
 
@@ -158,15 +158,23 @@ update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
 ```
 src/
   index.ts          # fetch 入口（路由层分发）
-  routes/           # webhook / setwebhook（含命令菜单注册）/ health 各端点
+  routes/           # webhook / admin（setwebhook·deletewebhook，含命令菜单注册）/ health 各端点
+  selfcheck.ts      # /selfcheck 的纯检查函数（env / 七表 / webhook，供路由消费）
   pipeline/
     inbound.ts      # 入站管线：三门（封禁/验证/限频）→ topic → 中继 → 账本
     outbound.ts     # 出站管线：命令分流 → 反查绑定 → 中继 → 账本 / 无绑定提示
     verify.ts       # 验证管线：出题 + 答题回调（归属/失效/重出/置顶刷新）
-    commands.ts     # 命令管线：/help /ban /unban 与未知命令
+    commands.ts     # 命令管线：分流与 /help /ban /unban /note /risk 等基础命令
+    deluser.ts      # /deluser 物理删除执行（二次确认回调裁决）
+    wipe.ts         # /wipealldata（两步确认 → 先删全部群话题 → 清库）
+    pinned.ts       # 用户信息置顶卡的建立与刷新
     content.ts      # 内容抽取（文本 + 7 类媒体）与 per-type 中继分发
+    topicEvents.ts  # 原生话题 close/reopen 同步与删除自愈
+    classify.ts     # update 分类（分流到入站 / 出站 / 回调）
+    errors.ts       # 错误分类（可重试 / 永久）
   copy.ts           # 用户可见文案唯一集中点（欢迎语 / 置顶 / 验证 / 命令 / 提示）
-  store/            # users / topics / messages / settings 按表分模块
+  store/            # users / topics / messages / settings / processedUpdates /
+                    # deleteConfirmations / bots 按表分模块；wipe（跨表清空）/ util（共享工具）
   telegram/         # client.ts：API 调用与错误分类的唯一出口
 ```
 
@@ -180,8 +188,20 @@ src/
 | token 永不进 URL | URL 会留在浏览器历史、CF 访问日志等处，泄漏即被接管 bot。管理端点用独立的 `ADMIN_SECRET` 鉴权，token 只从 env 读取 |
 | 一人一 topic，archive 后复用、deluser 后删除 | `/archive` 保留绑定 / 历史 / 备注并在回访时重开；`/deluser` 物理删除 topic + Hodor 数据；native close/reopen 服务事件同步 topic 状态 |
 | 全表带 bot_id | v1 单 bot，但数据模型天然支持多 bot：未来按 bot 独立 webhook 路径接入时只改接入层，不动数据 |
-| 无框架，原生 fetch | 端点总共只有 4 个，引入 Web 框架收益极低；零运行时依赖也让免费额度占用最小 |
+| 无框架，原生 fetch | 端点总共只有 5 个，引入 Web 框架收益极低；零运行时依赖也让免费额度占用最小 |
 | 提示回复限频（每用户每分钟 1 次） | 防止攻击者用「垃圾消息 → 触发提示回复」反向刷 CF 请求额度 |
+
+### 部署置备与业界模式对照
+
+「零仓库改动部署 + 数据库自动置备」对应业界几种成熟模式，本项目各取所长（详细部署步骤见[部署流程](./deploy.md)）：
+
+| 模式 | 业界代表 | hodor 的对应 |
+| --- | --- | --- |
+| **配置即资源**（IaC in repo）：平台按声明置备并回写 | Render `render.yaml`、CF 模板向导 / 按钮 | `wrangler.jsonc` 即声明式资源描述；Deploy 按钮路径由平台置备 D1 |
+| **置备 / 迁移是部署管线的独立阶段** | Heroku release phase、Render `preDeployCommand`、Fly `release_command` | `scripts/deploy.mjs`：云端经 postinstall 钩子（`WORKERS_CI=1` 门控）自动执行，本地 `npm run deploy` 显式执行，均先于部署 |
+| **平台侧建库 + env 注入引用**（连接信息不进仓库） | Vercel Marketplace、Heroku Add-ons（`DATABASE_URL` 模式） | 9 个变量全部走面板「变量和机密」；D1 是同平台 binding，真实 id 不进仓库、构建时按名字解析注入 |
+
+业界同样没有的第四种——让用户手改配置文件里的资源 ID——正是本方案要消除的。
 
 ## 路线图
 

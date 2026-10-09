@@ -77,8 +77,6 @@ bot 身份（bot_id）不变，所有数据继续有效：
 | `webhook 指向错误地址：…（应为 …，请重新执行 /setwebhook）` | 重新执行 `/setwebhook/<ADMIN_SECRET>`（常见于换了 Worker 地址 / 域名后未重绑） |
 | `Webhook 状态未知：getWebhookInfo 调用失败（…）`、`Telegram 最近投递错误：…` | Telegram 侧问题：稍后重试；持续出现时检查 token 是否已被吊销、网络策略 |
 
-- **部署与更新**：push 到 main 即自动部署新版本
-
 ## 版本管理
 
 发布新版本（维护者）与跟随更新（fork 用户）已独立成页，见[发布与更新](/guide/release.md)。
@@ -133,17 +131,13 @@ LIMIT 20;
 
 ## 故障排查
 
-::: info 适用范围
-标 ★ 的为当前阶段（阶段 4）已适用；其余涉及的功能（更多管理命令等）在对应阶段交付后生效。
-:::
-
 | 现象 | 排查 |
 | --- | --- |
-| ★ `/setwebhook` 回显 `setWebhook HTTP 400: … Failed to resolve host: Temporary failure in name resolution` | Telegram 侧解析不了 webhook 主机名（Hodor 把访问 setwebhook 所用的域名原样注册）：① 确认 Worker 设置 → 域和路由 中 **workers.dev 路由已启用**，且用的是公开 `https://hodor.<子域>.workers.dev` 地址（而非 localhost / 内网 IP / 自定义域）；② 新启用 / 新注册的 workers.dev 子域需数分钟 DNS 传播，`dig <主机名>` 或 dnschecker.org 确认全球可解析后重试 setwebhook（setWebhook 为覆盖式写入，重试安全；2026-10-09 真机验收实测） |
-| ★ bot 完全无响应 | ① 先确认 webhook 已绑定：访问 `/setwebhook/<ADMIN_SECRET>` 回显身份即已绑定（完整自检 `GET /selfcheck` 已交付：未绑定 / 指向错误会在 `failed` 中逐条点名）；② `npx wrangler tail hodor` 实时日志看请求是否到达、有无 401——secret 头不符说明 `TELEGRAM_WEBHOOK_SECRET` 与注册时不一致，重新 setwebhook；③ 日志无请求 = Telegram 侧未推送，检查 webhook 绑定 |
-| ★ 消息进群但为空 / 报 sendMessage 400 | `wrangler tail` 看具体 API 报错文案；若为「message to copy not found」类，参考 T21 运行时说明（[TODO](/todo/p1.md)） |
-| ★ 验证码收不到 | 用户是否已被 ban（封禁门不发出题）；日志中 sendMessage 是否报 403（用户已停用 / 拉黑 bot）；60 秒内重复消息受提示频控限制（每分钟最多 1 次提示） |
-| 消息转发了但没建 topic，或 topic 操作失败 | ★ bot 在群里缺少「管理话题」权限 |
-| `/purgemsg` 执行失败（阶段 6 起） | bot 缺少「删除消息」权限 |
-| ★ 提示「找不到对应用户」 | topic 是僵尸（绑定行不存在或已被手动清理）：按提示手动关闭或删除该 topic |
-| 突然全部请求 429 | CF 免费套餐每日 10 万请求上限用尽（每条消息约消耗 1 次 CF 请求 + 若干 Telegram API 出站调用）；人机验证默认开启已拦截大部分刷量，可调低 `MAX_MESSAGES_PER_MINUTE`，或升级付费计划 |
+| `/setwebhook` 回显 `setWebhook HTTP 400: … Failed to resolve host: Temporary failure in name resolution` | Telegram 侧解析不了 webhook 主机名（Hodor 把访问 setwebhook 所用的域名原样注册）：① 确认 Worker 设置 → 域和路由 中 **workers.dev 路由已启用**，且用的是公开 `https://hodor.<子域>.workers.dev` 地址（而非 localhost / 内网 IP / 自定义域）；② 新启用 / 新注册的 workers.dev 子域需数分钟 DNS 传播，`dig <主机名>` 或 dnschecker.org 确认全球可解析后重试 setwebhook（setWebhook 为覆盖式写入，重试安全；2026-10-09 真机验收实测） |
+| bot 完全无响应 | ① 先确认 webhook 已绑定：访问 `/setwebhook/<ADMIN_SECRET>` 回显身份即已绑定（或看完整自检 `GET /selfcheck`：未绑定 / 指向错误会在 `failed` 中逐条点名）；② `npx wrangler tail hodor` 实时日志看请求是否到达、有无 401——secret 头不符说明 `TELEGRAM_WEBHOOK_SECRET` 与注册时不一致，重新 setwebhook；③ 日志无请求 = Telegram 侧未推送，检查 webhook 绑定 |
+| 消息进群但为空 / 报 sendMessage 400 | `wrangler tail` 看具体 API 报错文案；若为「message to copy not found」类，参考 T21 运行时说明（[TODO](/todo/p1.md)） |
+| 验证码收不到 | 用户是否已被 ban（封禁门不发出题）；日志中 sendMessage 是否报 403（用户已停用 / 拉黑 bot）；60 秒内重复消息受提示频控限制（每分钟最多 1 次提示） |
+| 消息转发了但没建 topic，或 topic 操作失败 | bot 在群里缺少「管理话题」权限 |
+| `/purgemsg` 执行失败 | bot 缺少「删除消息」权限 |
+| 提示「找不到对应用户」 | topic 是僵尸（绑定行不存在或已被手动清理）：按提示手动关闭或删除该 topic |
+| 突然全部请求 429 | Cloudflare 套餐请求配额用尽（免费套餐每日 10 万请求；每条消息约消耗 1 次 CF 请求 + 若干 Telegram API 出站调用）；人机验证默认开启已拦截大部分刷量，可调低 `MAX_MESSAGES_PER_MINUTE`，或升级付费计划 |

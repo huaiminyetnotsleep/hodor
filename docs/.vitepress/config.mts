@@ -9,7 +9,7 @@ export default defineConfig({
   description: 'Telegram 双向私聊机器人 —— 客服消息双向转发，一个用户一个群组独立话题，消息不串线',
 
   // VitePress 不会给 head 里的绝对路径自动加 base 前缀，图标需显式写 /hodor/ 前缀
-  // 图标源文件 docs/icon.png，缩放产物在 docs/public/（512 logo / 180 apple-touch / 64 favicon）
+  // 图标文件均在 docs/public/（icon.png 为 logo，另生成 apple-touch-icon.png 180 / favicon.png 64）
   head: [
     ['link', { rel: 'icon', type: 'image/png', sizes: '64x64', href: '/hodor/favicon.png' }],
     ['link', { rel: 'apple-touch-icon', sizes: '180x180', href: '/hodor/apple-touch-icon.png' }],
@@ -34,12 +34,12 @@ export default defineConfig({
         ],
       },
       {
-        text: 'TODO',
+        text: '规划（未实现）',
         items: [
           { text: '全量列表', link: '/todo/' },
-          { text: 'P1', link: '/todo/p1' },
-          { text: 'P2', link: '/todo/p2' },
-          { text: 'P3', link: '/todo/p3' },
+          { text: 'P2 扩展', link: '/todo/p2' },
+          { text: 'P3 自托管', link: '/todo/p3' },
+          { text: 'P1 主线（已交付）', link: '/todo/p1' },
         ],
       },
     ],
@@ -47,12 +47,12 @@ export default defineConfig({
     sidebar: {
       '/todo/': [
         {
-          text: 'TODO',
+          text: '规划（未实现）',
           items: [
             { text: '全量列表', link: '/todo/' },
-            { text: 'P1', link: '/todo/p1' },
-            { text: 'P2', link: '/todo/p2' },
-            { text: 'P3', link: '/todo/p3' },
+            { text: 'P2 扩展', link: '/todo/p2' },
+            { text: 'P3 自托管', link: '/todo/p3' },
+            { text: 'P1 主线（已交付）', link: '/todo/p1' },
           ],
         },
       ],
@@ -75,9 +75,9 @@ export default defineConfig({
           ],
         },
         {
-          text: '更多',
+          text: '规划',
           items: [
-            { text: 'TODO', link: '/todo/' },
+            { text: '规划总览（未实现）', link: '/todo/' },
           ],
         },
       ],

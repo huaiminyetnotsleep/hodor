@@ -95,7 +95,7 @@ UNIQUE `(bot_id, update_id)`
 | `attempts` | INTEGER | 失败重推计数，每次认领接管 +1，≥ `MAX_ATTEMPTS` 置 `failed` 跳过（防毒丸） |
 | `created_at` | TEXT | 最近认领时间（每次重试 / 接管刷新）；超过 60 秒的 `processing` 行视为崩溃残留，可被下一次重推接管 |
 
-## delete_confirmations — /deluser 二次确认（阶段 6）
+## delete_confirmations — /deluser 二次确认
 
 PK `(bot_id, prompt_msg_id)`：一条确认按钮消息一行，`prompt_msg_id` 为该警告消息在客服群的 message_id。
 

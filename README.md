@@ -1,132 +1,184 @@
-# hodor
+<div align="center">
 
-Telegram Forum Topics 客服消息中继 Bot —— 一个用户，一个话题，消息不串线。
-设计、部署与运维文档见 [docs/](docs/)（VitePress 站点，`npm run docs:dev` 本地预览）。
+# Hodor
 
-**当前进度**：阶段 1–5 已交付并真机验收——webhook 绑定与鉴权、幂等与失败重推、用户建档与 topic 双向映射、文本 + 7 类媒体双向直传、欢迎语（`WELCOME_TEXT` 可配置）与用户信息置顶、双向消息账本、数学题人机验证与未验证拦截、分钟限频与超限重验、提示频控、`/help` `/ban` `/unban` 基础管理命令、验证开关与纯按钮模式（`/verifyon` `/verifyoff` `/verifymode`）、验证有效期（`VERIFY_TTL_HOURS`）、备注与高危标记（`/note` `/risk`）、429 有界重试。阶段 6 会话维护已交付并真机验收——`/archive` 软归档（保留历史/备注、回访重验重开）、`/deluser` 物理删除（二次确认，删 Telegram 话题 + Hodor 数据）、`/purgemsg` 话题消息清理、`/wipealldata`（先删全部群内话题再清库，保留 settings）、Telegram 原生话题关闭/重开状态同步与删除自愈。删除类命令不覆盖 Telegram 私聊窗口历史。阶段 7 公开发布已交付并真机验收（2026-10-09）——完整自检端点 `GET /selfcheck`（环境变量 / 七张表 / webhook 指向逐项检查：全过 200，有未通过项 503 + `failed` 数组逐条给出中文失败原因，`/health` 保持纯存活探针）、运维 SQL 查询包 `scripts/d1-console.sql`（总览 / 用户 / topic / 消息账本 / 失败 update / 孤儿检测 + 危险区维护语句）、发布回归测试套件（`test/release-regression.test.ts`，9 个部署链路顺序场景）；fork 从零部署（零变量表单 → 部署后面板配置）与已有实例升级（v1.5.0 / v1.6.0 发版链路）真机验收通过，**完整 v1 已发布**。后续扩展（多 bot / 换绑迁移 / TGuard / 自托管，阶段 8–14）按 [docs/todo](docs/todo/index.md) 的阶段计划另启。开发过程由 [Trellis](.trellis/workflow.md) 管理。
+**Telegram 话题式客服机器人 —— 一个用户，一个话题，消息不串线**
 
-## 准备工作（一次性）
+自部署于你自己的 Cloudflare（Workers + D1）：用户私聊 Bot，消息自动进入客服超级群的独立话题；
+管理员在话题里直接回复，即时送达用户私聊。数据只经过你自己的 Worker 与数据库，不经第三方中转。
 
-完整前置清单见 [docs/guide/deploy.md](docs/guide/deploy.md)。
+[在线文档](https://huaiminyetnotsleep.github.io/hodor/) · [快速开始](#快速开始) · [部署指南](docs/guide/deploy.md) · [路线图](docs/todo/index.md) · [报告问题](https://github.com/huaiminyetnotsleep/hodor/issues)
 
-**Telegram 侧**
+[![CI](https://github.com/huaiminyetnotsleep/hodor/actions/workflows/ci.yml/badge.svg)](https://github.com/huaiminyetnotsleep/hodor/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A524-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Cloudflare](https://img.shields.io/badge/Cloudflare-Workers%20%2B%20D1-F38020?logo=cloudflare&logoColor=white)](https://developers.cloudflare.com/workers/)
 
-1. @BotFather `/newbot` 建 Bot，保存 Token（`TELEGRAM_BOT_TOKEN`）；`/setprivacy` → Disable（防御性冗余）
-2. 建一个**私有** Supergroup（不设公开用户名），在群设置里开启 **Topics**；**不开** protected content（限制保存内容会影响后续媒体中继，T22 实测项）
-3. 把 Bot 拉进群并授予：Manage Topics / Send Messages / Delete Messages / Pin Messages
-4. 绑定 Webhook 之前先取 ID：往群里随便发一条消息，浏览器打开
-   `https://api.telegram.org/bot<TOKEN>/getUpdates`，从返回里记下群 `chat_id`（`-100` 开头负数）和你自己的 `user_id`
+</div>
 
-**Cloudflare 侧**
+<p align="center">
+  <img src="docs/public/prototype.svg" alt="Hodor 功能示意：用户私聊验证后转发到客服群话题，管理员回复直达用户私聊" width="860" />
+</p>
 
-5. 登录：`npx wrangler login`
-6. 建库不需要手动做——首次部署时 postinstall 钩子会按名字自动创建/复用 D1 并完成绑定（见下方部署章节）
+---
 
-**环境变量**
+## 为什么选择 Hodor
 
-7. 部署后在面板 Worker → 设置 → 变量和机密 配置 5 条必填项（部署向导 / Deploy 按钮不再代收变量——表单零提示，统一部署后面板配置；模板与说明见 `.dev.vars.example`，一次即可，`keep_vars: true` 已保证跨部署持久）；本地调试可选：`cp .dev.vars.example .dev.vars` 后 `npx wrangler dev`
+- **数据 100% 自持** —— 对话数据只落在你自己的 Worker 与 D1 数据库，无第三方 SaaS 中转，无遥测
+- **私聊体验，群组效率** —— 每个用户独占一个群组话题，多客户并发互不串扰，管理员多人协作同一收件箱
+- **免费套餐即可起步** —— Cloudflare Workers + D1 免费额度足够运行小型客服场景，成本透明可控
+- **五分钟完成部署** —— 纯浏览器 fork 部署或一条命令，D1 建库、绑定、迁移全部自动完成
 
-## 环境变量说明（模板与注释见 `.dev.vars.example`）
+## 功能特色
 
-| 变量 | 必填 | 用途 | 敏感 | 缺省 |
-|------|------|------|------|------|
-| `TELEGRAM_BOT_TOKEN` | 必填 | Bot Token（BotFather 发放），所有 Bot API 调用的凭证 | 是 | — |
-| `TELEGRAM_WEBHOOK_SECRET` | 必填 | Telegram 回调头鉴权（SHA-256 比对）；三个 Secret 必须互异 | 是 | — |
-| `ADMIN_SECRET` | 必填 | 管理端点路径段凭证（`/setwebhook/<ADMIN_SECRET>` 等，浏览器直接访问） | 是 | — |
-| `SUPPORT_CHAT_ID` | 必填 | 私有支持群 chat_id（`-100` 开头），Topic 所在群与双向路由依据 | 否 | — |
-| `ADMIN_IDS` | 必填 | 管理员 user_id 白名单，逗号分隔 | 否 | — |
-| `MAX_MESSAGES_PER_MINUTE` | 选填 | 每用户每分钟转发上限，超限触发重验（阶段 4 生效） | 否 | `20` |
-| `VERIFY_TTL_HOURS` | 选填 | 验证有效期小时数，0=永久（阶段 5 生效） | 否 | `0` |
-| `MAX_ATTEMPTS` | 选填 | 同一 update 处理失败重试上限，超限标记 failed 跳过 | 否 | `3` |
-| `WELCOME_TEXT` | 选填 | 自定义欢迎语（字面 `\n` 解释为换行） | 否 | 内置默认文案 |
+| 特色 | 主要优势 |
+| --- | --- |
+| 双向私聊直达 | 用户像加好友一样私聊 Bot 即可发起咨询；管理员在群话题里回一句，用户即刻收到——无需引用消息、无需切换工具 |
+| 一人一话题，永不串线 | 每个用户独占一个群组话题，多个客户同时咨询互不干扰；映射长期复用，回访自动接上原话题 |
+| 七类媒体原样转达 | 图片 / 视频 / 语音 / 音乐 / 文件 / 贴纸 / 动图按 Telegram `file_id` 直传——不下载、不落盘，速度与保真兼得 |
+| 人机验证挡机器人 | 默认数学题 + 按钮验证，可切纯按钮模式；未验证消息直接丢弃不积压，有效期与开关可配 |
+| 频率限制防滥用 | 每用户每分钟转发上限（默认 20 条），超限自动触发重验；提示类回复另有频控，防止反向轰炸管理员 |
+| 14 条管理命令 | 封禁 / 备注 / 风险标记 / 验证控制 / 会话归档·删除·清空，部署后自动注册进客服群命令菜单，触手可及 |
+| 会话有始有终 | 软归档保留历史与备注、物理删除二次确认、Telegram 原生关话题自动同步自愈——处置权始终在你手里 |
+| 部署完即可观测 | `/health` 纯存活探针可直接挂 uptime 监控；`/selfcheck` 全量自检、失败项逐条中文点名且不回显密钥，排障不求人 |
+| 经得起边界情况 | Webhook 幂等去重、失败自动重推、防毒丸上限（`MAX_ATTEMPTS`）、Telegram 429 有界重试——丢消息有底线 |
 
-注入方式（⚠️ 2026-09-28 实测与官方文档核实）：`wrangler deploy` 默认按配置重置绑定，但本仓库已设 **`keep_vars: true`**——面板「变量和机密」配置的变量（Text 或机密均可）**跨部署持久**；官方文档另明确 **Secrets 永不因部署删除**。
+## 工作原理
 
-- **全部 9 个**：5 条必填先配（当前阶段即用），4 条选填按需；3 个 Secret 建议用「机密」类型
-- **本地调试（可选）**：`cp .dev.vars.example .dev.vars` 后逐行取消注释并填值（必填 5 条必须启用），再 `npx wrangler dev`（`.dev.vars` 已被 git 忽略），与面板互不影响
-- 也可用 `npx wrangler secret put <NAME>`（Secret 类型，等价持久）
-
-## 开发流程
-
-```bash
-npm install
-npm test            # vitest：workerd 沙箱 + 每文件隔离的本地 D1
-npm run typecheck
+```mermaid
+flowchart LR
+    U[用户<br/>Telegram 私聊] -- 消息 --> W[Hodor Worker<br/>验证 · 频控 · 路由]
+    W -- 建话题 / 转发 --> T[客服群<br/>独立话题]
+    T -- 管理员回复 --> W
+    W -- 回发 --> U
+    W <-- 读写 --> D[(D1)]
 ```
 
-完整指南（一次性准备、手动运行 Worker、命令速查与注意事项）见 [docs/guide/development.md](docs/guide/development.md)。
+用户与话题的映射长期复用；归档后回访恢复原话题，仅 `/deluser` 或话题被原生删除后才建立新映射。
+数据流与模块边界详见[原理与架构](docs/guide/architecture.md)。
 
-## 部署到 Cloudflare（自动部署 · Workers Builds）
+> [!IMPORTANT]
+> 当前为**单 Bot、单客服群**架构。多 Bot、换绑迁移在[路线图](docs/todo/index.md)中，尚未实现——更换 Bot 或群组等于启用全新实例。
 
-三条路径共用同一套声明式配置（`wrangler.jsonc` + `.dev.vars.example`）。本项目面向自部署：**第三方使用者推荐「fork 后部署」**，每份部署独享自己的 D1 与变量。
+## 快速开始
 
-### 路径一（推荐）：fork 后部署（零仓库改动，全程浏览器）
+### 前置条件
 
-第三方使用者：
+- 一个 Telegram Bot（[@BotFather](https://t.me/BotFather) 创建）
+- 一个开启话题（Topics）的**私有**超级群组，Bot 授予四项权限：**管理话题 / 发送消息 / 删除消息 / 置顶消息**
+- 客服群 `chat_id` 与管理员 `user_id`（获取方法见[部署指南](docs/guide/deploy.md)）
+- 一个 Cloudflare 账户（免费套餐即可运行，用量受配额约束）
 
-1. Fork `huaiminyetnotsleep/hodor` 到自己的 GitHub 账号
-2. Cloudflare 面板 → **Workers & Pages → Create → Workers → Import a repository** → 授权 Cloudflare GitHub App → 选中**你的 fork**，向导逐项配置：
-   - 项目名称：`hodor`
-   - 变量表单：**不出现**（`.dev.vars.example` 条目全部注释 = 零提示，见该文件头部说明）；所有变量统一部署后在面板「设置 → 变量和机密」配置（见第 3 步 `/selfcheck` 指引），`keep_vars: true` 已在仓库配置，配好的值**跨部署持久，fork 使用者零代码改动**
-   - 构建命令：**留空**；部署命令：**保持向导默认 `npx wrangler deploy`，无需改动**——置备（创建/复用同名 D1 → 注入 database_id 到构建工作区，**不改动你的仓库** → 幂等迁移）由 `npm install` 的 postinstall 钩子自动完成，先于部署执行
-   - 关闭「启用预览构建」（Phase 1 无 preview 分支部署需求）
-3. 部署 → 验证：`curl https://hodor.<你的子域>.workers.dev/health` → `{"status":"ok","version":"…"}`；再 `curl https://hodor.<你的子域>.workers.dev/selfcheck` 做完整自检——刚部署、变量未配时预期 503 与 `failed` 数组（逐条点名缺失的 5 条必填变量，不回显任何密钥值），据此到面板 Worker → 设置 → 变量和机密 补齐（3 个 Secret 用机密类型，`SUPPORT_CHAT_ID` / `ADMIN_IDS` 用文本；4 条选填按需、均有默认值）；然后访问 `/setwebhook/<ADMIN_SECRET>` 完成绑定，再开一次 `/selfcheck` 应全绿返回 200，即可真机聊天
-4. 此后 **push 你的 fork 即自动构建部署**；上游更新 → fork 页点 **Sync fork** → 自动部署。另有可选的定时自动同步 workflow（默认关闭，开启方法见 [发布与更新](docs/guide/release.md) 的「自动跟随更新」）
+### 方式一：fork 后部署（推荐）
 
-> 排错：报 `The database … could not be found (7404 / 10181)` = 自动置备未生效——先查构建日志**安装阶段**的 `[provision]` 输出；兜底：把部署命令改为 `npm run deploy`（显式置备后部署）再重建。
-> 部署后变量丢失：确认部署所用代码包含 `keep_vars: true`（本仓库已配置，wrangler.jsonc）；仍丢失时检查变量是否加在了别的 Worker 上。
-> 若构建令牌无建库权限：在面板建好同名 D1 再重跑，脚本会按名字复用，仍零仓库改动。
->
-> 仓库所有者本人部署：无需 fork，Import a repository 直接选现有仓库，其余相同。
+全程浏览器，push 即自动部署。
 
-### 路径二：GitHub URL 一键部署（Deploy 按钮）
+1. Fork 本仓库到你的 GitHub 账号
+2. 打开 Cloudflare 面板 → Workers & Pages → Create → Workers → **Import a repository**，授权 GitHub 后选中你的 fork
+3. 向导保持默认（项目名 `hodor`、构建命令留空、部署命令 `npx wrangler deploy`），保存后自动完成首次部署
+4. 此后每次 push 到 `main` 即自动发布新版本
 
-适合没有任何现成仓库的全新使用方——点按钮，Cloudflare 会在你的 GitHub 账号下**自动创建仓库副本**（相当于自动 fork）并完成置备连接：
+### 方式二：Deploy 按钮
+
+没有现成仓库时，点击按钮由 Cloudflare 自动创建仓库副本并完成部署：
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/huaiminyetnotsleep/hodor)
 
-实测注意（2026-09-28）：
+### 方式三：手工 wrangler
 
-- 副本仓库名默认取项目名——你的账号下已有同名仓库会报「已存在具有该名称的存储库」（仓库所有者部署请走路径一直接导入现有仓库）
-- 报「无法获取存储库内容」多为瞬时失败：确认 URL 为标准 HTTPS 地址（非 `git@…` SSH 形式）、仓库 Public，稍后重试或改走路径一
-- 其余置备项（D1 / 部署命令）与路径一相同；表单零变量提示，变量与路径一相同，部署后面板配置（见路径一第 3 步）；`.dev.vars.example` 是本地开发模板（其表单清单用途现为零提示设计）
-
-### 路径三：手工 wrangler（不依赖 GitHub，救急/本地验证用）
+不依赖 GitHub，本地需 Node ≥ 24：
 
 ```bash
 npx wrangler login
-npm run deploy          # = node scripts/deploy.mjs：自动建/复用 D1、注入 id、迁移、部署
-curl https://hodor.<你的子域>.workers.dev/health
+npm run deploy
 ```
 
-仅注入/更新变量时：`npx wrangler secret put <NAME>`（变量清单见 `.dev.vars.example`）。
+> [!TIP]
+> 三条路径共用同一套仓库配置：D1 建库、绑定与表迁移自动完成；变量值一律不进仓库，部署后在 Cloudflare 面板「变量和机密」配置。
 
-### 与业界做法的对照
+部署后统一收尾：配置 9 个环境变量（`/selfcheck` 会逐条点名缺失项）→ 绑定 webhook → 复检全绿 → 试聊验收。
+完整分步说明见 **[部署指南](docs/guide/deploy.md)**；日常更新与回滚见[发布与更新](docs/guide/release.md)。
 
-「零配置部署 + 数据库置备」在业界有三种成熟模式，本项目各取所长：
+## 关键配置与命令
 
-| 模式 | 业界代表 | hodor 的对应 |
-|---|---|---|
-| **配置即资源**（IaC in repo）：平台按声明置备并回写 | Render `render.yaml`、CF 模板向导/按钮 | wrangler.jsonc 即声明式资源描述；路径二（按钮）由平台置备 D1 |
-| **置备/迁移是部署管线的独立阶段** | Heroku release phase、Render `preDeployCommand`、Fly `release_command` | `scripts/deploy.mjs`：云端经 postinstall 钩子（`WORKERS_CI=1` 门控）自动执行，本地 `npm run deploy` 显式执行，均先于部署 |
-| **平台侧建库 + env 注入引用**（连接信息不进仓库） | Vercel Marketplace、Heroku Add-ons（`DATABASE_URL` 模式） | 9 个变量全部走面板「变量和机密」/ Secret（部署表单零提示）；D1 是同平台 binding（真实 id 不进仓库，构建时按名字解析注入），故用前两种模式 |
+### Cloudflare 环境变量
 
-业界同样没有的第四种——让用户手改配置文件里的资源 ID——正是本方案要消除的。
+配置入口：Cloudflare 面板 → Worker → 设置 → **变量和机密**。三个 Secret 请使用互不相同的长随机串；仓库已开启 `keep_vars`，面板配置跨部署保留，变量值一律不进仓库。
 
-## 部署后的更新与回滚（三条路径通用）
+| 变量 | 类型 | 必填 | 默认 | 说明 |
+| --- | --- | --- | --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Secret | ✅ | — | Bot Token（@BotFather 获取） |
+| `TELEGRAM_WEBHOOK_SECRET` | Secret | ✅ | — | Webhook 防伪造密钥（≥ 16 位） |
+| `ADMIN_SECRET` | Secret | ✅ | — | `setwebhook` 管理端点访问凭证 |
+| `SUPPORT_CHAT_ID` | 文本 | ✅ | — | 客服群 ID（`-100` 开头） |
+| `ADMIN_IDS` | 文本 | ✅ | — | 管理员用户 ID，逗号分隔可多个 |
+| `MAX_MESSAGES_PER_MINUTE` | 文本 | — | `20` | 每用户每分钟转发上限，超限触发重验 |
+| `VERIFY_TTL_HOURS` | 文本 | — | `0` | 验证有效期（小时），`0` = 永久 |
+| `MAX_ATTEMPTS` | 文本 | — | `3` | 同一条更新最大重试次数，超限跳过 |
+| `WELCOME_TEXT` | 文本 | — | 内置文案 | 自定义欢迎语，字面 `\n` 解释为换行 |
 
-- 源码更新走 push 自动部署（路径三则手工 deploy）；**不再点按钮 / 不再重复导入**
-- 回滚：Dashboard → Deployments 一键回退（秒级）或 `npx wrangler rollback`；**Worker 回滚不回滚 D1**，迁移始终 append-only
-- 默认全量生效；需要灰度时用 Dashboard → Deployments → 版本上线控制（Versions gradual deployments，如 1% → 10% → 50% → 100%），任一阶段异常立即回退 Worker 版本
-- Webhook URL、Secrets、D1 资源跨更新原样保留（发布不重设 Webhook）
-- 人工验证：部署后 `/health` 确认链路，`/setwebhook/<ADMIN_SECRET>` 绑定后即可真机聊天验收
+配置完成后访问 `https://<worker-url>/setwebhook/<ADMIN_SECRET>` 绑定 webhook（同时自动注册命令菜单），再用 `/selfcheck` 复检。
 
-## 运维
+### 管理命令
 
-- 管理端操作（绑定 / 解绑 webhook）通过浏览器访问 `/setwebhook/<ADMIN_SECRET>`、`/deletewebhook/<ADMIN_SECRET>`；运维查询见下
+在客服群对应话题内发送，仅 `ADMIN_IDS` 中的管理员生效；部署后自动注册进群命令菜单（输入框点 `/` 直接选择）。
 
-### 数据库巡检（Dashboard D1 Console）
+| 命令 | 作用 |
+| --- | --- |
+| `/help` | 查看管理命令帮助（按当前验证开关动态展示） |
+| `/ban` `/unban` | 封禁 / 解封本话题用户 |
+| `/note` `/unnote` | 添加 / 清除用户备注 |
+| `/risk` `/unrisk` | 标记 / 取消高危用户 |
+| `/verifyon` `/verifyoff` `/verifymode` | 开启 / 关闭人机验证、切换验证模式（即时生效，无需重部署） |
+| `/archive` | 软归档本话题用户（保留历史与备注，回访复用原话题） |
+| `/deluser` | 物理删除用户及本话题（需确认） |
+| `/purgemsg` | 清理本话题可追踪的群消息 |
+| `/wipealldata` | 删除全部话题并清空数据库（**危险操作**，两步确认） |
 
-**唯一查询途径**：Dashboard → Storage & Databases → D1 → `hodor` → Console，直接输入 SQL 执行。常用查询（用户 / topic / 幂等状态 / 失败 update）见 [docs/guide/ops.md](docs/guide/ops.md) 常用 SQL 一节，在 Console 直接粘贴执行。
+完整行为与边界说明见[功能介绍](docs/guide/features.md)。
 
-只读约定：Console 只做只读查询；用户消息正文属敏感数据，直查结果不外发、不贴日志。
+### 常用命令
+
+```bash
+npm run deploy            # 一键部署：自动建/复用 D1 → 远端迁移 → 部署（迁移失败即中止）
+npm run dev               # 本地开发（wrangler dev + 本地 D1，需先 db:migrate:local）
+npm run db:migrate:local  # 应用本地 D1 迁移
+npm test                  # 运行测试（vitest + workers 池）
+npm run typecheck         # TypeScript 类型检查
+npm run docs:dev          # 本地预览文档站
+```
+
+## 文档
+
+| 页面 | 内容 |
+| --- | --- |
+| [功能介绍](docs/guide/features.md) | 消息类型、验证与频控、命令表、会话生命周期 |
+| [部署指南](docs/guide/deploy.md) | 前置条件、ID 获取、环境变量权威清单、三条部署路径、部署后验收 |
+| [运维手册](docs/guide/ops.md) | Webhook 与 Token 管理、`/health` 与 `/selfcheck`、故障排查、SQL 入口 |
+| [原理与架构](docs/guide/architecture.md) | 模块边界、消息流水线、设计决策（维护者参考） |
+| [数据表](docs/guide/database.md) | Schema 与语义（维护者参考） |
+| [本地开发](docs/guide/development.md) | Node 24、测试基座、本地 Worker 与 D1 |
+| [发布与更新](docs/guide/release.md) | 维护者发版流程与 fork 用户跟随更新（含可选自动同步） |
+| [路线图](docs/todo/index.md) | 明确标注的未来事项 |
+
+## 参与贡献
+
+欢迎通过 [Issue](https://github.com/huaiminyetnotsleep/hodor/issues) 反馈问题或提议功能；提交 PR 前请阅读[本地开发指南](docs/guide/development.md)，并确保 `npm test` 与 `npm run typecheck` 通过。
+
+## 致谢
+
+Hodor 的设计与文档参考了以下优秀的开源项目，特此感谢。
+
+**设计参考**
+
+- [ctt](https://github.com/iawooo/ctt) —— 数学题验证 + 答案按钮、分钟级限频超限重验、D1 + 话题映射的整体形态
+- [BetterForward](https://github.com/SideCloudGroup/BetterForward) —— 话题置顶用户信息、管理命令设计
+- [open-wegram-bot](https://github.com/wozulong/open-wegram-bot) —— 无状态转发思路、webhook `secret_token` 鉴权
+
+**文档样式参考**
+
+- [grammY](https://github.com/grammyjs/grammY) · [Uptime Kuma](https://github.com/louislam/uptime-kuma) · [Memos](https://github.com/usememos/memos)
+
+## License
+
+[MIT](LICENSE) © huaiminyetnotsleep
