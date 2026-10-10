@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.8.0...v1.9.0) (2026-10-10)
+
+
+### Features
+
+* add native Cloudflare Turnstile verification mode ([67d4c76](https://github.com/huaiminyetnotsleep/hodor/commit/67d4c76a377f8c217b8d9c1a4ec0f9fdaf47386b))
+* split verifymode into per-mode commands gated to General ([493fa3e](https://github.com/huaiminyetnotsleep/hodor/commit/493fa3e3eecd0acc49ba1154be0d25295c7d8b31))
+
 ## [1.8.0](https://github.com/huaiminyetnotsleep/hodor/compare/v1.7.0...v1.8.0) (2026-10-09)
 
 
