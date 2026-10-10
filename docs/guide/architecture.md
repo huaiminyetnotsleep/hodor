@@ -41,7 +41,9 @@
 | `/setwebhook/<ADMIN_SECRET>` | GET | `ADMIN_SECRET`（路径段） | 绑定 webhook，token 从 env 读取 |
 | `/deletewebhook/<ADMIN_SECRET>` | GET | 同上 | 解绑 webhook |
 | `/health` | GET | 无 | 存活探针 + 版本号 |
-| `/selfcheck` | GET | 无 | 完整自检：环境变量 / 八张表 / webhook 指向；有未通过项 503 + `failed[]` |
+| `/selfcheck` | GET | 无 | 完整自检：环境变量 / 验证配置 / 八张表 / webhook 指向；有未通过项 503 + `failed[]` |
+| `/verify?r=<nonce>` | GET | 无（nonce 只是请求标识，不是身份） | Turnstile 验证页面（Telegram Mini App 嵌入；安全静态页 + CSP） |
+| `/api/verify/turnstile` | POST | Telegram initData HMAC 身份 + D1 条件最终裁决 | 网页验证唯一完成入口（身份 + Turnstile token + 请求归属），不开放宽 CORS |
 
 ::: info 鉴权失败的响应约定
 管理端点的所有鉴权失败（secret 缺失、不存在、不正确）一律返回 `401` + 「无效的管理密钥」，**不区分具体原因**，避免给探测者反馈某个 secret 是否存在过。
@@ -51,11 +53,12 @@
 
 ### 自检（/selfcheck）
 
-部署完成后访问 `GET /selfcheck` 即可确认整条链路就绪。它按固定顺序（环境变量 → 数据库 → Webhook）逐项检查并返回 JSON（公开只读端点，不回显任何密钥值）：
+部署完成后访问 `GET /selfcheck` 即可确认整条链路就绪。它按固定顺序（环境变量 → 验证配置 → 数据库 → Webhook）逐项检查并返回 JSON（公开只读端点，不回显任何密钥值）：
 
 | 检查项 | 内容 |
 | --- | --- |
 | 环境变量 | 5 条必填变量已配置且格式合法（`SUPPORT_CHAT_ID` 为 `-100` 开头整数、`ADMIN_IDS` 可解析出至少一个合法 ID）；三个 Secret 互异；选填变量（`MAX_ATTEMPTS` / `MAX_MESSAGES_PER_MINUTE` / `VERIFY_TTL_HOURS`）已配置但值非法也可定位 |
+| 验证配置 | 读取 settings 验证模式快照后检查 Turnstile 相关配置：两把密钥必须成对（只配一个即报错）、`verify_mode=turnstile` 时必需齐全、官方测试密钥与非法 `PUBLIC_BASE_URL` 逐条点名；settings 读取失败单独报告，不阻断其余检查 |
 | 数据库 | `HODOR_DB` 绑定可用、当前 schema 全部八张表存在（users / topics / messages / settings / processed_updates / bots / delete_confirmations / broadcasts，迁移已执行） |
 | Webhook 绑定 | 通过 `getWebhookInfo` 确认 webhook 已指向本 Worker 的 `/webhook`；未绑定、指向错误地址、Telegram 调用失败均可定位 |
 
@@ -92,7 +95,8 @@ update 到达
  │ ⑥ 验证门（settings.verify_enabled 关闭时整门跳过、记录保留）：
  │      未验证 或 VERIFY_TTL_HOURS 过期 → 出题 / 重发验证码（每用户每分钟 ≤1 次），丢弃
  │      （首联 = 欢迎语 + 首题成对发出；答题前零 topic、零中继、零账本；
- │        题面形态随 settings.verify_mode：数学题 4 按钮 / 纯按钮单按钮）
+ │        题面形态随 settings.verify_mode：数学题 4 按钮 / 纯按钮单按钮 /
+ │        Turnstile web_app 按钮——关闭期间 Turnstile 不发无法完成的网页请求）
  │ ⑦ 限频门：60 秒固定窗口计数 ≥ MAX_MESSAGES_PER_MINUTE？
  │      → 标记未验证 + 发新验证码（提示含限频数字），丢弃
  │ ⑧ 确保 topic：查 topics 表；无则 createForumTopic + 置顶用户信息
@@ -146,7 +150,7 @@ General /broadcast 输入
 
 ## 验证状态机
 
-> 验证可运行时配置：`/verifyon` / `/verifyoff` 全局开关（settings 表持久化，关闭期间记录保留、TTL 不判定）、`/verifymode` 数学题 ↔ 纯按钮循环切换（切换清空全部 pending 旧题，旧题回调一律失效）。
+> 验证可运行时配置：`/verifyon` / `/verifyoff` 全局开关（settings 表持久化，关闭期间记录保留、TTL 不判定）；`/verifymode` 无参数只查看、显式参数设置 math / button / turnstile。模式 / 开关**真变化**在同一个 D1 batch（事务）内推进配置版本（`settings.verify_generation`）并清空全部 pending（含未完成的网页请求）；同值重复设置、无参查看与非法参数幂等不动。切为 turnstile 前置凭据检查，缺配置拒绝切换。
 >
 > 置顶信息验证行三态：✅ 已验证 / ❌ 未验证 / 未启用。
 
@@ -162,9 +166,10 @@ General /broadcast 输入
 ```
 
 - 验证码：数学题模式 `a ± b` 题目 + 4 个答案按钮，正确答案只存数据库，callback 只携带用户所选值，不在消息里泄漏答案；纯按钮模式单按钮（防护较弱，帮助与切换确认均说明）
-- 答错：编辑原消息提示错误，并重新出一题
+- Turnstile 模式：私聊 web_app 按钮打开 `/verify?r=<nonce>` 页面（nonce 为 32 随机字节的十六进制，D1 只存其 SHA-256 摘要）。提交后服务端依次校验 initData HMAC 身份、请求归属 / 有效期 / 配置版本、15 秒原子提交节流，再向 Cloudflare Siteverify 验 token（含 hostname / action / cdata 上下文核对），最后以单条条件 UPDATE 裁决（`meta.changes=1` 才算通过）——三模式共用同一请求栅栏与配置版本，切换后旧挑战（含网页请求）失效，切回不复活
+- 答错：编辑原消息提示错误，并重新出一题（换题与保存同样走 CAS，固定预检时的模式）
 - 验证通过前的消息直接丢弃，不积压补发
-- `VERIFY_TTL_HOURS`（默认 0 = 永久）：已验证用户的通过时间距 now ≥ TTL 时，下一条消息触发重验（撤验证 + 置顶降级 ❌ + 出题）
+- `VERIFY_TTL_HOURS`（默认 0 = 永久）：已验证用户的通过时间距 now ≥ TTL 时，下一条消息触发重验（撤验证 + 置顶降级 ❌ + 出题）；封禁原子清空请求栅栏，解封不恢复
 
 ## 可靠性
 
@@ -191,12 +196,15 @@ General /broadcast 输入
 ```
 src/
   index.ts          # fetch 入口（路由层分发）
-  routes/           # webhook / admin（setwebhook·deletewebhook，含命令菜单注册）/ health 各端点
-  selfcheck.ts      # /selfcheck 的纯检查函数（env / 八表 / webhook，供路由消费）
+  routes/           # webhook / admin（setwebhook·deletewebhook，含命令菜单注册）/ health /
+                    # verify（Turnstile 验证页面 GET 与完成 API POST）各端点
+  selfcheck.ts      # /selfcheck 的纯检查函数（env / 验证配置 / 八表 / webhook，供路由消费）
+  verification/     # telegramInitData（initData HMAC 身份校验）/ turnstile（Siteverify 客户端）/
+                    # page（安全页面渲染）/ request（nonce、SHA-256 摘要与格式）
   pipeline/
     inbound.ts      # 入站管线：三门（封禁/验证/限频）→ topic → 中继 → 账本
     outbound.ts     # 出站管线：命令分流 → 反查绑定 → 中继 → 账本 / 无绑定提示
-    verify.ts       # 验证管线：出题 + 答题回调（归属/失效/重出/置顶刷新）
+    verify.ts       # 验证管线：三模式出题（统一请求栅栏）+ 答题回调 CAS + 共享成功通知
     commands.ts     # 命令管线：分流与 /help /ban /unban /note /risk 等基础命令
     deluser.ts      # /deluser 物理删除执行（二次确认回调裁决）
     wipe.ts         # /wipealldata（两步确认 → 先删全部群话题 → 清库）
@@ -225,7 +233,7 @@ src/
 | token 永不进 URL | URL 会留在浏览器历史、CF 访问日志等处，泄漏即被接管 bot。管理端点用独立的 `ADMIN_SECRET` 鉴权，token 只从 env 读取 |
 | 一人一 topic，archive 后复用、deluser 后删除 | `/archive` 保留绑定 / 历史 / 备注并在回访时重开；`/deluser` 物理删除 topic + Hodor 数据；native close/reopen 服务事件同步 topic 状态 |
 | 业务表记录 bot_id | 标识当前实例的 bot 身份；多个实例各用独立 D1，不能仅凭此列推断可跨实例迁移 |
-| 无框架，原生 fetch | 端点总共只有 5 个，引入 Web 框架收益极低；零运行时依赖也让免费额度占用最小 |
+| 无框架，原生 fetch | 端点只有个位数，引入 Web 框架收益极低；零运行时依赖也让免费额度占用最小 |
 | 提示回复限频（每用户每分钟 1 次） | 防止攻击者用「垃圾消息 → 触发提示回复」反向刷 CF 请求额度 |
 
 ### 部署置备与业界模式对照
@@ -238,7 +246,7 @@ src/
 | --- | --- | --- |
 | **配置即资源**（IaC in repo）：平台按声明置备并回写 | Render `render.yaml`、CF 模板向导 / 按钮 | `wrangler.jsonc` 即声明式资源描述；Deploy 按钮路径由平台置备 D1 |
 | **置备 / 迁移是部署管线的独立阶段** | Heroku release phase、Render `preDeployCommand`、Fly `release_command` | `scripts/deploy.mjs`：云端经 postinstall 钩子（`WORKERS_CI=1` 门控）自动执行，本地 `npm run deploy` 显式执行，均先于部署 |
-| **平台侧建库 + env 注入引用**（连接信息不进仓库） | Vercel Marketplace、Heroku Add-ons（`DATABASE_URL` 模式） | 9 个变量全部走面板「变量和机密」；D1 是同平台 binding，真实 id 不进仓库、构建时按名字解析注入 |
+| **平台侧建库 + env 注入引用**（连接信息不进仓库） | Vercel Marketplace、Heroku Add-ons（`DATABASE_URL` 模式） | 基础 9 项变量全部走面板「变量和机密」；D1 是同平台 binding，真实 id 不进仓库、构建时按名字解析注入 |
 
 业界同样没有的第四种——让用户手改配置文件里的资源 ID——正是本方案要消除的。
 

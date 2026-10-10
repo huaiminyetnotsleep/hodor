@@ -62,6 +62,26 @@ bot 身份（bot_id）不变，所有数据继续有效：
 | `ADMIN_SECRET` | 零影响，仅管理端点换钥匙；旧链接失效，用新值重新访问即可 |
 | `TELEGRAM_WEBHOOK_SECRET` | 改完**必须重新 setwebhook**：旧注册还带着旧 secret，update 校验会 401 |
 | `TELEGRAM_BOT_TOKEN` | 见上方「更换 Token」 |
+| `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | 只影响 Turnstile 验证模式；不要只改面板值了事，按下方[验证模式与密钥变更](#验证模式与密钥变更)的门禁顺序操作 |
+
+## 验证模式与密钥变更 {#验证模式与密钥变更}
+
+Turnstile 的申请与生产配置见[部署指南 · Turnstile 申请与配置](/guide/deploy.md#turnstile)（唯一权威流程，本节不重复）。本节只讲运维动作。
+
+### 换密钥或换域名（门禁顺序）
+
+Turnstile 的 Secret、Widget hostname 或 `PUBLIC_BASE_URL` 变更不能只改面板值了事：在途的验证页面与旧配置不会瞬时全局生效。按以下顺序：
+
+1. 管理员执行 `/verifymode math`（或 `button`）切出 Turnstile 模式——同时作废全部未完成的网页请求
+2. 在面板修改变量；hostname 变化时同步在 Turnstile 控制台调整 Widget
+3. 访问 `/selfcheck` 复查至无 Turnstile 相关失败项
+4. `/verifymode turnstile` 重新启用，并按部署指南的验收步骤在真机复验
+
+### 回滚
+
+`/verifymode math`（或 `button`）即回退到原模式：未完成的网页请求与旧题目全部作废，**已验证状态保留**，已验证用户无需重验。
+
+不要用直接回滚代码版本的方式「关闭」Turnstile——旧版本不认识新的验证状态字段；先切模式才是安全路径。
 
 ## 健康自检与版本
 
@@ -75,7 +95,7 @@ bot 身份（bot_id）不变，所有数据继续有效：
 
 部署后或每次更新后建议访问一次，确认服务存活并核对版本号。
 
-**`GET /selfcheck` — 完整自检**。按 环境变量 → 数据库八表 → Webhook 绑定 的固定顺序逐项检查：
+**`GET /selfcheck` — 完整自检**。按 环境变量 → 验证配置（Turnstile）→ 数据库八表 → Webhook 绑定 的固定顺序逐项检查：
 
 全部通过返回 `200 {"status":"ok","version":"…"}`；有未通过项返回 503 与 `failed` 数组，逐条给出中文失败原因（不回显任何密钥值）。
 
@@ -86,6 +106,11 @@ bot 身份（bot_id）不变，所有数据继续有效：
 | failed 文案（节选形态） | 处置 |
 | --- | --- |
 | `必填变量未配置：TELEGRAM_BOT_TOKEN、…`、`SUPPORT_CHAT_ID 非法：…`、`密钥变量取值重复：…`、`MAX_ATTEMPTS 已配置但非法（正整数）…` 类 | 面板 Worker → 设置 → 变量和机密 补齐 / 修正对应变量后重试（选填值非法时运行时已回退默认值，failed 项属提示性质） |
+| `Turnstile 配置不完整：TURNSTILE_SITE_KEY 与 TURNSTILE_SECRET_KEY 必须成对配置（当前仅配置了 …）` | 两把 Key 成对补齐，或成对清空（不使用 Turnstile）；申请流程见[部署指南 · Turnstile 申请与配置](/guide/deploy.md#turnstile) |
+| `当前验证模式为 turnstile，但缺少必需配置：…` | 面板补齐缺失的 Key 后重试；或先用 `/verifymode math` / `button` 切回其他模式 |
+| `TURNSTILE_SITE_KEY / TURNSTILE_SECRET_KEY 是 Cloudflare 官方测试密钥：仅限本地测试…` | 换成在 Turnstile 控制台创建 Widget 获取的正式密钥（测试密钥放行一切，生产不可用） |
+| `PUBLIC_BASE_URL 已配置但非法：必须是 HTTPS origin…` | 修正为合法的 HTTPS origin（仅可含根路径），或直接清空该变量（按请求 origin 自动推导） |
+| `验证配置读取失败：无法从数据库读取验证模式（Turnstile 项跳过）` | D1 暂不可用：先看「数据库缺表」类条目与构建日志；该条不阻断其余检查 |
 | `数据库缺表：…（迁移可能未执行，请在构建日志确认 migrations 步骤）` | 查看构建日志安装阶段的 `[provision]` 与迁移输出：确认建库 / 复用是否成功、迁移是否执行或失败 |
 | `webhook 未绑定，请访问 /setwebhook/<ADMIN_SECRET> 完成绑定` | 浏览器访问 `/setwebhook/<ADMIN_SECRET>` 完成绑定 |
 | `webhook 指向错误地址：…（应为 …，请重新执行 /setwebhook）` | 重新执行 `/setwebhook/<ADMIN_SECRET>`（常见于换了 Worker 地址 / 域名后未重绑） |
@@ -155,6 +180,14 @@ LIMIT 20;
 | bot 完全无响应 | ① 先确认 webhook 已绑定：访问 `/setwebhook/<ADMIN_SECRET>` 回显身份即已绑定（或看完整自检 `GET /selfcheck`：未绑定 / 指向错误会在 `failed` 中逐条点名）；② `npx wrangler tail hodor` 实时日志看请求是否到达、有无 401——secret 头不符说明 `TELEGRAM_WEBHOOK_SECRET` 与注册时不一致，重新 setwebhook；③ 日志无请求 = Telegram 侧未推送，检查 webhook 绑定 |
 | 消息进群但为空 / 报 sendMessage 400 | `wrangler tail` 看具体 API 报错文案；若为「message to copy not found」类，参考 T21 运行时说明（[TODO](/todo/p1.md)） |
 | 验证码收不到 | 用户是否已被 ban（封禁门不发出题）；日志中 sendMessage 是否报 403（用户已停用 / 拉黑 bot）；60 秒内重复消息受提示频控限制（每分钟最多 1 次提示） |
+| `/verifymode turnstile` 回复「无法切换…缺少必需配置」 | 面板 Worker → 变量和机密 补齐 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`（成对配置），`/selfcheck` 核对后重试；申请流程见[部署指南](/guide/deploy.md#turnstile) |
+| 验证页面显示「请从 Bot 聊天窗口的…按钮打开本页」 | 链接在 Telegram 外打开（拿不到 Telegram 签名身份）或会话已失效：回到 Bot 私聊点「打开验证页面」按钮重开——这是唯一支持的入口 |
+| 验证页面显示「当前账号与验证请求不符」 | 打开链接的 Telegram 账号不是发起验证的账号：让原账号回 Bot 重新发起 |
+| 验证页面显示「身份信息已过期（页面打开超过 5 分钟）」 | 页面开着太久：关闭后从 Bot 按钮重新打开；仅刷新挑战组件无效 |
+| 验证页面显示「验证链接已过期或已被使用」 | 链接超过 10 分钟或已被使用：回 Bot 发送任意消息获取新链接 |
+| 验证页面显示「人机验证未完成，请重新尝试」 | Turnstile 组件加载或校验失败：点「重新验证」；持续失败检查 Turnstile 控制台 hostname 是否包含实际访问域名、设备到 `challenges.cloudflare.com` 的网络是否可达 |
+| 验证页面显示「验证服务暂时不可用」 | Cloudflare Siteverify 上游或 Worker 配置异常：稍后重试；用 `/selfcheck` 核对配置，`wrangler tail` 看脱敏日志 |
+| 切换模式后旧验证按钮 / 链接还能用吗 | 不能：模式 / 开关真变化会作废全部旧题目与网页请求，切回原模式也不复活；已验证状态保留（详见[验证模式与密钥变更](#验证模式与密钥变更)） |
 | 消息转发了但没建 topic，或 topic 操作失败 | bot 在群里缺少「管理话题」权限 |
 | `/purgemsg` 执行失败 | bot 缺少「删除消息」权限 |
 | 提示「找不到对应用户」 | topic 是僵尸（绑定行不存在或已被手动清理）：按提示手动关闭或删除该 topic |
