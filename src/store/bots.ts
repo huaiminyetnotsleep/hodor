@@ -3,7 +3,7 @@
  *
  * setwebhook 绑定时由 getMe 结果 upsert（docs/guide/database.md）；
  * webhook 处理时用 getSingleBotId 取数据归属（v1 单 bot：单行读，
- * 不从 update 猜身份——T41 原则的 v1 形态）。
+ * 不从 update 猜身份）。
  */
 import { nowIso } from "./util";
 

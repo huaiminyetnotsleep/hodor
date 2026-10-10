@@ -1,8 +1,8 @@
 /**
- * settings 表 store：验证开关、验证模式与验证配置版本（阶段 5 T31/T32 +
+ * settings 表 store：验证开关、验证模式与验证配置版本
  * Turnstile 任务 10-09-turnstile-verification）。
  *
- * settings 是全局单份的运行时开关（多 bot 维度拆分属阶段 8，本阶段契约
+ * settings 是全局单份的运行时开关
  * 即全局；docs/guide/database.md）。存库而非环境变量的产品语义是「命令
  * 切换即时生效、重部署不丢」——因此**不做缓存**：每条入站消息直读（单条
  * IN 点查），缓存会引入失效窗口破坏即时性。

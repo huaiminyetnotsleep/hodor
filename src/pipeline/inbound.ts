@@ -1,27 +1,27 @@
 /**
- * 入站管线（T19/T20/T21 + T22–T25 + 阶段 4 三门 T28/T29/T35 + 阶段 5 M2
- * 置顶治理行 / 高危提醒）：
+ * 入站管线（三门 → 话题 → 中继 → 账本，含置顶治理与高危提醒）：
+
  *
  * 1. extractContent → 支持集之外（audio 之外的音乐类 / video_note / …）静默完成，零副作用
  * 2. from 校验（缺 id → 静默完成）
  * 3. ensureUser → { isNew, displayChanged, firstSeenAt } + 治理快照
  *    （isBanned / isVerified / isRisk / verifyAnswer / verifyMsgId）+
  *    getVerificationSettings 每消息一次（置顶三态 / M3 门 ②）
- * ①封禁门 isBanned → 拦截 + claimNoticeSlot 赢得才发 BAN_NOTICE（T30 频控）；
+ * ①封禁门 isBanned → 拦截 + claimNoticeSlot 赢得才发 BAN_NOTICE（提示频控）；
  *    封禁用户零验证 / 限频逻辑、零 topic 副作用、零账本
- * ②验证门（T27/T28 + T31 开关 + T33 TTL）：
+ * ②验证门（开关 + TTL）：
  *    settings.verifyEnabled=false → **整门跳过**（门位置与门序不动——不删
  *    任何记录、不判定 TTL，未验证用户直接落 ③ 限频门；首联包欢迎语随门
  *    一起跳过，仅 isStart 用户在 ④ 仍可获欢迎语）
  *    开启且 (!isVerified 或 TTL 过期) → （过期先 markUnverified + 置顶降级 ❌
- *    best-effort）+ 欢迎语（isNew / isStart，slot 门控——阶段 3 语义）+
+ *    best-effort）+ 欢迎语（isNew / isStart，slot 门控）+
  *    验证题（首联包 isNew 不占 slot 与欢迎成对；存量 / pending 重出 slot
  *    门控——赢才出换题防死锁，输静默；题面随 settings.verifyMode 模式化）；
  *    本条丢弃（/start 亦如此）
  * ③限频门 countMessageInWindow 超限 → markUnverified + 置顶降级 ❌
  *    （downgradePinnedToUnverified 共享助手，best-effort）
  *    + slot 赢得才发「含限频数字 + 新题 + 按钮」合并消息（单 push）；本条丢弃
- * ④通过三门 → 阶段 3 链原样：
+ * ④通过三门 → 主链：
  *    topic 解析（open 复用 / closed 重开 / 新建 + 竞态清理）
  *      4a. pinned_msg_id === null → 发用户信息并置顶（高危 / 备注行随库内
  *          真值；验证行三态——开关关闭恒「未启用」，开启时三门后恒 ✅）
@@ -29,15 +29,15 @@
  *    欢迎语（仅 isStart 可达：新用户一律先落验证门；slot 门控）
  *    /start 短路（入口命令非对话内容，不中继不写账本）
  *    中继 relayContent → 账本 insertMessage
- *    8. isRisk && claimRiskNoticeSlot 赢得 → topic 内高危提醒（T37，24h 一次；
+ *    8. isRisk && claimRiskNoticeSlot 赢得 → topic 内高危提醒（24h 一次；
  *       完全 best-effort，绝不放大用户消息重发面）
  *
  * 门序固定：封禁 → 验证 → 限频（封禁不消耗验证 / 限频逻辑；未验证消息不进
  * 限频计数）。三门在建档之后、topic 之前；被任一门拦截 = 零 topic 副作用、
  * 零账本，按成功处理（webhook markProcessed + 200，不积压补发——答题前被
- * 丢弃的消息不回溯，T28）。
+ * 丢弃的消息不回溯）。
  *
- * 逐步失败语义（design.md §四 + 阶段 3 表格，binding）：
+ * 逐步失败语义（binding）：
  * | 步骤                | retryable                    | permanent                          |
  * | ①禁言提示            | 抛（slot 已耗，宁丢一条）      | warn 吞                            |
  * | ②欢迎语 / 验证题      | 抛（同上——重推出题，旧题失效） | warn 吞（题不落库）                 |
@@ -101,7 +101,7 @@ import type { TelegramMessageRef } from "./classify";
 
 /**
  * 展示名三级回退：first_name → @username → ID_<user_id>。topic title（建档时
- * 定死，不再复算）与高危提醒（T37，取当前消息展示字段）共用同一链路。
+ * 定死，不再复算）与高危提醒（取当前消息展示字段）共用同一链路。
  */
 function resolveDisplayName(from: { id: number; first_name?: string; username?: string }): string {
   const firstName = from.first_name?.trim();
@@ -111,8 +111,8 @@ function resolveDisplayName(from: { id: number; first_name?: string; username?: 
 }
 
 /**
- * 欢迎语（T23，claimNoticeSlot 原子频控；T30 起与其他提示共享 slot）。
- * 验证门（首联 / 未验证 start）与阶段 3 链（已验证 start）共用同一语义：
+ * 欢迎语（claimNoticeSlot 原子频控，与其他提示共享 slot）。
+ * 验证门（首联 / 未验证 start）与主链（已验证 start）共用同一语义：
  * retryable → 抛（slot 已被占：重推不再补发，宁可丢失也不重复轰炸）；
  * permanent → warn 跳过。
  */
@@ -137,7 +137,7 @@ async function maybeSendWelcome(
 }
 
 /**
- * 处理一条私聊 message：建档 → 三门（封禁 / 验证 / 限频）→ 阶段 3 链
+ * 处理一条私聊 message：建档 → 三门（封禁 / 验证 / 限频）→ 主链
  * （topic+置顶 → 欢迎语 → 中继 → 账本）。
  * 完成（resolve）= 按成功处理；抛出（reject）= retryable，交 webhook 500 重推。
  *
@@ -172,7 +172,7 @@ export async function handleInbound(
   // 验证行三态映射，M3 起供门 ② 开关 / TTL 判定
   const settings = await getVerificationSettings(env.HODOR_DB);
 
-  /* ---------------- ① 封禁门（T35）：banned → 拦截 + 频控禁言提示 ---------------- */
+  /* ---------------- ① 封禁门：banned → 拦截 + 频控禁言提示 ---------------- */
   if (userState.isBanned) {
     if (await claimNoticeSlot(env.HODOR_DB, botId, from.id)) {
       const notice = await client.sendMessage({ chat_id: from.id, text: BAN_NOTICE });
@@ -189,13 +189,13 @@ export async function handleInbound(
     return;
   }
 
-  /* ---------------- ② 验证门（T27/T28 + T31 开关 + T33 TTL） ---------------- */
+  /* ---------------- ② 验证门（开关 + TTL） ---------------- */
   // 开关关闭 → 整门跳过（门未删除，门序不动）：不删任何验证记录、不判定
   // TTL（关闭期间不消耗有效期——重开后按库内 verified_at 与当前 TTL 判定），
   // 未验证用户直接落 ③ 限频门（限频语义独立于验证开关，见 ③ 注释）
   if (settings.verifyEnabled) {
-    // TTL 过期判定（T33）：VERIFY_TTL_HOURS * 3600s；ISO 字典序比较（util
-    // 契约），恰好等于（verifiedAt ≤ now−ttl）视为过期（PRD 边界语义）。
+    // TTL 过期判定：VERIFY_TTL_HOURS * 3600s；ISO 字典序比较（util
+    // 契约），恰好等于（verifiedAt ≤ now−ttl）视为过期。
     // verifiedAt 为 null 而 isVerified=1 的脏态（理论不可达）→ 不视为过期：
     // 防御式 fail-open，不因脏数据误伤已验证用户
     const ttlMs = parseVerifyTtlHours(env) * 3600_000;
@@ -205,19 +205,19 @@ export async function handleInbound(
       userState.verifiedAt <= isoBefore(ttlMs);
     if (!userState.isVerified || expired) {
       if (expired) {
-        // TTL 撤验证（T33）：DB 真值先行——markUnverified 一步清 is_verified /
+        // TTL 撤验证：DB 真值先行——markUnverified 一步清 is_verified /
         // verified_at / 题目字段；置顶降级 ❌ 复用 ③ 的共享助手（best-effort，
         // 失败不阻断出题——撤验证后重推只会落回本门继续出题流程，无振荡）
         await markUnverified(env.HODOR_DB, botId, from.id);
         await downgradePinnedToUnverified(env, client, botId, from.id);
       }
-      // 欢迎语：isNew（首联包前半）或 isStart —— 阶段 3 语义不变（slot 门控）
+      // 欢迎语：isNew（首联包前半）或 isStart（slot 门控）
       if (userState.isNew || isStart) {
         await maybeSendWelcome(env, client, botId, from.id);
       }
       // 出题策略：isNew 首联包不占 slot（与欢迎语成对发出）；存量未验证（无题 /
-      // 有 pending）一律 slot 门控重出**新题**——赢才出（重发节流，T30），输静默；
-      // 题面随 settings.verifyMode 模式化（T32，sendVerificationCode 内读取）
+      // 有 pending）一律 slot 门控重出**新题**——赢才出（重发节流），输静默；
+      // 题面随 settings.verifyMode 模式化（sendVerificationCode 内读取）
       if (userState.isNew || (await claimNoticeSlot(env.HODOR_DB, botId, from.id))) {
         await sendVerificationCode(env, botId, from.id, { type: "question" }, requestOrigin);
       }
@@ -227,7 +227,7 @@ export async function handleInbound(
     }
   }
 
-  /* ---------------- ③ 限频门（T29）：固定窗口，超限 → 撤验证重验，本条丢弃 ---------------- */
+  /* ---------------- ③ 限频门：固定窗口，超限 → 撤验证重验，本条丢弃 ---------------- */
   const limit = parseMaxMessagesPerMinute(env);
   if (!(await countMessageInWindow(env.HODOR_DB, botId, from.id, limit))) {
     await markUnverified(env.HODOR_DB, botId, from.id);
@@ -243,14 +243,14 @@ export async function handleInbound(
     return;
   }
 
-  /* ---------------- ④ 阶段 3 链（三门全过；以下逻辑不变） ---------------- */
+  /* ---------------- ④ 主链（三门全过） ---------------- */
   let topic = await resolveTopic(env, client, {
     botId,
     userId: from.id,
     supportChatId,
     title: resolveDisplayName(from),
   });
-  // null = createForumTopic permanent（topic 未建），本条按已处理丢弃（阶段 2 语义）
+  // null = createForumTopic permanent（topic 未建），本条按已处理丢弃
   if (topic === null) return;
   let currentTopic = topic;
 
@@ -272,7 +272,7 @@ export async function handleInbound(
       note: currentTopic.note,
     });
 
-  /* ---------------- 4a / 4b：用户信息置顶（T24） ---------------- */
+  /* ---------------- 4a / 4b：用户信息置顶 ---------------- */
   if (currentTopic.pinned_msg_id === null) {
     await pinUserCard(env, client, {
       botId,
@@ -295,7 +295,7 @@ export async function handleInbound(
     }
   }
 
-  /* ---------------- 5. 欢迎语（T23；仅 isStart 可达——新用户一律先落验证门） ---------------- */
+  /* ---------------- 5. 欢迎语（仅 isStart 可达——新用户一律先落验证门） ---------------- */
   if (isStart) {
     await maybeSendWelcome(env, client, botId, from.id);
   }
@@ -303,7 +303,7 @@ export async function handleInbound(
   /* ---------------- 6. 中继（/start 短路；其余 per-type send 干净渲染） ---------------- */
   // isStartCommand 命中的所有变体（/start、/start@bot、/start payload）是纯入口 /
   // 控制命令而非对话内容：新 topic 出现 + 置顶即首联信号，不把 start 文本刷进
-  // topic（2026-09-30 真机验收修正）；payload 变体 v1 无深链场景，一并跳过。
+  // topic；payload 变体无深链场景，一并跳过。
   // 短路 = 静默完成（update 照常 processed），中继与账本（第 7 步）都不执行。
   if (isStart) return;
 
@@ -398,7 +398,7 @@ export async function handleInbound(
     return;
   }
 
-  /* ---------------- 7. 账本（T25；失败原样抛 → 重推可能重发一次中继） ---------------- */
+  /* ---------------- 7. 账本（失败原样抛 → 重推可能重发一次中继） ---------------- */
   await insertMessage(env.HODOR_DB, {
     botId,
     userId: from.id,
@@ -409,8 +409,8 @@ export async function handleInbound(
     contentType: payload.type,
   });
 
-  /* ------------- 8. 高危 24h 一次性提醒（T37；账本后附着物，完全 best-effort） ------------- */
-  // 排序（design §三）：中继 / 账本是主链，治理提醒是附着物——放最后，两种
+  /* ------------- 8. 高危 24h 一次性提醒（账本后附着物，完全 best-effort） ------------- */
+  // 排序：中继 / 账本是主链，治理提醒是附着物——放最后，两种
   // 失败均 warn 吞，绝不抛（提醒 429 → 整条重推 → 用户消息重发的放大面为零）；
   // /start 短路在第 6 步已 return，本提醒只附着在成功中继 + 账本之后。
   // claimRiskNoticeSlot 原子裁决（WHERE 带 is_risk=1）：24h 窗口内仅一条，
@@ -440,7 +440,7 @@ interface CreateTopicContext {
 }
 
 /**
- * topic 解析（阶段 2 逻辑 + 阶段 6 T38 真重开 / 原生删除自愈）：
+ * topic 解析（复用 / 真重开 / 原生删除自愈）：
  *
  * - open 行 → 直接复用；
    * - closed 行（native close / /archive）→ **API 先行**（reopenForumTopic ok
@@ -504,7 +504,7 @@ async function resolveTopic(
   return createTopicWithRaceCleanup(env, client, ctx);
 }
 
-/** 未命中映射时的建 topic 主流程失败语义（阶段 2 不变） */
+/** 未命中映射时的建 topic 主流程失败语义 */
 async function createTopicWithRaceCleanup(
   env: Cloudflare.Env,
   client: TelegramClient,
@@ -518,7 +518,7 @@ async function createTopicWithRaceCleanup(
     if (created.kind === "retryable") {
       throw new Error(created.errorMessage ?? "createForumTopic retryable");
     }
-    // permanent：无 topic 可用，本条消息按已处理丢弃（阶段 2 语义，不 5xx）
+    // permanent：无 topic 可用，本条消息按已处理丢弃（不 5xx）
     console.warn(
       `[inbound] user ${ctx.userId}: createForumTopic permanent，topic 未建、消息被丢弃：${created.errorMessage ?? "no detail"}`,
     );

@@ -1,5 +1,5 @@
 /**
- * Cloudflare Turnstile Siteverify 客户端（Turnstile 任务；design.md §6）。
+ * Cloudflare Turnstile Siteverify 客户端。
  *
  * - endpoint 固定为官方地址，绝不接受调用方传入 URL；
  * - 每次调用 5 秒超时；临时性失败（网络错误 / 超时 / 5xx / 非 JSON /

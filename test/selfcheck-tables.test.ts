@@ -1,5 +1,5 @@
 /**
- * GET /selfcheck 数据库检查（T07，阶段 7）——缺表 / 齐全两种 D1 状态。
+ * GET /selfcheck 数据库检查——缺表 / 齐全两种 D1 状态。
  *
  * 利用「每测试文件隔离 D1」的基座约定：本文件刻意不在 beforeAll 应用迁移，
  * 先断言全库空表状态下 selfcheck 逐张点名缺表；再在文件内 applyD1Migrations
@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe("/selfcheck 数据库检查", () => {
-  it("未应用迁移 → 503，failed 先报验证配置读取失败、再按期望表顺序逐张点名缺表", async () => {
+ it("未应用迁移 → 503，failed 先报验证配置读取失败、再按期望表顺序逐张点名缺表", async () => {
     const res = await SELF.fetch("https://example.com/selfcheck");
     expect(res.status).toBe(503);
     expect(JSON.parse(await res.text())).toEqual({
@@ -48,15 +48,15 @@ describe("/selfcheck 数据库检查", () => {
     });
   });
 
-  it("应用迁移后复测 → 200 ok（八表齐全，三项全过）", async () => {
+ it("应用迁移后复测 → 200 ok（八表齐全，三项全过）", async () => {
     await applyD1Migrations(env.HODOR_DB, env.TEST_MIGRATIONS);
     const res = await SELF.fetch("https://example.com/selfcheck");
     expect(res.status).toBe(200);
     expect(await res.text()).toBe(JSON.stringify({ status: "ok", version: VERSION }));
   });
 
-  it("HODOR_DB 查询抛错 → 数据库不可用（绑定故障分支）", async () => {
-    // 构造 prepare 即抛错的假绑定；env 其余项用钉死的全合法值
+ it("HODOR_DB 查询抛错 → 数据库不可用（绑定故障分支）", async () => {
+ // 构造 prepare 即抛错的假绑定；env 其余项用钉死的全合法值
     const brokenDb = {
       prepare() {
         throw new Error("simulated D1 outage");
@@ -76,8 +76,8 @@ describe("/selfcheck 数据库检查", () => {
       status: "error",
       version: VERSION,
       failed: [
-        // 验证配置项（settings 读取）与表项独立失败、互不阻断（固定顺序：
-        // 验证配置在前、表在后）
+ // 验证配置项（settings 读取）与表项独立失败、互不阻断（固定顺序：
+ // 验证配置在前、表在后）
         "验证配置读取失败：无法从数据库读取验证模式（Turnstile 项跳过）",
         "数据库不可用：HODOR_DB 绑定查询失败",
       ],

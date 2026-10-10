@@ -201,7 +201,7 @@ export function createTelegramClient(token: string): TelegramClient {
       }),
     deleteWebhook: () => request<boolean>("deleteWebhook", {}),
     getMe: () => request<TelegramBotUser>("getMe", {}),
-    // T07 /selfcheck：读取当前 webhook 绑定状态（诊断用只读方法）。与其余
+    // /selfcheck 用：读取当前 webhook 绑定状态（诊断用只读方法）。与其余
     // 方法一样只经 request() 既有分类矩阵（含 429 有界原地重试的共享行为，
     // 恰一次、绝不两次）——「单次调用不重试」由自检层保证：失败（retryable /
     // permanent 均同）只落 failed 文案，绝不再次调用
@@ -216,16 +216,16 @@ export function createTelegramClient(token: string): TelegramClient {
       request<CreateForumTopicResult>("createForumTopic", { ...params }),
     deleteForumTopic: (params: DeleteForumTopicParams) =>
       request<boolean>("deleteForumTopic", { ...params }),
-    // Telegram 原生 topic state / T38 archive：参数蛇形原样透传（与 deleteForumTopic 同款）
+    // Telegram 原生 topic state / archive：参数蛇形原样透传（与 deleteForumTopic 同款）
     closeForumTopic: (params: CloseForumTopicParams) =>
       request<boolean>("closeForumTopic", { ...params }),
     reopenForumTopic: (params: ReopenForumTopicParams) =>
       request<boolean>("reopenForumTopic", { ...params }),
-    // T39 /purgemsg：按账本 group_msg_id 逐条删除（Bot API 单条接口，
+    // /purgemsg：按账本 group_msg_id 逐条删除（Bot API 单条接口，
     // 无批量——部分失败计数由 commands.ts 消费方汇总）
     deleteMessage: (params: DeleteMessageParams) =>
       request<boolean>("deleteMessage", { ...params }),
-    // T22 媒体 per-type send：参数名即 Telegram API 字段名（photo/video/…），
+    // 媒体 per-type send：参数名即 Telegram API 字段名（photo/video/…），
     // 蛇形原样透传；caption / message_thread_id 为 undefined 时 JSON 序列化自然剔除
     sendPhoto: (params: SendPhotoParams) =>
       request<MessageIdResult>("sendPhoto", { ...params }),
@@ -241,19 +241,19 @@ export function createTelegramClient(token: string): TelegramClient {
       request<MessageIdResult>("sendSticker", { ...params }),
     sendAnimation: (params: SendAnimationParams) =>
       request<MessageIdResult>("sendAnimation", { ...params }),
-    // T24：置顶静默（disable_notification 恒 true——invariant 收敛在 client 一处）
+    // 置顶静默（disable_notification 恒 true——invariant 收敛在 client 一处）
     pinChatMessage: (params: PinChatMessageParams) =>
       request<boolean>("pinChatMessage", { ...params, disable_notification: true }),
     editMessageText: (params: EditMessageTextParams) =>
       request<MessageIdResult>("editMessageText", { ...params }),
-    // T27 答题 toast：callbackQueryId 蛇形映射为 callback_query_id；
+    // 答题 toast：callbackQueryId 蛇形映射为 callback_query_id；
     // text 为 undefined 时 JSON 序列化自然剔除（与其余可选参数同款语义）
     answerCallbackQuery: (params: AnswerCallbackQueryParams) =>
       request<boolean>("answerCallbackQuery", {
         callback_query_id: params.callbackQueryId,
         text: params.text,
       }),
-    // T34 验收增量：命令菜单注册 / 对称清理。commands 的键名（command /
+    // 命令菜单注册 / 对称清理。commands 的键名（command /
     // description）即 API 字段名，scope 对象蛇形原样直传；scope 为
     // undefined 时 JSON 序列化自然剔除（= default 全局作用域）
     setMyCommands: (params: SetMyCommandsParams) =>

@@ -31,7 +31,7 @@ beforeAll(async () => {
 });
 
 describe("迁移 0003：users 加 risk_notice_at 列", () => {
-  it("存量行全字段原样保留（加列不丢数据）", async () => {
+ it("存量行全字段原样保留（加列不丢数据）", async () => {
     const row = await env.HODOR_DB.prepare(
       `SELECT first_name, last_name, username, status, is_banned, is_risk, is_verified,
          verified_at, verify_answer, verify_msg_id, rate_window_start, rate_count,
@@ -59,7 +59,7 @@ describe("迁移 0003：users 加 risk_notice_at 列", () => {
     });
   });
 
-  it("新列存在且存量行默认 NULL（从未提醒）", async () => {
+ it("新列存在且存量行默认 NULL（从未提醒）", async () => {
     const row = await env.HODOR_DB.prepare(
       "SELECT risk_notice_at FROM users WHERE bot_id = ? AND user_id = ?",
     )
@@ -68,7 +68,7 @@ describe("迁移 0003：users 加 risk_notice_at 列", () => {
     expect(row!.risk_notice_at).toBeNull();
   });
 
-  it("新列可写入 ISO 文本（claimRiskNoticeSlot 的落点）且不影响既有列", async () => {
+ it("新列可写入 ISO 文本（claimRiskNoticeSlot 的落点）且不影响既有列", async () => {
     await env.HODOR_DB.prepare(
       "UPDATE users SET risk_notice_at = ? WHERE bot_id = ? AND user_id = ?",
     )

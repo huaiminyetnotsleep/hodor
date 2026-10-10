@@ -1,5 +1,5 @@
 /**
- * 全用户广播管线（2026-10-09 任务，design.md §三–§七）：
+ * 全用户广播管线：
  *
  * - handleBroadcastCommand：classify=broadcast（客服群 General 的 /broadcast）
  *   派发入口——鉴权 → 解析 → getMe 落款 → 组装/校验 → 建 preparing 行 →
@@ -13,11 +13,11 @@
  *   D1 状态幂等续做或修复）；permanent → warn + 补偿文案 + 终止。
  * - 确认胜出后的一切副作用（toast / 「正在发送…」编辑）一律 best-effort——
  *   抛出会让已冻结的任务停在半路，绝不因展示面失败丢整批。
- * - 发送循环三态按 design §7.3：ok → 成功；permanent（含 403 屏蔽）→ 失败
+ * - 发送循环三态：ok → 成功；permanent（含 403 屏蔽）→ 失败
  *   继续；retryable 且带 retry_after → 有界 sleep（≤10s）后重试恰一次，仍
  *   失败计失败继续；其他最终 retryable → 失败继续。绝不循环重试。
  *
- * 非原子窗口（design §7.1/§7.4，均有测试固化）：Telegram 发送与 D1 落库不能
+ * 非原子窗口（均有测试固化）：Telegram 发送与 D1 落库不能
  * 原子提交——预览/控制消息发出后落库失败按 §7.1 补偿；极端双重故障留下的
  * 孤立草稿不持有可执行任务（按钮严格匹配库存 control_msg_id）。
  */
@@ -86,7 +86,7 @@ import type { TelegramCallbackQueryRef, TelegramMessageRef } from "./classify";
 /** 预览有效期分钟数（控制消息文案展示用；与 BROADCAST_PREVIEW_TTL_MS 同源） */
 const BROADCAST_PREVIEW_TTL_MINUTES = BROADCAST_PREVIEW_TTL_MS / 60_000;
 
-/** 发送循环内 429 有界等待上限（秒；design §7.3：≤10s、恰一次） */
+/** 发送循环内 429 有界等待上限（秒；≤10s、恰一次） */
 const BROADCAST_RETRY_SLEEP_MAX_SECONDS = 10;
 
 function sleep(ms: number): Promise<void> {
@@ -145,7 +145,7 @@ async function answerBestEffort(
 const EMPTY_BROADCAST_KEYBOARD: InlineKeyboardMarkup = { inline_keyboard: [] };
 
 /**
- * 惰性清理后的展示收尾（design §7.1 / §7.2）：过期草稿与中断任务在任何
+ * 惰性清理后的展示收尾：过期草稿与中断任务在任何
  * 广播命令 / callback 触发清理时都要同步更新 General 控制消息并删终态行。
  * 展示编辑完全 best-effort（retryable/permanent 均 warn 吞），不阻断新操作；
  * preparing 没有 control_msg_id 时删行，已发预览作为不持有任务的孤立历史保留。
@@ -238,7 +238,7 @@ export async function handleBroadcastCommand(
     return;
   }
   const signature = me.result.first_name?.trim() || BROADCAST_FALLBACK_SIGNATURE;
-  // 成功后顺带刷新 bots 身份缓存（design §4.2：本次落款直接用本次 API 结果，
+  // 成功后顺带刷新 bots 身份缓存（本次落款直接用本次 API 结果，
   // 不依赖缓存；D1 失败照常抛出 → 重推重跑收敛）
   await upsertBot(env.HODOR_DB, {
     botId,
@@ -253,10 +253,10 @@ export async function handleBroadcastCommand(
     return;
   }
 
-  // 惰性清理（design §7.1）：过期草稿 / 滞留 sending 收敛并更新 General 控制消息
+  // 惰性清理：过期草稿 / 滞留 sending 收敛并更新 General 控制消息
   await cleanupStaleAndFinalize(env.HODOR_DB, client, botId);
 
-  // webhook 重推复用（design §7.1）：按 source_update_id 读取既有行，
+  // webhook 重推复用：按 source_update_id 读取既有行，
   // 从已落库的进度续做（重推最多产生一份可执行任务）
   const existing = await findBroadcastBySourceUpdate(env.HODOR_DB, botId, updateId);
   if (existing) {
@@ -305,7 +305,7 @@ export async function handleBroadcastCommand(
 }
 
 /**
- * 补齐 preparing 行的两条 General 消息（design §7.1）：预览公告 → 控制消息 →
+ * 补齐 preparing 行的两条 General 消息：预览公告 → 控制消息 →
  * pending。每步幂等：preview_msg_id / control_msg_id 已落库的步骤跳过
  * （webhook 重推从既有进度续做）。
  */
@@ -341,7 +341,7 @@ async function continuePreparing(
     try {
       await setBroadcastPreviewMsgId(env.HODOR_DB, botId, row.id, previewMsgId);
     } catch (error) {
-      // 非原子窗口补偿（design §7.1）：预览已发出但 ID 未落库——尽力提示后
+      // 非原子窗口补偿：预览已发出但 ID 未落库——尽力提示后
       // 抛出交重推；重发一份预览属已接受代价（孤立草稿不持有可执行任务）
       await replyGeneralBestEffort(client, chatId, BROADCAST_PREVIEW_CREATE_FAILED_NOTICE);
       throw error;
@@ -433,7 +433,7 @@ export async function handleBroadcastCallback(
 }
 
 /**
- * 按行状态分派（穷举 switch；design §7.2/§7.3/§7.4）。并发裁决失败（lost）
+ * 按行状态分派（穷举 switch）。并发裁决失败（lost）
  * 时重读一次再分派——状态只向前迁移，至多多跳一次即收敛。
  */
 async function dispatchBroadcastCallback(
@@ -461,11 +461,11 @@ async function dispatchBroadcastCallback(
     }
     case "sending":
       // cleanup 已把陈旧行置 failed；仍是 sending = 有正在执行的循环 →
-      // toast 后直接结束，绝不并发第二份发送（design §7.4）
+      // toast 后直接结束，绝不并发第二份发送
       await answerBestEffort(client, callback.id, BROADCAST_TOAST_SENDING);
       return;
     case "completed":
-      // 幂等修复路径（design §7.3）：最终统计编辑失败的 webhook 重投重跑——
+      // 幂等修复路径：最终统计编辑失败的 webhook 重投重跑——
       // 只重做控制消息编辑与删行，绝不重发公告
       await finishTerminal(
         env,
@@ -513,7 +513,7 @@ async function redispatch(
 }
 
 /**
- * 终态收尾（design §7.3）：控制消息改终态文案 → 删行 → toast。
+ * 终态收尾：控制消息改终态文案 → 删行 → toast。
  * 编辑 retryable → 抛出（webhook 重投重跑见终态行 → 幂等修复路径只重做编辑
  * 与删行）；编辑 permanent（含重复 edit 的 "message is not modified"）→ warn
  * 后照常删行结束。General 消息是唯一历史。
@@ -545,7 +545,7 @@ async function finishTerminal(
   await answerBestEffort(client, callbackQueryId, toastText);
 }
 
-/** pending 主流程：取消 / 确认（design §7.2） */
+/** pending 主流程：取消 / 确认 */
 async function handlePendingCallback(
   env: Cloudflare.Env,
   client: TelegramClient,
@@ -629,7 +629,7 @@ async function handlePendingCallback(
 }
 
 /**
- * 发送循环（design §7.3，确认回调请求内）：
+ * 发送循环（确认回调请求内）：
  * 1. 一次性资格复核（整查询交集，绝不逐人查库）；资格已变化者计失败不发送。
  * 2. 控制消息改「正在发送…」：失败只 warn，不阻断主循环。
  * 3. 顺序逐位 sendMessage（冻结 message_html + HTML）；三态消费见模块头注释。
@@ -702,7 +702,7 @@ async function runSendLoop(
     }
     if (sent.retryAfterSeconds !== undefined) {
       // 429（client 已原地重试过一次，此处 retry_after > 3s）：有界 sleep 后
-      // 重试恰一次；仍失败计失败继续，绝不无限阻断整份广播（PRD R3）
+      // 重试恰一次；仍失败计失败继续，绝不无限阻断整份广播
       await sleep(Math.min(sent.retryAfterSeconds, BROADCAST_RETRY_SLEEP_MAX_SECONDS) * 1000);
       const retried = await client.sendMessage({
         chat_id: userId,

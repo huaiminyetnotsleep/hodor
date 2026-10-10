@@ -39,7 +39,7 @@ describe("telegram client: 分类矩阵", () => {
     stub.restore();
   });
 
-  it("200 + ok:true → Ok，result 直接透传", async () => {
+ it("200 + ok:true → Ok，result 直接透传", async () => {
     stub.always("getMe", {
       status: 200,
       json: { ok: true, result: { id: 42, is_bot: true, username: "hodor_bot", first_name: "hodor" } },
@@ -51,7 +51,7 @@ describe("telegram client: 分类矩阵", () => {
     });
   });
 
-  it("200 + ok:false（信封带 error_code）→ permanent，errorMessage=description，errorCode 透传", async () => {
+ it("200 + ok:false（信封带 error_code）→ permanent，errorMessage=description，errorCode 透传", async () => {
     stub.always("getMe", {
       status: 200,
       json: { ok: false, error_code: 400, description: "Bad Request: chat not found" },
@@ -63,7 +63,7 @@ describe("telegram client: 分类矩阵", () => {
     expectNoTokenLeak(error);
   });
 
-  it("200 + ok:false（信封无 error_code）→ permanent，errorCode 不存在", async () => {
+ it("200 + ok:false（信封无 error_code）→ permanent，errorCode 不存在", async () => {
     stub.always("getMe", {
       status: 200,
       json: { ok: false, description: "Unauthorized" },
@@ -74,7 +74,7 @@ describe("telegram client: 分类矩阵", () => {
     expectNoTokenLeak(error);
   });
 
-  it("429 + retry_after=1 → 原地 sleep 重试恰好一次，第二次 200 → Ok（恰 2 次调用）", async () => {
+ it("429 + retry_after=1 → 原地 sleep 重试恰好一次，第二次 200 → Ok（恰 2 次调用）", async () => {
     stub.on("getMe", (i) =>
       i === 0
         ? {
@@ -99,7 +99,7 @@ describe("telegram client: 分类矩阵", () => {
     expect(stub.countOf("getMe")).toBe(2);
   });
 
-  it("429 + retry_after=1 → 重试后仍 429（新值 7）→ retryable 携带新 retryAfterSeconds（恰 2 次调用，绝不重试两次）", async () => {
+ it("429 + retry_after=1 → 重试后仍 429（新值 7）→ retryable 携带新 retryAfterSeconds（恰 2 次调用，绝不重试两次）", async () => {
     stub.on("getMe", (i) => ({
       status: 429,
       json: {
@@ -116,7 +116,7 @@ describe("telegram client: 分类矩阵", () => {
     expect(stub.countOf("getMe")).toBe(2);
   });
 
-  it("429 + retry_after=10（> 3s）→ 不重试，retryable（恰 1 次调用）", async () => {
+ it("429 + retry_after=10（> 3s）→ 不重试，retryable（恰 1 次调用）", async () => {
     stub.always("getMe", {
       status: 429,
       json: {
@@ -133,7 +133,7 @@ describe("telegram client: 分类矩阵", () => {
     expect(stub.countOf("getMe")).toBe(1);
   });
 
-  it("429 无 retry_after → retryable 且不带 retryAfterSeconds（不重试）", async () => {
+ it("429 无 retry_after → retryable 且不带 retryAfterSeconds（不重试）", async () => {
     stub.always("getMe", {
       status: 429,
       json: { ok: false, error_code: 429, description: "Too Many Requests" },
@@ -144,7 +144,7 @@ describe("telegram client: 分类矩阵", () => {
     expect(stub.countOf("getMe")).toBe(1);
   });
 
-  it("403 → permanent，errorCode === 403（消费方按数字码分支 bot_blocked_by_user）", async () => {
+ it("403 → permanent，errorCode === 403（消费方按数字码分支 bot_blocked_by_user）", async () => {
     stub.always("copyMessage", {
       status: 403,
       json: { ok: false, error_code: 403, description: "Forbidden: bot was blocked by the user" },
@@ -157,7 +157,7 @@ describe("telegram client: 分类矩阵", () => {
     expectNoTokenLeak(error);
   });
 
-  it("400 → permanent（毒丸），errorCode 透传", async () => {
+ it("400 → permanent（毒丸），errorCode 透传", async () => {
     stub.always("copyMessage", {
       status: 400,
       json: { ok: false, error_code: 400, description: "Bad Request: message to copy not found" },
@@ -170,7 +170,7 @@ describe("telegram client: 分类矩阵", () => {
     expectNoTokenLeak(error);
   });
 
-  it("其他 4xx（418）→ permanent，errorCode 透传", async () => {
+ it("其他 4xx（418）→ permanent，errorCode 透传", async () => {
     stub.always("createForumTopic", {
       status: 418,
       json: { ok: false, error_code: 418, description: "I'm a teapot" },
@@ -183,7 +183,7 @@ describe("telegram client: 分类矩阵", () => {
     expectNoTokenLeak(error);
   });
 
-  it("5xx → retryable", async () => {
+ it("5xx → retryable", async () => {
     stub.always("deleteWebhook", {
       status: 502,
       json: { ok: false, error_code: 502, description: "Bad Gateway" },
@@ -194,16 +194,16 @@ describe("telegram client: 分类矩阵", () => {
     expectNoTokenLeak(error);
   });
 
-  it("网络错误（fetch 抛出）→ retryable，且不透传含 URL 的异常文本", async () => {
+ it("网络错误（fetch 抛出）→ retryable，且不透传含 URL 的异常文本", async () => {
     stub.always("getMe", { throwError: true });
     const error = asError(await client.getMe());
     expect(error.kind).toBe("retryable");
-    // 只含方法名 + 语义，绝不含 token / URL / 底层异常文本
+ // 只含方法名 + 语义，绝不含 token / URL / 底层异常文本
     expect(error.errorMessage).toBe("getMe network error");
     expectNoTokenLeak(error);
   });
 
-  it("200 + 非 JSON body → retryable", async () => {
+ it("200 + 非 JSON body → retryable", async () => {
     stub.always("getMe", { status: 200, rawBody: "<html>gateway error page</html>" });
     const error = asError(await client.getMe());
     expect(error.kind).toBe("retryable");
@@ -211,7 +211,7 @@ describe("telegram client: 分类矩阵", () => {
     expectNoTokenLeak(error);
   });
 
-  it("200 + 合法 JSON 但无 ok 字段 → retryable", async () => {
+ it("200 + 合法 JSON 但无 ok 字段 → retryable", async () => {
     stub.always("getMe", { status: 200, json: { hello: "world" } });
     const error = asError(await client.getMe());
     expect(error.kind).toBe("retryable");
@@ -232,7 +232,7 @@ describe("telegram client: 方法契约", () => {
     stub.restore();
   });
 
-  it("setWebhook：入参映射为 url / secret_token / allowed_updates", async () => {
+ it("setWebhook：入参映射为 url / secret_token / allowed_updates", async () => {
     stub.always("setWebhook", { status: 200, json: { ok: true, result: true } });
     const result = await client.setWebhook({
       url: "https://worker.example.com/webhook",
@@ -247,7 +247,7 @@ describe("telegram client: 方法契约", () => {
     });
   });
 
-  it("copyMessage：蛇形参数原样透传（含 / 不含 message_thread_id）", async () => {
+ it("copyMessage：蛇形参数原样透传（含 / 不含 message_thread_id）", async () => {
     stub.always("copyMessage", {
       status: 200,
       json: { ok: true, result: { message_id: 321 } },
@@ -274,7 +274,7 @@ describe("telegram client: 方法契约", () => {
     });
   });
 
-  it("createForumTopic / deleteForumTopic / deleteWebhook：出参形状正确", async () => {
+ it("createForumTopic / deleteForumTopic / deleteWebhook：出参形状正确", async () => {
     stub.always("createForumTopic", {
       status: 200,
       json: { ok: true, result: { message_thread_id: 555 } },
@@ -302,7 +302,7 @@ describe("telegram client: 方法契约", () => {
     expect(await client.deleteWebhook()).toEqual({ ok: true, result: true });
   });
 
-  it("所有请求都打到 https://api.telegram.org/bot<token>/<method>（base URL 契约）", async () => {
+ it("所有请求都打到 https://api.telegram.org/bot<token>/<method>（base URL 契约）", async () => {
     stub.always("getMe", { status: 200, json: { ok: true, result: { id: 1 } } });
     await client.getMe();
     expect(stub.callsOf("getMe")[0].url).toBe(`https://api.telegram.org/bot${TOKEN}/getMe`);
@@ -310,7 +310,7 @@ describe("telegram client: 方法契约", () => {
   });
 });
 
-describe("telegram client: T22/T24 新方法（全部经 request()，零分类旁路）", () => {
+describe("telegram client: 媒体与置顶新方法（全部经 request()，零分类旁路）", () => {
   let stub: TelegramFetchStub;
   let client: ReturnType<typeof createTelegramClient>;
   beforeEach(() => {
@@ -321,7 +321,7 @@ describe("telegram client: T22/T24 新方法（全部经 request()，零分类�
     stub.restore();
   });
 
-  it("sendPhoto：file_id + caption + thread 蛇形透传，出参 MessageIdResult", async () => {
+ it("sendPhoto：file_id + caption + thread 蛇形透传，出参 MessageIdResult", async () => {
     stub.always("sendPhoto", { status: 200, json: { ok: true, result: { message_id: 777 } } });
     const result = await client.sendPhoto({
       chat_id: -1001234567890,
@@ -330,7 +330,7 @@ describe("telegram client: T22/T24 新方法（全部经 request()，零分类�
       message_thread_id: 100,
     });
     expect(result).toEqual({ ok: true, result: { message_id: 777 } });
-    // 精确键集：无多余键，caption 字段名即 caption
+ // 精确键集：无多余键，caption 字段名即 caption
     expect(stub.callsOf("sendPhoto")[0].body).toEqual({
       chat_id: -1001234567890,
       photo: "AgACAgUAA…",
@@ -339,7 +339,7 @@ describe("telegram client: T22/T24 新方法（全部经 request()，零分类�
     });
   });
 
-  it("sendSticker：sticker 键名 + thread；类型上就不存在 caption 字段", async () => {
+ it("sendSticker：sticker 键名 + thread；类型上就不存在 caption 字段", async () => {
     stub.always("sendSticker", { status: 200, json: { ok: true, result: { message_id: 778 } } });
     const result = await client.sendSticker({
       chat_id: -1001234567890,
@@ -354,18 +354,18 @@ describe("telegram client: T22/T24 新方法（全部经 request()，零分类�
     });
   });
 
-  it("sendVideo / sendVoice / sendAudio / sendDocument / sendAnimation：各字段名正确，可选键缺省即剔除", async () => {
+ it("sendVideo / sendVoice / sendAudio / sendDocument / sendAnimation：各字段名正确，可选键缺省即剔除", async () => {
     stub.always("sendVideo", { status: 200, json: { ok: true, result: { message_id: 9 } } });
     stub.always("sendVoice", { status: 200, json: { ok: true, result: { message_id: 9 } } });
     stub.always("sendAudio", { status: 200, json: { ok: true, result: { message_id: 9 } } });
     stub.always("sendDocument", { status: 200, json: { ok: true, result: { message_id: 9 } } });
     stub.always("sendAnimation", { status: 200, json: { ok: true, result: { message_id: 9 } } });
 
-    // 纯 file_id（无 caption / thread）：键集中只剩 chat_id + 媒体字段
+ // 纯 file_id（无 caption / thread）：键集中只剩 chat_id + 媒体字段
     await client.sendVideo({ chat_id: 7001, video: "vid_1" });
     expect(stub.callsOf("sendVideo")[0].body).toEqual({ chat_id: 7001, video: "vid_1" });
 
-    // voice 可带 caption
+ // voice 可带 caption
     await client.sendVoice({ chat_id: 7001, voice: "voice_1", caption: "语音说明" });
     expect(stub.callsOf("sendVoice")[0].body).toEqual({
       chat_id: 7001,
@@ -373,8 +373,8 @@ describe("telegram client: T22/T24 新方法（全部经 request()，零分类�
       caption: "语音说明",
     });
 
-    // audio（2026-09-30 增补）：audio 字段名 + caption + thread 透传，
-    // title/performer 元数据不在参数集（调用方只组 file_id + caption）
+ // audio：audio 字段名 + caption + thread 透传，
+ // title/performer 元数据不在参数集（调用方只组 file_id + caption）
     await client.sendAudio({ chat_id: 7001, audio: "aud_1", caption: "一首歌", message_thread_id: 6 });
     expect(stub.callsOf("sendAudio")[0].body).toEqual({
       chat_id: 7001,
@@ -383,7 +383,7 @@ describe("telegram client: T22/T24 新方法（全部经 request()，零分类�
       message_thread_id: 6,
     });
 
-    // document 可带 thread
+ // document 可带 thread
     await client.sendDocument({ chat_id: 7001, document: "doc_1", message_thread_id: 5 });
     expect(stub.callsOf("sendDocument")[0].body).toEqual({
       chat_id: 7001,
@@ -396,7 +396,7 @@ describe("telegram client: T22/T24 新方法（全部经 request()，零分类�
     expect(stub.callsOf("sendAnimation")[0].body).toEqual({ chat_id: 7001, animation: "gif_1" });
   });
 
-  it("pinChatMessage：disable_notification 恒注入 true（精确键集）", async () => {
+ it("pinChatMessage：disable_notification 恒注入 true（精确键集）", async () => {
     stub.always("pinChatMessage", { status: 200, json: { ok: true, result: true } });
     const result = await client.pinChatMessage({ chat_id: -1001234567890, message_id: 500 });
     expect(result).toEqual({ ok: true, result: true });
@@ -407,7 +407,7 @@ describe("telegram client: T22/T24 新方法（全部经 request()，零分类�
     });
   });
 
-  it("editMessageText：chat_id / message_id / text 透传", async () => {
+ it("editMessageText：chat_id / message_id / text 透传", async () => {
     stub.always("editMessageText", { status: 200, json: { ok: true, result: { message_id: 500 } } });
     const result = await client.editMessageText({
       chat_id: -1001234567890,
@@ -422,7 +422,7 @@ describe("telegram client: T22/T24 新方法（全部经 request()，零分类�
     });
   });
 
-  it("分类矩阵对新方法同样成立：429 retry_after=1 → 原地重试恰一次后 Ok（恰 2 次调用）", async () => {
+ it("分类矩阵对新方法同样成立：429 retry_after=1 → 原地重试恰一次后 Ok（恰 2 次调用）", async () => {
     stub.on("sendPhoto", (i) =>
       i === 0
         ? {
@@ -441,7 +441,7 @@ describe("telegram client: T22/T24 新方法（全部经 request()，零分类�
     expect(stub.countOf("sendPhoto")).toBe(2);
   });
 
-  it("分类矩阵对新方法同样成立：editMessageText 403 → permanent 且 errorCode 按数字码透传", async () => {
+ it("分类矩阵对新方法同样成立：editMessageText 403 → permanent 且 errorCode 按数字码透传", async () => {
     stub.always("editMessageText", {
       status: 403,
       json: { ok: false, error_code: 403, description: "Forbidden: bot was blocked" },
@@ -454,7 +454,7 @@ describe("telegram client: T22/T24 新方法（全部经 request()，零分类�
     expectNoTokenLeak(error);
   });
 
-  it("分类矩阵对新方法同样成立：sendDocument 网络错误 → retryable（不透传 URL）", async () => {
+ it("分类矩阵对新方法同样成立：sendDocument 网络错误 → retryable（不透传 URL）", async () => {
     stub.always("sendDocument", { throwError: true });
     const error = asError(await client.sendDocument({ chat_id: 7001, document: "d" }));
     expect(error.kind).toBe("retryable");
@@ -463,7 +463,7 @@ describe("telegram client: T22/T24 新方法（全部经 request()，零分类�
   });
 });
 
-describe("telegram client: T27 阶段 4 新增（reply_markup + answerCallbackQuery）", () => {
+describe("telegram client: 新增（reply_markup + answerCallbackQuery）", () => {
   let stub: TelegramFetchStub;
   let client: ReturnType<typeof createTelegramClient>;
   beforeEach(() => {
@@ -474,7 +474,7 @@ describe("telegram client: T27 阶段 4 新增（reply_markup + answerCallbackQu
     stub.restore();
   });
 
-  it("sendMessage 携带 reply_markup：inline_keyboard 蛇形结构原样透传（精确键集）", async () => {
+ it("sendMessage 携带 reply_markup：inline_keyboard 蛇形结构原样透传（精确键集）", async () => {
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 6 } } });
     const result = await client.sendMessage({
       chat_id: 7001,
@@ -503,7 +503,7 @@ describe("telegram client: T27 阶段 4 新增（reply_markup + answerCallbackQu
     });
   });
 
-  it("sendMessage 不带 reply_markup：键集零多余（既有中继路径不受影响）", async () => {
+ it("sendMessage 不带 reply_markup：键集零多余（既有中继路径不受影响）", async () => {
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 7 } } });
     await client.sendMessage({ chat_id: -1001234567890, text: "中继正文", message_thread_id: 9 });
     expect(stub.callsOf("sendMessage")[0].body).toEqual({
@@ -513,7 +513,7 @@ describe("telegram client: T27 阶段 4 新增（reply_markup + answerCallbackQu
     });
   });
 
-  it("editMessageText 携带 reply_markup：答错重出（同消息换新按钮）透传", async () => {
+ it("editMessageText 携带 reply_markup：答错重出（同消息换新按钮）透传", async () => {
     stub.always("editMessageText", { status: 200, json: { ok: true, result: { message_id: 6 } } });
     const result = await client.editMessageText({
       chat_id: 7001,
@@ -530,7 +530,7 @@ describe("telegram client: T27 阶段 4 新增（reply_markup + answerCallbackQu
     });
   });
 
-  it("answerCallbackQuery：callbackQueryId 蛇形映射 + text 透传", async () => {
+ it("answerCallbackQuery：callbackQueryId 蛇形映射 + text 透传", async () => {
     stub.always("answerCallbackQuery", { status: 200, json: { ok: true, result: true } });
     const result = await client.answerCallbackQuery({
       callbackQueryId: "cb-abc-1",
@@ -543,7 +543,7 @@ describe("telegram client: T27 阶段 4 新增（reply_markup + answerCallbackQu
     });
   });
 
-  it("answerCallbackQuery 不带 text：键集中无 text（只终止加载态）", async () => {
+ it("answerCallbackQuery 不带 text：键集中无 text（只终止加载态）", async () => {
     stub.always("answerCallbackQuery", { status: 200, json: { ok: true, result: true } });
     await client.answerCallbackQuery({ callbackQueryId: "cb-abc-2" });
     expect(stub.callsOf("answerCallbackQuery")[0].body).toEqual({
@@ -551,7 +551,7 @@ describe("telegram client: T27 阶段 4 新增（reply_markup + answerCallbackQu
     });
   });
 
-  it("分类矩阵对 answerCallbackQuery 同样成立：403 → permanent 且 errorCode 按数字码透传", async () => {
+ it("分类矩阵对 answerCallbackQuery 同样成立：403 → permanent 且 errorCode 按数字码透传", async () => {
     stub.always("answerCallbackQuery", {
       status: 403,
       json: { ok: false, error_code: 403, description: "Forbidden: query is too old" },

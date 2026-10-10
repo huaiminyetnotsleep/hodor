@@ -1,28 +1,23 @@
 /**
- * copy.ts 文案模块直测（trellis-check P2 加固，2026-09-30；阶段 5 M1 扩展）：
+ * copy.ts 文案模块直测：
  *
  * - DEFAULT_WELCOME_TEXT 逐字定稿——期望值**硬编码**（不取自 copy.ts），
- *   打破「import 常量自比较」的循环断言：文案漂移（fork 改写 / 误改）即刻红灯；
+ * 打破「import 常量自比较」的循环断言：文案漂移（fork 改写 / 误改）即刻红灯；
  * - formatPinnedInfo 回退链三分支完整输出 + 验证行**三态**（✅ 已验证 /
- *   ❌ 未验证 / 未启用）+ 高危 / 备注行按需追加（行序固定）与
- *   `YYYY-MM-DD HH:mm (UTC)` 时间格式；
- * - isStartCommand 矩阵；阶段 4 新文案定稿（验证题 / 超限 / 禁言 / 命令）；
- * - 阶段 5（M1）：formatHelpText 开关 × 模式四态（只展示可操作开关命令 +
- *   纯按钮防护较弱说明）+ ADMIN_COMMAND_MENU 与帮助清单一致性互证 +
- *   note / risk / verifyon / verifyoff / verifymode / 纯按钮题面新文案定稿；
- * - 阶段 5（M3）：答错重试前缀（与模式化题面拼接、math 拼接产物与
- *   formatVerifyRetryQuestion 逐字一致）+ 超限纯按钮变体
- *   formatRateLimitVerifyButton（限频前缀与数学题形态一致）定稿。
+ * ❌ 未验证 / 未启用）+ 高危 / 备注行按需追加（行序固定）与
+ * `YYYY-MM-DD HH:mm (UTC)` 时间格式；
+ * - isStartCommand 矩阵；验证 / 超限 / 禁言 / 命令文案定稿；
+ * - formatHelpText 开关 × 模式各态（只展示可操作开关命令 + 纯按钮防护
+ * 较弱说明）+ ADMIN_COMMAND_MENU 与帮助清单一致性互证；
+ * - 答错重试前缀（与模式化题面拼接、math 拼接产物与
+ * formatVerifyRetryQuestion 逐字一致）+ 超限纯按钮变体
+ * formatRateLimitVerifyButton（限频前缀与数学题形态一致）。
  *
  * 纯函数直测，不触碰 D1 与 SELF。
  *
- * 阶段 4 调整说明：阶段 3 的「验证状态：未启用」断言按验证交付翻转为两态
- * 契约（isVerified → ✅ 已验证 / ❌ 未验证）——原断言意图（置顶绝不伪称
- * 验证状态）保留并收紧。
- * 阶段 5 调整说明：验证行两态按 T31 开关交付升为三态（verify 入参对象化，
- * 新增 disabled = 验证关闭期间恒「未启用」）；HELP_TEXT 常量改
- * formatHelpText(settings) 动态生成——既有断言意图（只列已交付命令、
- * 未交付命令绝不出现）按新形态保留。
+ * 置顶验证行三态契约：verify 入参对象化，disabled = 验证关闭期间恒
+ * 「未启用」，置顶绝不伪称验证状态；HELP_TEXT 常量为
+ * formatHelpText(settings) 动态生成，命令清单随开关与模式变化。
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -70,8 +65,8 @@ import {
 } from "../src/copy";
 
 describe("copy: DEFAULT_WELCOME_TEXT 逐字定稿", () => {
-  it("三要素完整字面量（项目名 / 使用方式 / 项目地址；emoji、空行、URL 均逐字）", () => {
-    // 期望值硬编码自 docs/guide/features.md 定稿文案——与 copy.ts 零共享
+ it("三要素完整字面量（项目名 / 使用方式 / 项目地址；emoji、空行、URL 均逐字）", () => {
+ // 期望值硬编码自 docs/guide/features.md 定稿文案——与 copy.ts 零共享
     expect(DEFAULT_WELCOME_TEXT).toBe(`你好，欢迎使用 hodor 私聊机器人！👋
 
 直接发送消息即可与客服对话，无需任何命令；客服的回复也会在这里显示。
@@ -81,7 +76,7 @@ describe("copy: DEFAULT_WELCOME_TEXT 逐字定稿", () => {
 });
 
 describe("copy: formatPinnedInfo 昵称回退链与验证行三态（完整输出断言）", () => {
-  it("first + last 且有 @username：姓名（@handle）括注齐备（已验证态 ✅）", () => {
+ it("first + last 且有 @username：姓名（@handle）括注齐备（已验证态 ✅）", () => {
     expect(
       formatPinnedInfo({
         id: 123456789,
@@ -101,7 +96,7 @@ describe("copy: formatPinnedInfo 昵称回退链与验证行三态（完整输�
     );
   });
 
-  it("姓名无 @username：括注整体省略（不留空括号）（未验证态 ❌）", () => {
+ it("姓名无 @username：括注整体省略（不留空括号）（未验证态 ❌）", () => {
     expect(
       formatPinnedInfo({
         id: 42,
@@ -120,7 +115,7 @@ describe("copy: formatPinnedInfo 昵称回退链与验证行三态（完整输�
     );
   });
 
-  it("全无名（first_name 空白同缺席）但有 @username → 展示 @username 且括注省略（不出现 @x（@x）重复）", () => {
+ it("全无名（first_name 空白同缺席）但有 @username → 展示 @username 且括注省略（不出现 @x（@x）重复）", () => {
     expect(
       formatPinnedInfo({
         id: 778,
@@ -139,7 +134,7 @@ describe("copy: formatPinnedInfo 昵称回退链与验证行三态（完整输�
     );
   });
 
-  it("全无名无 @username → ID_<id> 兜底（已验证态 ✅）", () => {
+ it("全无名无 @username → ID_<id> 兜底（已验证态 ✅）", () => {
     expect(
       formatPinnedInfo({ id: 777, firstSeenAt: "2025-06-30T09:07:00.000Z", verify: "verified" }),
     ).toBe(
@@ -152,7 +147,7 @@ describe("copy: formatPinnedInfo 昵称回退链与验证行三态（完整输�
     );
   });
 
-  it("任意分支恒含三态验证行之一且时间为 YYYY-MM-DD HH:mm (UTC)（秒/毫秒截断）", () => {
+ it("任意分支恒含三态验证行之一且时间为 YYYY-MM-DD HH:mm (UTC)（秒/毫秒截断）", () => {
     const unverifiedSamples = [
       formatPinnedInfo({ id: 1, first_name: "A", username: "a", firstSeenAt: "2026-09-29T18:00:05.123Z", verify: "unverified" }),
       formatPinnedInfo({ id: 2, first_name: "B", firstSeenAt: "2026-09-29T18:00:05.123Z", verify: "unverified" }),
@@ -162,23 +157,23 @@ describe("copy: formatPinnedInfo 昵称回退链与验证行三态（完整输�
     for (const text of unverifiedSamples) {
       expect(text).toContain("验证状态：❌ 未验证");
       expect(text).toMatch(/首次聊天：\d{4}-\d{2}-\d{2} \d{2}:\d{2} \(UTC\)/);
-      // 未验证态绝不混入已验证标记（置顶绝不伪称验证状态——原意图保留）
+ // 未验证态绝不混入已验证标记（置顶绝不伪称验证状态——原意图保留）
       expect(text).not.toContain("✅");
     }
-    // 已验证态：✅ 已验证（与未验证态零歧义）
+ // 已验证态：✅ 已验证（与未验证态零歧义）
     expect(
       formatPinnedInfo({ id: 5, first_name: "V", firstSeenAt: "2026-01-01T00:00:00.000Z", verify: "verified" }),
     ).toContain("验证状态：✅ 已验证");
-    // 未启用态（T31 验证关闭期间）：「未启用」，不带任何状态 emoji
+ // 未启用态（验证关闭期间）：「未启用」，不带任何状态 emoji
     const disabled = formatPinnedInfo({ id: 6, first_name: "D", firstSeenAt: "2026-01-01T00:00:00.000Z", verify: "disabled" });
     expect(disabled).toContain("验证状态：未启用");
     expect(disabled).not.toContain("✅");
     expect(disabled).not.toContain("❌");
   });
 
-  it("高危 / 备注行按需追加（行序：验证状态 → 高危 → 备注；缺省 / 空值零痕迹）", () => {
+ it("高危 / 备注行按需追加（行序：验证状态 → 高危 → 备注；缺省 / 空值零痕迹）", () => {
     const base = { id: 9, first_name: "R", username: "r", firstSeenAt: "2026-10-01T00:00:00.000Z" };
-    // 缺省（isRisk / note 未携带或空）→ 恒四行，无高危 / 备注痕迹
+ // 缺省（isRisk / note 未携带或空）→ 恒四行，无高危 / 备注痕迹
     const plain = formatPinnedInfo({ ...base, verify: "verified" });
     expect(plain.split("\n")).toHaveLength(4);
     expect(plain).not.toContain("高危");
@@ -186,7 +181,7 @@ describe("copy: formatPinnedInfo 昵称回退链与验证行三态（完整输�
     const emptyNote = formatPinnedInfo({ ...base, verify: "verified", isRisk: false, note: "" });
     expect(emptyNote.split("\n")).toHaveLength(4);
 
-    // isRisk → 「高危：⚠️ 高危用户」追加在验证行之后
+ // isRisk → 「高危：⚠️ 高危用户」追加在验证行之后
     const riskOnly = formatPinnedInfo({ ...base, verify: "unverified", isRisk: true });
     expect(riskOnly.split("\n")).toEqual([
       "昵称：R（@r）",
@@ -196,7 +191,7 @@ describe("copy: formatPinnedInfo 昵称回退链与验证行三态（完整输�
       "高危：⚠️ 高危用户",
     ]);
 
-    // note 非空 → 「备注：<text>」；null 同缺省
+ // note 非空 → 「备注：<text>」；null 同缺省
     const noteOnly = formatPinnedInfo({ ...base, verify: "verified", note: "仅咨询退款" });
     expect(noteOnly.split("\n")).toEqual([
       "昵称：R（@r）",
@@ -207,7 +202,7 @@ describe("copy: formatPinnedInfo 昵称回退链与验证行三态（完整输�
     ]);
     expect(formatPinnedInfo({ ...base, verify: "verified", note: null }).split("\n")).toHaveLength(4);
 
-    // 两者齐备 → 高危在前、备注在后（行序固定，disabled 态同样适用）
+ // 两者齐备 → 高危在前、备注在后（行序固定，disabled 态同样适用）
     const both = formatPinnedInfo({ ...base, verify: "disabled", isRisk: true, note: "高危勿信" });
     expect(both.split("\n")).toEqual([
       "昵称：R（@r）",
@@ -221,7 +216,7 @@ describe("copy: formatPinnedInfo 昵称回退链与验证行三态（完整输�
 });
 
 describe("copy: isStartCommand 矩阵", () => {
-  it("命令形态 ✓：/start、/start@bot、/start payload、/start@bot payload、尾随空白", () => {
+ it("命令形态 ✓：/start、/start@bot、/start payload、/start@bot payload、尾随空白", () => {
     expect(isStartCommand("/start")).toBe(true);
     expect(isStartCommand("/start@hodor_bot")).toBe(true);
     expect(isStartCommand("/start payload")).toBe(true);
@@ -229,7 +224,7 @@ describe("copy: isStartCommand 矩阵", () => {
     expect(isStartCommand("/start ")).toBe(true);
   });
 
-  it("非命令形态 ✗：前缀巧合 / 其他命令 / 空串 / 缺失 / 大小写敏感", () => {
+ it("非命令形态 ✗：前缀巧合 / 其他命令 / 空串 / 缺失 / 大小写敏感", () => {
     expect(isStartCommand("/startx")).toBe(false);
     expect(isStartCommand("/help")).toBe(false);
     expect(isStartCommand("")).toBe(false);
@@ -238,76 +233,76 @@ describe("copy: isStartCommand 矩阵", () => {
   });
 });
 
-describe("copy: 阶段 4 验证 / 限频文案（T27/T29）", () => {
-  it("formatVerifyQuestion：题头 + 算式，题头与超限形态共用", () => {
+describe("copy: 验证 / 限频文案", () => {
+ it("formatVerifyQuestion：题头 + 算式，题头与超限形态共用", () => {
     expect(formatVerifyQuestion("3 + 5 = ?")).toBe(`${VERIFY_QUESTION_HEADER}\n3 + 5 = ?`);
   });
 
-  it("formatVerifyRetryQuestion：错误提示在前 + 空行 + 新题（同一消息原位重出）", () => {
+ it("formatVerifyRetryQuestion：错误提示在前 + 空行 + 新题（同一消息原位重出）", () => {
     expect(formatVerifyRetryQuestion("8 - 2 = ?")).toBe(
       `回答错误，请再试一次。\n\n${VERIFY_QUESTION_HEADER}\n8 - 2 = ?`,
     );
   });
 
-  it("formatRateLimitVerifyQuestion：文案含限频数字（验收断言点「3」）+ 新题", () => {
+ it("formatRateLimitVerifyQuestion：文案含限频数字（验收断言点「3」）+ 新题", () => {
     const text = formatRateLimitVerifyQuestion(3, "4 + 4 = ?");
     expect(text).toContain("每分钟最多 3 条");
     expect(text).toContain(`${VERIFY_QUESTION_HEADER}\n4 + 4 = ?`);
-    // 其他 limit 数值同样内插（不与 3 硬编码耦合）
+ // 其他 limit 数值同样内插（不与 3 硬编码耦合）
     expect(formatRateLimitVerifyQuestion(20, "1 + 1 = ?")).toContain("每分钟最多 20 条");
   });
 
-  it("toast / 编辑文案定稿（硬编码，防漂移）", () => {
+ it("toast / 编辑文案定稿（硬编码，防漂移）", () => {
     expect(VERIFY_WRONG_TOAST).toBe("回答错误，请重试。");
     expect(VERIFY_PASSED_TOAST).toBe("验证通过！");
     expect(VERIFY_PASSED_TEXT).toBe("✅ 验证通过，现在可以直接发送消息了。");
     expect(VERIFY_EXPIRED_NOTICE).toBe("题目已失效，请发送任意消息获取新题目。");
   });
 
-  it("M3 答错重试前缀定稿：与模式化题面拼接；math 拼接产物与 formatVerifyRetryQuestion 逐字一致", () => {
-    // 前缀硬编码（防漂移）——verify.ts 答错重出分支以 prefix + challenge.text 组装
+ it("M3 答错重试前缀定稿：与模式化题面拼接；math 拼接产物与 formatVerifyRetryQuestion 逐字一致", () => {
+ // 前缀硬编码（防漂移）——verify.ts 答错重出分支以 prefix + challenge.text 组装
     expect(VERIFY_RETRY_PREFIX).toBe("回答错误，请再试一次。\n\n");
-    // math 模式拼接产物与阶段 4 定稿函数逐字一致（零行为漂移保证点）
+ // math 模式拼接产物与 定稿函数逐字一致（零行为漂移保证点）
     expect(`${VERIFY_RETRY_PREFIX}${formatVerifyQuestion("3 + 5 = ?")}`).toBe(
       formatVerifyRetryQuestion("3 + 5 = ?"),
     );
   });
 
-  it("M3 超限纯按钮变体 formatRateLimitVerifyButton：限频前缀与数学题形态一致（含 limit 数字），题面为按钮引导文案", () => {
+ it("M3 超限纯按钮变体 formatRateLimitVerifyButton：限频前缀与数学题形态一致（含 limit 数字），题面为按钮引导文案", () => {
     const text = formatRateLimitVerifyButton(3);
     expect(text).toContain("每分钟最多 3 条");
-    // 前缀与 math 超限形态共用（超限语义不随模式变化）
+ // 前缀与 math 超限形态共用（超限语义不随模式变化）
     const mathPrefix = formatRateLimitVerifyQuestion(3, "4 + 4 = ?").split("\n\n")[0];
     expect(text.split("\n\n")[0]).toBe(mathPrefix);
-    // 后半为纯按钮题面（copy 单点复用）
+ // 后半为纯按钮题面（copy 单点复用）
     expect(text.split("\n\n")[1]).toBe(formatVerifyButtonQuestion());
     expect(formatRateLimitVerifyButton(20)).toContain("每分钟最多 20 条");
   });
 });
 
-describe("copy: 阶段 4 封禁与命令文案（T34/T35）", () => {
-  it("BAN_NOTICE 定稿：明确告知禁言且不留绕过暗示", () => {
+describe("copy: 封禁与命令文案", () => {
+ it("BAN_NOTICE 定稿：明确告知禁言且不留绕过暗示", () => {
     expect(BAN_NOTICE).toBe("你已被禁言，消息无法送达客服。如有疑问请通过其他方式联系。");
   });
 
-  it("UNKNOWN_COMMAND_NOTICE 引导 /help", () => {
+ it("UNKNOWN_COMMAND_NOTICE 引导 /help", () => {
     expect(UNKNOWN_COMMAND_NOTICE).toBe("未知命令，发送 /help 查看可用命令。");
   });
 
-  it("ban / unban 确认携带目标用户 ID", () => {
+ it("ban / unban 确认携带目标用户 ID", () => {
     expect(formatBanConfirmed(7117077829)).toBe("已禁言用户 7117077829：其后续消息将被拦截。");
     expect(formatUnbanConfirmed(7117077829)).toBe("已解除用户 7117077829 的禁言。");
   });
 
-  it("UNBOUND_TOPIC_NOTICE 定稿不变（/ban /unban /note /risk 无绑定复用）", () => {
+ it("UNBOUND_TOPIC_NOTICE 定稿不变（/ban /unban /note /risk 无绑定复用）", () => {
     expect(UNBOUND_TOPIC_NOTICE).toBe(
       "找不到对应用户：此话题没有有效绑定（可能从未建立或已被关闭），请勿在此继续回复。",
     );
   });
 });
 
-describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", () => {
-  it("固定命令段：全部已交付命令 + 「/ 开头不中继」说明；未交付命令绝不出现", () => {
+describe("copy: formatHelpText 动态帮助（开关 × 模式四态）", () => {
+ it("固定命令段：全部已交付命令 + 「/ 开头不中继」说明；未交付命令绝不出现", () => {
     for (const settings of [
       { verifyEnabled: true, verifyMode: "math" as const },
       { verifyEnabled: true, verifyMode: "button" as const },
@@ -329,7 +324,7 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
     }
   });
 
-  it("开关两态只展示可操作的那个：开 → /verifyoff；关 → /verifyon + 「当前验证已关闭」", () => {
+ it("开关两态只展示可操作的那个：开 → /verifyoff；关 → /verifyon + 「当前验证已关闭」", () => {
     const on = formatHelpText({ verifyEnabled: true, verifyMode: "math" });
     expect(on).toContain("/verifyoff - 临时关闭人机验证（已验证记录保留）");
     expect(on).not.toContain("/verifyon");
@@ -340,7 +335,7 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
     expect(off).not.toContain("/verifyoff");
   });
 
-  it("模式三态：/verifymode 查看行随当前模式 + 三个专用切换命令行（2026-10-10 命令拆分）", () => {
+ it("模式三态：/verifymode 查看行随当前模式 + 三个专用切换命令行", () => {
     expect(formatHelpText({ verifyEnabled: true, verifyMode: "math" })).toContain(
       "/verifymode - 查看当前验证模式（当前：数学题）",
     );
@@ -359,21 +354,21 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
     expect(formatHelpText({ verifyEnabled: true, verifyMode: "math" })).toContain(
       "/verifymode_turnstile - 切换到 Turnstile 人机验证",
     );
-    // 兼容别名仍在帮助中注明
+ // 兼容别名仍在帮助中注明
     expect(formatHelpText({ verifyEnabled: true, verifyMode: "math" })).toContain(
       "/verifymode math|button|turnstile",
     );
   });
 
-  it("ADMIN_COMMAND_MENU 与帮助清单一致（单一事实源互证）：帮助中的命令 = 菜单 − 不可操作开关", () => {
-    // 菜单恒全量注册（Telegram 菜单是客户端缓存）；帮助只展示可操作的开关命令
+ it("ADMIN_COMMAND_MENU 与帮助清单一致（单一事实源互证）：帮助中的命令 = 菜单 − 不可操作开关", () => {
+ // 菜单恒全量注册（Telegram 菜单是客户端缓存）；帮助只展示可操作的开关命令
     const menuCommands = ADMIN_COMMAND_MENU.map((entry) => entry.command);
     expect(menuCommands).toEqual([
       "help", "ban", "unban", "note", "unnote", "risk", "unrisk",
       "verifyon", "verifyoff", "verifymode", "verifymode_math", "verifymode_button", "verifymode_turnstile",
       "archive", "deluser", "purgemsg", "broadcast", "wipealldata",
     ]);
-    // verifymode 描述定稿为「查看验证模式」（2026-10-10 拆分：设置职责移交新命令）
+ // verifymode 描述定稿为「查看验证模式」（设置职责移交专用命令）
     expect(ADMIN_COMMAND_MENU.find((e) => e.command === "verifymode")!.description).toBe(
       "查看验证模式",
     );
@@ -392,15 +387,15 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
   });
 });
 
-describe("copy: 阶段 5 新文案定稿（T36/T37/T31/T32）", () => {
-  it("note / unnote：确认回显备注 / 清除确认 / 用法提示", () => {
+describe("copy: 新文案定稿", () => {
+ it("note / unnote：确认回显备注 / 清除确认 / 用法提示", () => {
     expect(formatNoteConfirmed("仅咨询退款")).toContain("仅咨询退款");
     expect(formatUnnoteConfirmed()).toContain("备注");
     expect(NOTE_USAGE_NOTICE).toContain("/note");
     expect(NOTE_USAGE_NOTICE).toContain("<内容>");
   });
 
-  it("risk / unrisk：确认携带目标用户 ID；高危提醒醒目（⚠️ 前后缀 + 展示名）", () => {
+ it("risk / unrisk：确认携带目标用户 ID；高危提醒醒目（⚠️ 前后缀 + 展示名）", () => {
     expect(formatRiskConfirmed(7117077829)).toContain("7117077829");
     expect(formatRiskConfirmed(7117077829)).toContain("24 小时");
     expect(formatUnriskConfirmed(7117077829)).toContain("7117077829");
@@ -409,10 +404,10 @@ describe("copy: 阶段 5 新文案定稿（T36/T37/T31/T32）", () => {
     expect(notice).toContain("⚠️");
     expect(notice).toContain("张三");
     expect(notice.startsWith("⚠️")).toBe(true); // 醒目措辞：⚠️ 开头
-    // 提醒是管理员侧消息——文案绝不发给用户私聊由管线保证，此处只定稿形态
+ // 提醒是管理员侧消息——文案绝不发给用户私聊由管线保证，此处只定稿形态
   });
 
-  it("verifyon / verifyoff 确认：分别含「已验证不受影响」与「记录保留 + 重开判定」说明", () => {
+ it("verifyon / verifyoff 确认：分别含「已验证不受影响」与「记录保留 + 重开判定」说明", () => {
     const onText = formatVerifyOnConfirmed();
     expect(onText).toContain("已开启");
     expect(onText).toContain("不受影响");
@@ -423,7 +418,7 @@ describe("copy: 阶段 5 新文案定稿（T36/T37/T31/T32）", () => {
     expect(offText).toContain("有效期");
   });
 
-  it("verifymode 确认：携带新模式；纯按钮附防护较弱说明、数学题不附", () => {
+ it("verifymode 确认：携带新模式；纯按钮附防护较弱说明、数学题不附", () => {
     const mathText = formatVerifyModeConfirmed("math");
     expect(mathText).toContain("数学题");
     expect(mathText).not.toContain("防护较弱");
@@ -433,7 +428,7 @@ describe("copy: 阶段 5 新文案定稿（T36/T37/T31/T32）", () => {
     expect(buttonText).toContain("防护较弱");
   });
 
-  it("命令拆分文案（2026-10-10）：General 引导提示定稿 + 查看 / 用法提示以新命令为准、别名附注", () => {
+ it("命令拆分文案：General 引导提示定稿 + 查看 / 用法提示以新命令为准、别名附注", () => {
     expect(VERIFY_COMMANDS_GENERAL_ONLY_NOTICE).toBe("验证配置命令请在客服群 General 中使用。");
 
     const current = formatVerifyModeCurrent({ verifyEnabled: true, verifyMode: "math" });
@@ -454,7 +449,7 @@ describe("copy: 阶段 5 新文案定稿（T36/T37/T31/T32）", () => {
     expect(missing).toContain("客服群 General");
   });
 
-  it("isGeneralGlobalCommand 矩阵（General 放行集合）：命令形态 ✓ / 前缀巧合与绑定类命令 ✗", () => {
+ it("isGeneralGlobalCommand 矩阵（General 放行集合）：命令形态 ✓ / 前缀巧合与绑定类命令 ✗", () => {
     for (const text of [
       "/verifyon",
       "/verifyoff",
@@ -485,7 +480,7 @@ describe("copy: 阶段 5 新文案定稿（T36/T37/T31/T32）", () => {
     }
   });
 
-  it("纯按钮题面与按钮文案定稿", () => {
+ it("纯按钮题面与按钮文案定稿", () => {
     const question = formatVerifyButtonQuestion();
     expect(question).toContain("点击下方按钮");
     expect(question).toContain("机器人");
@@ -493,8 +488,8 @@ describe("copy: 阶段 5 新文案定稿（T36/T37/T31/T32）", () => {
   });
 });
 
-describe("copy: 全用户广播文案（2026-10-09 任务）", () => {
-  it("isBroadcastCommand 矩阵：命令形态 ✓ / 前缀巧合与其他命令 ✗（isStartCommand 同款口径）", () => {
+describe("copy: 全用户广播文案", () => {
+ it("isBroadcastCommand 矩阵：命令形态 ✓ / 前缀巧合与其他命令 ✗（isStartCommand 同款口径）", () => {
     expect(isBroadcastCommand("/broadcast")).toBe(true);
     expect(isBroadcastCommand("/broadcast@hodor_bot")).toBe(true);
     expect(isBroadcastCommand("/broadcast 维护通知\n正文")).toBe(true);
@@ -506,11 +501,11 @@ describe("copy: 全用户广播文案（2026-10-09 任务）", () => {
     expect(isBroadcastCommand("/BROADCAST")).toBe(false);
   });
 
-  it("落款回退定稿（2026-10-09 用户变更）：getMe 无显示名 → Hodor（不再是客服公告）", () => {
+ it("落款回退：getMe 无显示名 → Hodor", () => {
     expect(BROADCAST_FALLBACK_SIGNATURE).toBe("Hodor");
   });
 
-  it("控制消息 / 完成统计文案：预计人数、有效期、成功仅 API 接收、失败不补发逐字体现", () => {
+ it("控制消息 / 完成统计文案：预计人数、有效期、成功仅 API 接收、失败不补发逐字体现", () => {
     const control = formatBroadcastControlText(120, 5);
     expect(control).toContain("（未发送）");
     expect(control).toContain("120 名");

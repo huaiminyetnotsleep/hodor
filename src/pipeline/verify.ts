@@ -1,11 +1,11 @@
 /**
- * 人机验证管线（T27/T28/T29 共用件 + T32 模式化 + Turnstile 任务统一栅栏）：
+ * 人机验证管线（三模式统一栅栏）：
  *
  * - generateQuestion：纯函数出题（注入 rng 可测）——a,b ∈ [1,9]，a+b 或
  *   （a ≥ b 时）a-b；正确答案 + 3 个互异干扰项乱序。按钮只携带所选值
  *   （"v:<n>"），正确答案只落 users.verify_answer。
  * - buildChallenge：math / button 整数题产物 { text, answer, keyboard }。
- * - sendVerificationCode：三模式统一出题顺序（design §8）——
+ * - sendVerificationCode：三模式统一出题顺序——
  *   settings 快照 → 生成 nonce/hash（统一栅栏，三模式共用）→ **条件预留**
  *   （bot/user、未封禁、未验证、预期 mode/enabled/generation）→ 发送
  *   Telegram → CAS 回填 msgId（匹配 hash/generation）→ 失败按 hash/generation
@@ -21,7 +21,7 @@
  *   错误策略显式注入——callback 保持 retryable 抛 / permanent warn；网页
  *   入口两种失败都 warn（D1 已提交，不回滚、不向客户端谎报失败）。
  *
- * 失败语义（design.md §四 + §10，binding）：
+ * 失败语义（binding）：
  * | 环节                          | retryable               | permanent          |
  * | 出题 send（门内提示）          | 抛（slot 已耗，宁丢一条） | warn 吞（清理栅栏） |
  * | 答题链 answerCb / edit 题 /    | 抛（重推收敛到失效分支，  | warn 继续          |
@@ -63,7 +63,7 @@ import type {
 } from "../telegram/types";
 import type { TelegramCallbackQueryRef } from "./classify";
 
-/** 算子值域上限：a,b ∈ [1,9]（design.md §二.4） */
+/** 算子值域上限：a,b ∈ [1,9] */
 const OPERAND_MAX = 9;
 /** 答案值域：a-b ∈ [0,8]、a+b ∈ [2,18]，取并集 [0,18]（干扰项同值域） */
 const ANSWER_MIN = 0;
@@ -125,7 +125,7 @@ export function optionsKeyboard(options: readonly number[]): InlineKeyboardMarku
 }
 
 /**
- * 纯按钮模式的单按钮键盘（T32）：唯一按钮即唯一合法答案 0（"v:0"）——
+ * 纯按钮模式的单按钮键盘：唯一按钮即唯一合法答案 0（"v:0"）——
  * 与 optionsKeyboard 同为「载荷只携带所选值」形态，判卷路径完全复用。
  */
 export function buttonKeyboard(): InlineKeyboardMarkup {
@@ -134,7 +134,7 @@ export function buttonKeyboard(): InlineKeyboardMarkup {
   };
 }
 
-/** 出题场景：普通新题（验证门）或超限重验（提示含限频数字，T29） */
+/** 出题场景：普通新题（验证门）或超限重验（提示含限频数字） */
 export type VerificationSendKind =
   | { type: "question" }
   | { type: "overflow"; limit: number };
@@ -156,14 +156,14 @@ export interface TurnstileChallenge {
   nonce: string;
   /** SHA-256(nonce)：预留 / 回填 / 清理 / 最终裁决共用的栅栏键 */
   hash: string;
-  /** 到期时间（创建 + 600 秒；design §3 常量） */
+  /** 到期时间（创建 + 600 秒） */
   expiresAt: string;
 }
 
 export type VerificationChallenge = IntegerChallenge | TurnstileChallenge;
 
 /**
- * 统一出题（T32 模式化 + Turnstile 扩展）——math / button 纯构造：
+ * 统一出题（三模式化）——math / button 纯构造：
  *
  * - math（默认）：现状数学题——题头 / 超限前缀文案（含 limit 数字）+ 4 选项
  *   按钮乱序，answer 只落库；
@@ -247,7 +247,7 @@ export async function buildTurnstileChallenge(
 /**
  * 出题并发送到用户私聊（验证门 / 首联包 / 超限合并消息共用）。
  *
- * 统一顺序（design §8）：settings 快照 → 生成请求（三模式共用栅栏）→
+ * 统一顺序：settings 快照 → 生成请求（三模式共用栅栏）→
  * **条件预留**（WHERE 含未封禁 / 未验证 / 当前实际配置 = 快照——预留与快照
  * 之间发生切换则预留失败，放弃本轮，重推重新走完整流程）→ 发送 → CAS 回填
  * msgId（匹配 hash/generation）→ 失败按 hash/generation CAS 清理。
@@ -393,9 +393,9 @@ function consumeEditFailure(
 }
 
 /**
- * 共享成功通知（design §10）：题面消息编辑为通过提示 + 置顶验证行按库内
+ * 共享成功通知：题面消息编辑为通过提示 + 置顶验证行按库内
  * 真值刷新。两条入口共享内容与顺序；错误策略显式注入——callback 策略保持
- * 阶段 4 语义（retryable 抛给 webhook 重推、permanent warn），web 策略两种
+ * 错误语义（retryable 抛给 webhook 重推、permanent warn），web 策略两种
  * 失败都 warn（D1 已提交，通知失败绝不撤销验证、绝不向客户端谎报失败）。
  */
 export async function announceVerificationPassed(
@@ -512,7 +512,7 @@ export async function handleVerifyCallback(
     const edited = await client.editMessageText({
       chat_id: message.chat.id,
       message_id: message.message_id,
-      // 重试前缀（copy 定稿）+ 模式化题面——math 模式下与阶段 4 文案逐字一致
+      // 重试前缀 + 模式化题面——math 模式下与答错重出文案逐字一致
       text: `${VERIFY_RETRY_PREFIX}${challenge.text}`,
       reply_markup: challenge.keyboard,
     });

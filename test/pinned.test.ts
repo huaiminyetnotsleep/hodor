@@ -1,5 +1,5 @@
 /**
- * 置顶组装共享助手（阶段 5 M2，src/pipeline/pinned.ts）：
+ * 置顶组装共享助手（src/pipeline/pinned.ts）：
  * composePinnedText 的 verify 三态映射（默认 settings 开启 → 库内真值
  * ✅/❌；verify_enabled=0 → 恒「未启用」覆盖真值）、高危 / 备注行随库内
  * 真值组合（行序：验证 → 高危 → 备注）、users / topics 行缺失 → null、
@@ -8,7 +8,7 @@
  * D1 全真（applyD1Migrations）；不涉及出站调用——纯组装层。文件内 DB
  * 共享：beforeEach 清空 settings 行，各用例从「默认 settings（无行 →
  * 开启 + 数学题）」出发，需要关闭态的用例自写 verify_enabled=0。
- * 阶段 5 新增文件。
+
  */
 import { applyD1Migrations, env } from "cloudflare:test";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -77,7 +77,7 @@ async function expectedText(
 }
 
 describe("pinned: composePinnedText 三态映射（settings × 库内真值）", () => {
-  it("默认 settings（无行 → 开启）+ 已验证用户 → ✅ 已验证；无高危 / 备注行", async () => {
+ it("默认 settings（无行 → 开启）+ 已验证用户 → ✅ 已验证；无高危 / 备注行", async () => {
     await seedUser(7301, { verified: true });
     await seedTopic(7301, 810);
 
@@ -89,7 +89,7 @@ describe("pinned: composePinnedText 三态映射（settings × 库内真值）",
     expect(text).not.toContain("备注");
   });
 
-  it("默认 settings + 未验证用户 → ❌ 未验证（库内真值）", async () => {
+ it("默认 settings + 未验证用户 → ❌ 未验证（库内真值）", async () => {
     await seedUser(7302);
     await seedTopic(7302, 811);
 
@@ -99,7 +99,7 @@ describe("pinned: composePinnedText 三态映射（settings × 库内真值）",
     expect(text).toContain("验证状态：❌ 未验证");
   });
 
-  it("verify_enabled=0 → 恒「未启用」（disabled 覆盖已验证真值）；verify_mode 脏值不影响映射", async () => {
+ it("verify_enabled=0 → 恒「未启用」（disabled 覆盖已验证真值）；verify_mode 脏值不影响映射", async () => {
     await env.HODOR_DB.prepare(
       "INSERT INTO settings (key, value) VALUES ('verify_enabled', '0'), ('verify_mode', 'junk')",
     ).run();
@@ -114,7 +114,7 @@ describe("pinned: composePinnedText 三态映射（settings × 库内真值）",
 });
 
 describe("pinned: composePinnedText 高危 / 备注行（库内真值组合）", () => {
-  it("is_risk=1 + note 非空 → 高危行与备注行都在验证行之后（行序固定）", async () => {
+ it("is_risk=1 + note 非空 → 高危行与备注行都在验证行之后（行序固定）", async () => {
     await seedUser(7304, { verified: true, risk: true });
     await seedTopic(7304, 813, "仅咨询退款");
 
@@ -130,7 +130,7 @@ describe("pinned: composePinnedText 高危 / 备注行（库内真值组合）",
     expect(noteAt).toBeGreaterThan(riskAt);
   });
 
-  it("is_risk=1 但 note 为 NULL → 高危行在、备注行不在", async () => {
+ it("is_risk=1 但 note 为 NULL → 高危行在、备注行不在", async () => {
     await seedUser(7305, { risk: true });
     await seedTopic(7305, 814);
 
@@ -140,7 +140,7 @@ describe("pinned: composePinnedText 高危 / 备注行（库内真值组合）",
     expect(text).not.toContain("备注");
   });
 
-  it("note 为空白串 → 视同无备注（formatPinnedInfo trim 契约，不产生空行）", async () => {
+ it("note 为空白串 → 视同无备注（formatPinnedInfo trim 契约，不产生空行）", async () => {
     await seedUser(7306);
     await seedTopic(7306, 815, "   ");
 
@@ -151,7 +151,7 @@ describe("pinned: composePinnedText 高危 / 备注行（库内真值组合）",
 });
 
 describe("pinned: composePinnedText 边界与 overrides", () => {
-  it("users 行缺失 / topics 行缺失 → null（无可组装真值）", async () => {
+ it("users 行缺失 / topics 行缺失 → null（无可组装真值）", async () => {
     await seedUser(7307); // 有用户无 topic
     expect(await composePinnedText(env.HODOR_DB, BOT_ID, 7307)).toBeNull();
 
@@ -159,7 +159,7 @@ describe("pinned: composePinnedText 边界与 overrides", () => {
     expect(await composePinnedText(env.HODOR_DB, BOT_ID, 7308)).toBeNull();
   });
 
-  it("overrides 强制 verify：settings 关闭（映射「未启用」）+ 已验证 → 强制 ❌（降级路径语义）", async () => {
+ it("overrides 强制 verify：settings 关闭（映射「未启用」）+ 已验证 → 强制 ❌（降级路径语义）", async () => {
     await env.HODOR_DB.prepare(
       "INSERT INTO settings (key, value) VALUES ('verify_enabled', '0')",
     ).run();

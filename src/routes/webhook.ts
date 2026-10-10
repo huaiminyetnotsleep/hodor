@@ -1,5 +1,5 @@
 /**
- * POST /webhook（T15 / T16 / T17 + T27 callback 派发）：Telegram update 唯一入口。
+ * POST /webhook（幂等认领 / 失败重推 / 防毒丸 / 回调派发）：Telegram update 唯一入口。
  *
  * 路由层保持极薄（架构分层约定）：只做「鉴权 → 解析 → 认领 → 分流 → 派发」的
  * 编排，业务全部在 pipeline，数据全部在 store，Telegram 调用全部在 client。
@@ -131,15 +131,15 @@ export async function handleWebhook(
       const message = update.message as TelegramMessageRef | undefined;
       if (message) await handleTopicEvent(env.HODOR_DB, botId, message);
     } else if (kind === "callback" || kind === "group_callback") {
-      // callback = 私聊题面按钮（T27）；group_callback = 客服群内按钮
-      //（T40 wipe 确认键盘）——两者信封同形，仅 chat 归属不同
+      // callback = 私聊题面按钮；group_callback = 客服群内按钮
+      //（wipe 确认键盘）——两者信封同形，仅 chat 归属不同
       const callbackQuery = update.callback_query as TelegramCallbackQueryRef | undefined;
       if (callbackQuery) {
         if (kind === "callback") {
           await handleVerifyCallback(env, botId, callbackQuery);
         } else {
-          // 客服群按钮按载荷前缀路由：d: 删除确认（T38）/ b: 广播确认（2026-10-09）
-          // / 其余 w: 清库确认（T40）——前缀互斥，非本仓库载荷一律落 wipe 分支
+          // 客服群按钮按载荷前缀路由：d: 删除确认 / b: 广播确认
+          // / 其余 w: 清库确认——前缀互斥，非本仓库载荷一律落 wipe 分支
           //（毒丸防护由各 handler 的载荷解析兜底）
           if (callbackQuery.data?.startsWith("d:")) {
             await handleDeluserCallback(env, botId, callbackQuery);
@@ -153,7 +153,7 @@ export async function handleWebhook(
         console.warn(`[webhook] update ${updateId}: classify=${kind} 但 callback_query 缺失`);
       }
     } else if (kind === "broadcast") {
-      // 全用户广播（2026-10-09）：客服群 General 专用 /broadcast——update_id 是
+      // 全用户广播：客服群 General 专用 /broadcast——update_id 是
       // 广播行的幂等锚点（source_update_id），随消息一并传入
       const message = update.message as TelegramMessageRef | undefined;
       if (message) await handleBroadcastCommand(env, botId, updateId, message);
@@ -177,9 +177,9 @@ export async function handleWebhook(
     }
   } catch (error) {
     // retryable：保持 processing 返回 500，交由 Telegram 重推 + 状态机接管。
-    // 部分成功窗口（design.md 已知代价）：若失败前 sendMessage 实际已送达，
+    // 部分成功窗口（已知代价）：若失败前 sendMessage 实际已送达，
     // 60s 过期接管后会重发一次——at-least-once 的代价，绝不提前标记
-    // processed 掩盖失败而丢消息（p1.md 警示；行为由
+    // processed 掩盖失败而丢消息（行为由
     // test/webhook-route.test.ts「部分成功窗口」用例固化）。callback 分支
     // 同理：答题链 retryable 抛出 → 重推收敛到「题目已失效」分支（幂等）。
     const detail = error instanceof Error ? error.message : String(error);

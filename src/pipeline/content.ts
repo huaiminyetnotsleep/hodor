@@ -1,11 +1,11 @@
 /**
- * 内容抽取与中继分发（T22，design.md「模块与数据流」§一.1）。
+ * 内容抽取与中继分发。
  *
  * - extractContent：把不可信的 message 媒体/文本字段校验并归一为
- *   ContentPayload。支持集固定 8 类（text + 7 媒体，audio 于 2026-09-30
- *   真机验收按用户要求纳入）；支持集之外（video_note / contact /
+ *   ContentPayload。支持集固定 8 类（text + 7 媒体，含 audio）
+ *）；支持集之外（video_note / contact /
  *   location / poll / dice / 空 text 无媒体…）一律返回 null = 受控静默
- *   忽略（沿用阶段 2「先于一切副作用」语义，首条此类消息不建档不建 topic，
+ *   忽略（「先于一切副作用」语义，首条此类消息不建档不建 topic，
  *   update 仍按成功处理）。
  * - relayContent：按 type 分发到 client 对应 send 方法（per-type send 按
  *   file_id 直传，绝不下载内容）；threadId 存在时带 message_thread_id
@@ -15,7 +15,7 @@
 import type { TelegramClient, TelegramResult } from "../telegram/types";
 import type { TelegramMessageRef } from "./classify";
 
-/** 支持集固定 8 类（T22 + audio 增补）：扩展留待需要时（design.md「明确不做」） */
+/** 支持集固定 8 类：扩展留待需要时 */
 export type ContentType =
   | "text"
   | "photo"
@@ -64,7 +64,7 @@ function nonEmptyText(value: unknown): string | undefined {
  *
  * 探测顺序 text → photo → video → animation → document → voice → audio →
  * sticker：Telegram 单条消息只携带一种媒体，顺序只为确定性（不可信输入
- * 逐字段校验）。audio 紧随 voice（同为声音类，2026-09-30 真机验收纳入）。
+ * 逐字段校验）。audio 紧随 voice（同为声音类）。
  * photo 取最大尺寸（width 最大，并列取后者）的 file_id。
  */
 export function extractContent(message: TelegramMessageRef): ContentPayload | null {

@@ -1,5 +1,5 @@
 /**
- * 验证页面渲染（Turnstile 任务；design.md §4「GET /verify」）。
+ * 验证页面渲染（GET /verify）。
  *
  * 纯函数模块：只产出 HTML 与 CSP nonce，不发请求、不读库；路由层负责
  * no-store / Referrer-Policy / nosniff / CSP 响应头。

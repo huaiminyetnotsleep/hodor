@@ -10,13 +10,13 @@ export default {
 
     if (request.method === "GET" && pathname === "/health") return handleHealth();
 
-    // 完整自检（T07，阶段 7）：公开只读（与 /health 同无鉴权），逐项检查
+    // 完整自检：公开只读（与 /health 同无鉴权），逐项检查
     // env / 验证配置 / 八表 / webhook 绑定；非 GET 自然落 404（极薄路由，逻辑在 routes 层）
     if (request.method === "GET" && pathname === "/selfcheck") {
       return handleSelfCheck(request, env);
     }
 
-    // Turnstile 验证页面（2026-10-09 任务）：Mini App 入口（web_app 按钮）与
+    // Turnstile 验证页面：Mini App 入口（web_app 按钮）与
     // 唯一完成 API。GET /verify?r=<nonce> 只发安全静态页面；POST 提交身份 +
     // token，全部校验在 routes/verify 层。非约定方法自然落 404。
     if (request.method === "GET" && pathname === "/verify") {

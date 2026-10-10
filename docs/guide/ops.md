@@ -178,7 +178,7 @@ LIMIT 20;
 | --- | --- |
 | `/setwebhook` 回显 `setWebhook HTTP 400: … Failed to resolve host: Temporary failure in name resolution` | Telegram 侧解析不了 webhook 主机名（Hodor 把访问 setwebhook 所用的域名原样注册）：① 确认 Worker 设置 → 域和路由 中 **workers.dev 路由已启用**，且用的是公开 `https://hodor.<子域>.workers.dev` 地址（而非 localhost / 内网 IP / 自定义域）；② 新启用 / 新注册的 workers.dev 子域需数分钟 DNS 传播，`dig <主机名>` 或 dnschecker.org 确认全球可解析后重试 setwebhook（setWebhook 为覆盖式写入，重试安全；2026-10-09 真机验收实测） |
 | bot 完全无响应 | ① 先确认 webhook 已绑定：访问 `/setwebhook/<ADMIN_SECRET>` 回显身份即已绑定（或看完整自检 `GET /selfcheck`：未绑定 / 指向错误会在 `failed` 中逐条点名）；② `npx wrangler tail hodor` 实时日志看请求是否到达、有无 401——secret 头不符说明 `TELEGRAM_WEBHOOK_SECRET` 与注册时不一致，重新 setwebhook；③ 日志无请求 = Telegram 侧未推送，检查 webhook 绑定 |
-| 消息进群但为空 / 报 sendMessage 400 | `wrangler tail` 看具体 API 报错文案；若为「message to copy not found」类，参考 T21 运行时说明（[TODO](/todo/p1.md)） |
+| 消息进群但为空 / 报 sendMessage 400 | `wrangler tail` 看具体 API 报错文案，按 Telegram Bot API 的错误说明定位；权限类问题补齐 bot 群权限后重试 |
 | 验证码收不到 | 用户是否已被 ban（封禁门不发出题）；日志中 sendMessage 是否报 403（用户已停用 / 拉黑 bot）；60 秒内重复消息受提示频控限制（每分钟最多 1 次提示） |
 | `/verifymode_turnstile` 回复「无法切换…缺少必需配置」 | 面板 Worker → 变量和机密 补齐 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`（成对配置），`/selfcheck` 核对后在客服群 General 重试；申请流程见[部署指南](/guide/deploy.md#turnstile) |
 | 验证页面显示「请从 Bot 聊天窗口的…按钮打开本页」 | 链接在 Telegram 外打开（拿不到 Telegram 签名身份）或会话已失效：回到 Bot 私聊点「打开验证页面」按钮重开——这是唯一支持的入口 |

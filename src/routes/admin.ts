@@ -1,5 +1,5 @@
 /**
- * 管理端点（T13 / T14 + T34 验收增量命令菜单）：GET /setwebhook/<ADMIN_SECRET>、
+ * 管理端点：GET /setwebhook/<ADMIN_SECRET>、
  * GET /deletewebhook/<ADMIN_SECRET>。
  *
  * 鉴权约定（docs/guide/architecture.md）：路径段密钥比较用常量时间
@@ -10,7 +10,7 @@
  * （分类层只回传方法名 / 状态 / 信封 description，绝不含 token）；
  * 管理端点是人看的，无重投递机制，retryable 附提示即可。
  *
- * 命令菜单（T34 验收增量，best-effort）：setwebhook 成功后把
+ * 命令菜单（best-effort）：setwebhook 成功后把
  * ADMIN_COMMAND_MENU 注册到客服群 scope（setMyCommands）；deletewebhook
  * 对称清理（deleteMyCommands）。失败仅 warn + 回显注明，绝不影响
  * webhook 绑定结果；env 无 SUPPORT_CHAT_ID → 跳过注册。
@@ -82,7 +82,7 @@ export async function handleSetWebhook(
   const hook = await client.setWebhook({
     url: webhookUrl,
     secretToken: env.TELEGRAM_WEBHOOK_SECRET,
-    // message 供阶段 2 双向中继；callback_query 供阶段 4 验证码回调，
+    // message 供双向中继；callback_query 供验证码回调，
     // 一次绑定性配齐，多余类型在 classify 安全忽略
     allowedUpdates: ["message", "callback_query"],
   });
@@ -97,7 +97,7 @@ export async function handleSetWebhook(
     displayName: me.result.first_name ?? "",
   });
 
-  /* ---------------- 命令菜单注册（T34 验收增量，best-effort） ---------------- */
+  /* ---------------- 命令菜单注册（best-effort） ---------------- */
   const commands = await registerCommandMenu(client, env);
 
   return Response.json({
@@ -151,7 +151,7 @@ export async function handleDeleteWebhook(
   const result = await client.deleteWebhook();
   if (!result.ok) return telegramFailure("deleteWebhook", result);
 
-  // 命令菜单对称清理（T34 验收增量，best-effort）：与注册同一 scope；
+  // 命令菜单对称清理（best-effort）：与注册同一 scope；
   // webhook 已解绑，菜单清理失败只影响点选体验——warn 即可，不改变 200
   const supportChatId = parseSupportChatId(env);
   if (supportChatId !== null) {

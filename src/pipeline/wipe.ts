@@ -1,5 +1,5 @@
 /**
- * /wipealldata 确认回调管线（T40，design.md §6 新语义）：客服群内警告消息
+ * /wipealldata 确认回调管线：客服群内警告消息
  * 按钮的点击处理（classify=group_callback 派发到本模块）。
  *
  * 无状态两步确认：确认窗口编入 callback_data（`w:yes:<unix秒>` / `w:no:<unix秒>`），

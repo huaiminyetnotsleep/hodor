@@ -31,7 +31,7 @@ export type TelegramError = {
 export type TelegramResult<T> = TelegramOk<T> | TelegramError;
 
 /* ------------------------------------------------------------------ */
-/* 本阶段（阶段 2 MVP）所需的 6 个 API 方法的入参 / 出参最小类型子集 */
+/* 基础消息与 webhook 方法的入参 / 出参最小类型子集 */
 /* ------------------------------------------------------------------ */
 
 /** getMe 返回的 bot 身份（字段按 Telegram User 信封蛇形命名） */
@@ -48,13 +48,13 @@ export interface SetWebhookParams {
   url: string;
   /** 注册到 Telegram 的 secret_token（TELEGRAM_WEBHOOK_SECRET） */
   secretToken: string;
-  /** 只订阅的 update 类型；阶段 4 验证码回调无需重新绑定 */
+  /** 只订阅的 update 类型；含回调类型，无需重新绑定 */
   allowedUpdates: string[];
 }
 
 /** copyMessage 入参（与 Telegram API 参数一一对应）
- *  （阶段 2 管线已不调用：copyMessage 在生产 bot 上全场景 400
- *  「message to copy not found」，2026-09-30 实测；T22 / 阶段 3 重审媒体路径） */
+ *  （当前管线已不调用：copyMessage 在生产 bot 上曾全场景 400
+ *  「message to copy not found」（账号级异常，实测）；媒体中继已改用 per-type send） */
 export interface CopyMessageParams {
   from_chat_id: number;
   from_message_id: number;
@@ -69,7 +69,7 @@ export interface CopyMessageResult {
 }
 
 /**
- * inline 键盘按钮（Turnstile 任务起为互斥联合类型）：
+ * inline 键盘按钮（互斥联合类型）：
  * - callback_data：题面选项按钮（验证题 "v:<值>"，普通回调）；
  * - web_app：Mini App 入口按钮（官方约束：仅可用于用户与 Bot 的私聊）——
  *   Turnstile 验证模式用它在私聊打开 /verify 页面；与 callback_data 互斥，
@@ -80,24 +80,24 @@ export type InlineKeyboardButton =
   | { text: string; web_app: { url: string } };
 
 /**
- * reply_markup 最小子集：inline 键盘（T27 验证题选项按钮）。
+ * reply_markup 最小子集：inline 键盘（验证题选项按钮）。
  * 纯透传字段（可选）——既有调用不携带时零影响。
  */
 export interface InlineKeyboardMarkup {
   inline_keyboard: InlineKeyboardButton[][];
 }
 
-/** sendMessage 入参：阶段 2 文本中继的实际通道 */
+/** sendMessage 入参：文本中继的实际通道 */
 export interface SendMessageParams {
   chat_id: number;
-  /** 纯文本内容（阶段 2 仅中继 message.text 非空） */
+  /** 纯文本内容（仅中继 message.text 非空） */
   text: string;
   /** 入站带 thread（送达客服群 topic）；出站私聊不传 */
   message_thread_id?: number;
-  /** inline 键盘（T27 验证题按钮）；中继等既有路径不传 */
+  /** inline 键盘（验证题按钮）；中继等既有路径不传 */
   reply_markup?: InlineKeyboardMarkup;
   /**
-   * 受限解析模式（全用户广播专用，2026-10-09 任务）：仅广播公告传 "HTML"
+   * 受限解析模式（全用户广播专用）：仅广播公告传 "HTML"
    * （标签全部由系统生成、内容已转义，见 pipeline/broadcastFormat.ts）；
    * 普通中继等既有路径不传——保持纯文本语义零变化。
    */
@@ -115,13 +115,13 @@ export interface SendMessageResult {
 }
 
 /** forwardMessage 入参：注意参数名是 message_id（不是 copyMessage 的 from_message_id）。
- *  当前管线未调用（2026-09-30 定稿：入站文本用 sendMessage 干净渲染）——
- *  保留备用，T22 媒体阶段的「带身份」备选；生产实测支持 message_thread_id。 */
+ *  当前管线未调用（入站文本用 sendMessage 干净渲染）——
+ *  保留备用的「带身份」转发通道；生产实测支持 message_thread_id。 */
 export interface ForwardMessageParams {
   chat_id: number;
   from_chat_id: number;
   message_id: number;
-  /** 转发落进客服群对应 topic；2026-09-30 生产实测支持 */
+  /** 转发落进客服群对应 topic；生产实测支持 */
   message_thread_id?: number;
 }
 
@@ -149,17 +149,17 @@ export interface DeleteForumTopicParams {
 }
 
 /* ------------------------------------------------------------------ */
-/* 阶段 6（T38–T39）：topic 开关 + 消息删除                              */
+/* topic 开关与消息删除方法                                              */
 /* ------------------------------------------------------------------ */
 
-/** closeForumTopic 入参（原生 topic 状态同步 / T38 archive 软归档） */
+/** closeForumTopic 入参（原生 topic 状态同步 / archive 软归档） */
 export interface CloseForumTopicParams {
   chat_id: number;
   message_thread_id: number;
 }
 
 /**
- * reopenForumTopic 入参（T38 重开链路：closed 行复用前真重开——阶段 6 起
+ * reopenForumTopic 入参（重开链路：closed 行复用前真重开——
  * 原生 close / /archive 真关闭 TG topic，仅改 DB 状态不再够用）
  */
 export interface ReopenForumTopicParams {
@@ -167,14 +167,14 @@ export interface ReopenForumTopicParams {
   message_thread_id: number;
 }
 
-/** deleteMessage 入参（T39 /purgemsg：按账本 group_msg_id 逐条删除） */
+/** deleteMessage 入参（/purgemsg：按账本 group_msg_id 逐条删除） */
 export interface DeleteMessageParams {
   chat_id: number;
   message_id: number;
 }
 
 /* ------------------------------------------------------------------ */
-/* T22 / T24（阶段 3）：媒体 per-type send + 置顶/编辑 8 方法          */
+/* 媒体 per-type send + 置顶 / 编辑方法                              */
 /* ------------------------------------------------------------------ */
 
 /** 统一出参最小子集：send* / editMessageText 只取新消息 ID（复用同一形状） */
@@ -209,7 +209,7 @@ export interface SendVoiceParams {
   message_thread_id?: number;
 }
 
-/** 音频（音乐文件）：2026-09-30 真机验收按用户要求纳入支持集；title/performer 元数据不透传 */
+/** 音频（音乐文件）；title/performer 元数据不透传 */
 export interface SendAudioParams {
   chat_id: number;
   audio: string;
@@ -243,17 +243,17 @@ export interface PinChatMessageParams {
   message_id: number;
 }
 
-/** editMessageText 入参：T24 昵称变更刷新置顶信息 / T27 验证题重出与通过提示用 */
+/** editMessageText 入参：昵称变更刷新置顶信息 / 验证题重出与通过提示用 */
 export interface EditMessageTextParams {
   chat_id: number;
   message_id: number;
   text: string;
-  /** inline 键盘（T27 答错重出新题的按钮）；刷新置顶等既有路径不传 */
+  /** inline 键盘（答错重出新题的按钮）；刷新置顶等既有路径不传 */
   reply_markup?: InlineKeyboardMarkup;
 }
 
 /**
- * answerCallbackQuery 入参（T27）：终止客户端按钮加载态 + 可选 toast 提示。
+ * answerCallbackQuery 入参：终止客户端按钮加载态 + 可选 toast 提示。
  * callbackQueryId 即 update.callback_query.id（Telegram 单次消费）。
  */
 export interface AnswerCallbackQueryParams {
@@ -263,7 +263,7 @@ export interface AnswerCallbackQueryParams {
 }
 
 /* ------------------------------------------------------------------ */
-/* T34 验收增量：命令菜单（setMyCommands / deleteMyCommands）           */
+/* 命令菜单（setMyCommands / deleteMyCommands）                       */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -289,7 +289,7 @@ export interface DeleteMyCommandsParams {
 }
 
 /* ------------------------------------------------------------------ */
-/* T07（阶段 7）：getWebhookInfo —— /selfcheck 完整自检                  */
+/* getWebhookInfo —— /selfcheck 完整自检                            */
 /* ------------------------------------------------------------------ */
 
 /**

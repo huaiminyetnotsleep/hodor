@@ -29,49 +29,49 @@ function envWith(overrides: Record<string, string | undefined>): Cloudflare.Env 
 }
 
 describe("parseSupportChatId", () => {
-  it("合法 -100 前缀 → 数值", () => {
+ it("合法 -100 前缀 → 数值", () => {
     expect(parseSupportChatId(envWith({ SUPPORT_CHAT_ID: "-1001234567890" }))).toBe(-1001234567890);
     expect(parseSupportChatId(envWith({ SUPPORT_CHAT_ID: " -1009876543210 " }))).toBe(-1009876543210);
   });
 
-  it("缺少 -100 前缀 → null", () => {
+ it("缺少 -100 前缀 → null", () => {
     expect(parseSupportChatId(envWith({ SUPPORT_CHAT_ID: "1234567890" }))).toBeNull();
     expect(parseSupportChatId(envWith({ SUPPORT_CHAT_ID: "-1234567890" }))).toBeNull();
     expect(parseSupportChatId(envWith({ SUPPORT_CHAT_ID: "-10" }))).toBeNull();
   });
 
-  it("畸形值 → null", () => {
+ it("畸形值 → null", () => {
     expect(parseSupportChatId(envWith({ SUPPORT_CHAT_ID: "-100abc" }))).toBeNull();
     expect(parseSupportChatId(envWith({ SUPPORT_CHAT_ID: "-100.5" }))).toBeNull();
     expect(parseSupportChatId(envWith({ SUPPORT_CHAT_ID: "" }))).toBeNull();
     expect(parseSupportChatId(envWith({ SUPPORT_CHAT_ID: "not-a-chat" }))).toBeNull();
   });
 
-  it("变量缺失（binding 缺席）→ null", () => {
+ it("变量缺失（binding 缺席）→ null", () => {
     expect(parseSupportChatId(envWith({ SUPPORT_CHAT_ID: undefined }))).toBeNull();
   });
 });
 
 describe("parseAdminIds", () => {
-  it("逗号分隔多值 → 数组", () => {
+ it("逗号分隔多值 → 数组", () => {
     expect(parseAdminIds(envWith({ ADMIN_IDS: "111111111,222222222" }))).toEqual([
       111111111, 222222222,
     ]);
   });
 
-  it("空白容忍（逐 token trim）", () => {
+ it("空白容忍（逐 token trim）", () => {
     expect(parseAdminIds(envWith({ ADMIN_IDS: " 111111111 ,  222222222 " }))).toEqual([
       111111111, 222222222,
     ]);
   });
 
-  it("非法 token 跳过，不致命", () => {
+ it("非法 token 跳过，不致命", () => {
     expect(parseAdminIds(envWith({ ADMIN_IDS: "111111111,abc,,3.5,222222222" }))).toEqual([
       111111111, 222222222,
     ]);
   });
 
-  it("空 / 缺失 → []（无管理员）", () => {
+ it("空 / 缺失 → []（无管理员）", () => {
     expect(parseAdminIds(envWith({ ADMIN_IDS: "" }))).toEqual([]);
     expect(parseAdminIds(envWith({ ADMIN_IDS: undefined }))).toEqual([]);
     expect(parseAdminIds(envWith({ ADMIN_IDS: " , ," }))).toEqual([]);
@@ -79,18 +79,18 @@ describe("parseAdminIds", () => {
 });
 
 describe("parseMaxAttempts", () => {
-  it("合法正整数 → 原值", () => {
+ it("合法正整数 → 原值", () => {
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: "5" }))).toBe(5);
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: "1" }))).toBe(1);
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: " 3 " }))).toBe(3);
   });
 
-  it("缺失 / 空串 → 缺省 3（对齐 docs/guide/deploy.md）", () => {
+ it("缺失 / 空串 → 缺省 3（对齐 docs/guide/deploy.md）", () => {
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: undefined }))).toBe(3);
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: "" }))).toBe(3);
   });
 
-  it("非法 / 非正整数 → 缺省 3（先解析，不轻信输入）", () => {
+ it("非法 / 非正整数 → 缺省 3（先解析，不轻信输入）", () => {
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: "abc" }))).toBe(3);
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: "0" }))).toBe(3);
     expect(parseMaxAttempts(envWith({ MAX_ATTEMPTS: "-2" }))).toBe(3);
@@ -99,18 +99,18 @@ describe("parseMaxAttempts", () => {
 });
 
 describe("parseMaxMessagesPerMinute", () => {
-  it("合法正整数 → 原值", () => {
+ it("合法正整数 → 原值", () => {
     expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: "3" }))).toBe(3);
     expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: "1" }))).toBe(1);
     expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: " 20 " }))).toBe(20);
   });
 
-  it("缺失 / 空串 → 缺省 20（对齐 docs/guide/deploy.md 变量表）", () => {
+ it("缺失 / 空串 → 缺省 20（对齐 docs/guide/deploy.md 变量表）", () => {
     expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: undefined }))).toBe(20);
     expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: "" }))).toBe(20);
   });
 
-  it("非法 / 非正整数 → 缺省 20（先解析，不轻信输入——超限文案数字来源于此）", () => {
+ it("非法 / 非正整数 → 缺省 20（先解析，不轻信输入——超限文案数字来源于此）", () => {
     expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: "abc" }))).toBe(20);
     expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: "0" }))).toBe(20);
     expect(parseMaxMessagesPerMinute(envWith({ MAX_MESSAGES_PER_MINUTE: "-5" }))).toBe(20);
@@ -119,47 +119,47 @@ describe("parseMaxMessagesPerMinute", () => {
 });
 
 describe("parseWelcomeText", () => {
-  it("变量缺失（binding 缺席）→ null（调用方兜底默认文案）", () => {
+ it("变量缺失（binding 缺席）→ null（调用方兜底默认文案）", () => {
     expect(parseWelcomeText(envWith({ WELCOME_TEXT: undefined }))).toBeNull();
   });
 
-  it("空串 / 纯空白（trim 后为空）→ null", () => {
+ it("空串 / 纯空白（trim 后为空）→ null", () => {
     expect(parseWelcomeText(envWith({ WELCOME_TEXT: "" }))).toBeNull();
     expect(parseWelcomeText(envWith({ WELCOME_TEXT: "   \n  " }))).toBeNull();
   });
 
-  it("自定义文案含字面 \\n（反斜杠 n 序列）→ 解释为真实换行", () => {
+ it("自定义文案含字面 \\n（反斜杠 n 序列）→ 解释为真实换行", () => {
     expect(parseWelcomeText(envWith({ WELCOME_TEXT: "第一行\\n第二行\\n第三行" }))).toBe(
       "第一行\n第二行\n第三行",
     );
   });
 
-  it("真实换行原样保留，与字面 \\n 混用不重复解释", () => {
-    // 源串含一个真实换行 + 一个字面 \n → 各自一个换行，替换后不叠加
+ it("真实换行原样保留，与字面 \\n 混用不重复解释", () => {
+ // 源串含一个真实换行 + 一个字面 \n → 各自一个换行，替换后不叠加
     expect(parseWelcomeText(envWith({ WELCOME_TEXT: "a\nb\\nc" }))).toBe("a\nb\nc");
   });
 
-  it("前后空白 trim 后返回", () => {
+ it("前后空白 trim 后返回", () => {
     expect(parseWelcomeText(envWith({ WELCOME_TEXT: "  你好，欢迎咨询  " }))).toBe("你好，欢迎咨询");
   });
 });
 
-describe("parseVerifyTtlHours（T33 验证有效期）", () => {
-  it("合法非负整数 → 原值（含 0 = 永久有效）", () => {
+describe("parseVerifyTtlHours（验证有效期）", () => {
+ it("合法非负整数 → 原值（含 0 = 永久有效）", () => {
     expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "1" }))).toBe(1);
     expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "24" }))).toBe(24);
     expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: " 8 " }))).toBe(8);
-    // 0 是合法值（永不重验），不与「非法回退 0」歧义
+ // 0 是合法值（永不重验），不与「非法回退 0」歧义
     expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "0" }))).toBe(0);
   });
 
-  it("缺失 / 空串 → 缺省 0（对齐 docs/guide/deploy.md 变量表）", () => {
+ it("缺失 / 空串 → 缺省 0（对齐 docs/guide/deploy.md 变量表）", () => {
     expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: undefined }))).toBe(0);
     expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "" }))).toBe(0);
     expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "   " }))).toBe(0);
   });
 
-  it("负数 / 非整数 / 非法 → 回退 0（先解析，不轻信输入）", () => {
+ it("负数 / 非整数 / 非法 → 回退 0（先解析，不轻信输入）", () => {
     expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "-1" }))).toBe(0);
     expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "-0.5" }))).toBe(0);
     expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "2.5" }))).toBe(0);
@@ -168,53 +168,53 @@ describe("parseVerifyTtlHours（T33 验证有效期）", () => {
 });
 
 describe("parsePublicBaseUrl（Turnstile 任务：验证页面固定公网地址）", () => {
-  it("合法 HTTPS origin（含根路径或不带路径）→ URL（仅 origin 被消费）", () => {
+ it("合法 HTTPS origin（含根路径或不带路径）→ URL（仅 origin 被消费）", () => {
     const plain = parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "https://hodor.example.workers.dev" }));
     expect(plain?.origin).toBe("https://hodor.example.workers.dev");
     const rooted = parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "https://verify.example.com/" }));
     expect(rooted?.origin).toBe("https://verify.example.com");
   });
 
-  it("缺失 / 空串 / 纯空白 → null（视同未配置，回退请求 origin）", () => {
+ it("缺失 / 空串 / 纯空白 → null（视同未配置，回退请求 origin）", () => {
     expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: undefined }))).toBeNull();
     expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "" }))).toBeNull();
     expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "   " }))).toBeNull();
   });
 
-  it("非 HTTPS（http / 其他协议）→ null", () => {
+ it("非 HTTPS（http / 其他协议）→ null", () => {
     expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "http://hodor.example.com" }))).toBeNull();
     expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "ftp://hodor.example.com" }))).toBeNull();
     expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "//hodor.example.com" }))).toBeNull();
   });
 
-  it("凭据 / 查询 / 片段 / 深路径 → null（origin 之外一律拒绝）", () => {
+ it("凭据 / 查询 / 片段 / 深路径 → null（origin 之外一律拒绝）", () => {
     expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "https://user:pass@hodor.example.com" }))).toBeNull();
     expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "https://hodor.example.com/?x=1" }))).toBeNull();
     expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "https://hodor.example.com/#frag" }))).toBeNull();
     expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "https://hodor.example.com/verify" }))).toBeNull();
   });
 
-  it("非 URL 垃圾输入 → null（解析失败按未配置 + 诊断路径处理）", () => {
+ it("非 URL 垃圾输入 → null（解析失败按未配置 + 诊断路径处理）", () => {
     expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "not a url" }))).toBeNull();
     expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "hodor.example.com" }))).toBeNull();
   });
 });
 
 describe("timingSafeEqualStrings（SHA-256 摘要常量时间比较）", () => {
-  it("相等 → true", async () => {
+ it("相等 → true", async () => {
     await expect(timingSafeEqualStrings("secret-a", "secret-a")).resolves.toBe(true);
   });
 
-  it("不等（同长度）→ false", async () => {
+ it("不等（同长度）→ false", async () => {
     await expect(timingSafeEqualStrings("secret-a", "secret-b")).resolves.toBe(false);
   });
 
-  it("不等（不同长度）→ false：摘要定长，比较不泄漏长度信息", async () => {
+ it("不等（不同长度）→ false：摘要定长，比较不泄漏长度信息", async () => {
     await expect(timingSafeEqualStrings("abc", "ab")).resolves.toBe(false);
     await expect(timingSafeEqualStrings("ab", "abc")).resolves.toBe(false);
   });
 
-  it("空串：等 / 不等", async () => {
+ it("空串：等 / 不等", async () => {
     await expect(timingSafeEqualStrings("", "")).resolves.toBe(true);
     await expect(timingSafeEqualStrings("", "x")).resolves.toBe(false);
   });

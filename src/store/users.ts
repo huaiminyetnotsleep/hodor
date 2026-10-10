@@ -1,14 +1,14 @@
 /**
  * users 表 store：用户建档、展示缓存刷新、提示频控与治理门控原语。
  *
- * T19：首条消息即建档（无需 /start，无需文本——阶段 3 起媒体同权）；
+ * 首条消息即建档（无需 /start，文本与媒体同权）；
  * 每次消息刷新昵称缓存与 last_seen_at。
- * T23：claimNoticeSlot 用 last_notice_at 做「每用户每分钟最多 1 次」的
- * 提示频控（欢迎语；阶段 4 起验证码 / 禁言 / 超限提示复用同列）。
- * T27/T29/T35（阶段 4）：ensureUser 的既有 SELECT 顺带读出治理快照
+ * claimNoticeSlot 用 last_notice_at 做「每用户每分钟最多 1 次」的
+ * 提示频控（欢迎语 / 验证码 / 禁言 / 超限提示共用同列）。
+ * ensureUser 的既有 SELECT 顺带读出治理快照
  * （封禁 / 验证 / 题目字段）；验证态、封禁态与限频窗口的全部变更收口在
  * 本模块的专用原子 setter / 计数器——流水线绝不手写治理列 UPDATE。
- * T37/T32（阶段 5）：快照顺带读出 is_risk / verified_at（高危提醒与
+ * 快照顺带读出 is_risk / verified_at（高危提醒与
  * TTL 判定的数据源）；setRisk / claimRiskNoticeSlot（24 小时一次性
  * 提醒窗口）；clearAllPendingVerifications（/verifymode 切换作废旧题）。
  *
@@ -37,11 +37,11 @@ export interface GovernanceSnapshot {
   isVerified: boolean;
   /**
    * 高危标记（users.is_risk）：置顶「高危」行与 topic 内 24 小时一次性
-   * 提醒（claimRiskNoticeSlot）的数据源（T37）
+   * 提醒（claimRiskNoticeSlot）的数据源
    */
   isRisk: boolean;
   /**
-   * 验证通过时间（users.verified_at）：T33 VERIFY_TTL_HOURS 过期判定用
+   * 验证通过时间（users.verified_at）：VERIFY_TTL_HOURS 过期判定用
    * （字典序比较，util 契约）；未验证 / 已撤销 → null
    */
   verifiedAt: string | null;
@@ -72,13 +72,13 @@ export interface EnsureUserResult extends GovernanceSnapshot {
   displayChanged: boolean;
 }
 
-/** 提示频控窗口：每用户每 60 秒最多赢得 1 个 notice slot（T23） */
+/** 提示频控窗口：每用户每 60 秒最多赢得 1 个 notice slot */
 export const NOTICE_SLOT_WINDOW_MS = 60_000;
 
-/** 限频固定窗口长度：距 rate_window_start ≥ 60s 即重置计数（T29） */
+/** 限频固定窗口长度：距 rate_window_start ≥ 60s 即重置计数 */
 export const RATE_WINDOW_MS = 60_000;
 
-/** 高危提醒窗口：同一高危用户 24 小时内最多提醒 1 次（T37） */
+/** 高危提醒窗口：同一高危用户 24 小时内最多提醒 1 次 */
 export const RISK_NOTICE_WINDOW_MS = 24 * 3600_000;
 
 /**
@@ -157,7 +157,7 @@ export async function ensureUser(
     existing.last_name !== lastName ||
     existing.username !== username;
   if (displayChanged) {
-    // 原阶段 2 的 upsert 更新分支：只覆盖展示缓存与活跃时间
+    // upsert 更新分支：只覆盖展示缓存与活跃时间
     await db
       .prepare(
         `INSERT INTO users (bot_id, user_id, first_name, last_name, username, last_seen_at)
@@ -246,7 +246,7 @@ export async function getGovernanceSnapshot(
 }
 
 /**
- * 原子领取提示频控 slot（T23 欢迎语频控；T30 起全部 bot → 用户提示共享）：
+ * 原子领取提示频控 slot（全部 bot → 用户提示共享）：
  * `last_notice_at IS NULL 或 ≤ 60 秒前` 才允许写入当前时间——单条 UPDATE
  * 的 WHERE 即裁决，**无读-判-写竞态**；meta.changes === 1 即赢得本分钟窗口。
  *
@@ -269,14 +269,14 @@ export async function claimNoticeSlot(
 }
 
 /**
- * 原子领取高危提醒 slot（T37）：完全复刻 claimNoticeSlot 的原子模式——
+ * 原子领取高危提醒 slot：完全复刻 claimNoticeSlot 的原子模式——
  * 单条 UPDATE 的 WHERE 即裁决，**无读-判-写竞态**；meta.changes === 1 即
  * 赢得本 24 小时窗口（赢者负责发送 topic 内提醒）。
  *
  * WHERE 额外带 `is_risk = 1`：非高危（含 /unrisk 之后）永不赢得，调用方
  * 无需先判快照；`risk_notice_at IS NULL 或 ≤ 24 小时前` 才允许写入当前
  * 时间——NULL 即「从未提醒」，首条消息天然赢。/risk 重新标记时 setter
- * 已清空本列，窗口随之重置（下一条消息再提醒一次，PRD 语义）。
+ * 已清空本列，窗口随之重置（下一条消息再提醒一次）。
  */
 export async function claimRiskNoticeSlot(
   db: D1Database,
@@ -295,7 +295,7 @@ export async function claimRiskNoticeSlot(
 }
 
 /**
- * 落库 pending 验证题（T27 旧原语；Turnstile 任务起流水线不再使用——出题走
+ * 落库 pending 验证题（流水线不再使用——出题走
  * reserveVerificationRequest + attachVerifyMessage 的统一栅栏 CAS。本函数仅
  * 保留给测试播种 / 兼容场景：无条件覆盖 answer + msgId，不改栅栏四列）。
  */
@@ -314,7 +314,7 @@ export async function setPendingVerification(
 }
 
 /**
- * 标记验证通过（T27 旧入口，现仅测试播种 / 兼容保留——流水线的两条最终裁决
+ * 标记验证通过（仅测试播种 / 兼容保留——流水线的两条最终裁决
  * 走 completeCallbackVerification / completeTurnstileVerification 的条件 CAS）：
  * `is_verified 0→1 + verified_at + 清空题目字段与 Turnstile 四列`，
  * WHERE 带 `is_verified = 0` 使「是否发生转换」可辨（幂等重放返回 false）。
@@ -338,7 +338,7 @@ export async function markVerified(
 }
 
 /**
- * 撤销验证态（T29 超限重验 / T38 归档统一入口）：is_verified=0 + 清 verified_at
+ * 撤销验证态（超限重验 / 归档统一入口）：is_verified=0 + 清 verified_at
  * 与题目字段 + Turnstile 四列（归档 / TTL / 超限后不得残留任何可完成的挑战）。
  * 不动限频列——窗口重置由 countMessageInWindow 按时间自行判定。
  */
@@ -380,7 +380,7 @@ export async function clearAllPendingVerifications(db: D1Database): Promise<void
     .run();
 }
 
-/** 封禁 / 解禁（T35）：/ban /unban 命令的唯一写入口。
+/** 封禁 / 解禁：/ban /unban 命令的唯一写入口。
  *
  * /ban 在同一 UPDATE 内原子清空全部 pending 字段（题目 + Turnstile 四列）：
  * 不清 hash 的话 ban→unban 会让旧挑战（旧网页链接 / 旧题面）在解封后满足
@@ -409,7 +409,7 @@ export async function setBanned(
 }
 
 /**
- * 置用户 deleted 态（T38 /archive 的 DB 状态之一）：表示软归档，不删除 users 行，
+ * 置用户 deleted 态（/archive 的 DB 状态之一）：表示软归档，不删除 users 行，
  * 也不参与验证门判定；验证态由 markUnverified 单独清理。物理 /deluser 会删行。幂等 setter。
  */
 export async function markUserDeleted(
@@ -424,7 +424,7 @@ export async function markUserDeleted(
 }
 
 /**
- * 复位用户 active 态（T38 重开链路）：resolveTopic 重开 closed 行时的唯一
+ * 复位用户 active 态（重开链路）：resolveTopic 重开 closed 行时的唯一
  * 复位点（与 reopenTopic 成对），ensureUser 永不触碰 status 列（契约不变）。
  */
 export async function markUserActive(
@@ -439,10 +439,10 @@ export async function markUserActive(
 }
 
 /**
- * 高危标记 / 取消（T37）：/risk /unrisk 命令的唯一写入口。
+ * 高危标记 / 取消：/risk /unrisk 命令的唯一写入口。
  *
  * 单语句同时写 is_risk 与 risk_notice_at = NULL：置 1 清窗口使该用户
- * **下一条消息重新提醒一次**（重新标记 → 提示窗口重置，PRD 语义）；
+ * **下一条消息重新提醒一次**（重新标记 → 提示窗口重置）；
  * 置 0 一并清——行内不留悬空窗口（再 /risk 语义与首次标记完全一致）。
  */
 export async function setRisk(
@@ -460,9 +460,9 @@ export async function setRisk(
 }
 
 /**
- * 限频固定窗口计数（T29）：窗口内第 1..N 条放行，第 N+1 条拦截。
+ * 限频固定窗口计数：窗口内第 1..N 条放行，第 N+1 条拦截。
  *
- * 两条原子语句实现（design.md §二.3）：
+ * 两条原子语句实现：
  * ① 窗口过期（或从未计数）→ 重置窗口起点、计数置 1，changes=1 即放行；
  * ② 窗口内 → `rate_count + 1 WHERE rate_count < limit`，changes=1 放行，
  *    changes=0 即第 N+1 条 → 超限。单语句原子性（D1 串行化）保证并发下

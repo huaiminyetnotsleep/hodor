@@ -1,17 +1,17 @@
 /**
- * Turnstile 模式的验证管线集成用例（Turnstile 任务阶段 3）：
+ * Turnstile 模式的验证管线集成用例（Turnstile 任务）：
  *
  * - sendVerificationCode（turnstile）：web_app 按钮消息（URL = origin +
- *   /verify?r=<nonce>）+ 统一栅栏落库（hash=SHA-256(nonce)、600 秒到期、
- *   配置版本快照、answer 恒 NULL、CAS 回填 msgId）；
+ * /verify?r=<nonce>）+ 统一栅栏落库（hash=SHA-256(nonce)、600 秒到期、
+ * 配置版本快照、answer 恒 NULL、CAS 回填 msgId）；
  * - PUBLIC_BASE_URL 有效时优先（固定 canonical 地址）；请求 origin 兜底；
  * - 关闭验证期间 / 凭据缺失：不发无法完成的 Mini App 请求（零出站、零 pending）；
- * - math 模式统一栅栏回归：题面 / 按钮形态与阶段 5 逐字一致，同时落
- *   hash/generation 栅栏（CAS 回填）；关闭期间超限出题照常（栅栏匹配
- *   实际 enabled=false 的配置快照）；
+ * - math 模式统一栅栏回归：题面 / 按钮形态与 逐字一致，同时落
+ * hash/generation 栅栏（CAS 回填）；关闭期间超限出题照常（栅栏匹配
+ * 实际 enabled=false 的配置快照）；
  * - 失败清理：发送 retryable → 抛 + 栅栏清理；permanent → 静默 + 栅栏清理；
  * - inbound 集成：turnstile + 验证关闭期间的超限路径——撤验证照常、
- *   Mini App 请求不发（无法完成），旧 math 模式行为零变化由既有回归覆盖。
+ * Mini App 请求不发（无法完成），旧 math 模式行为零变化由既有回归覆盖。
  */
 import { applyD1Migrations, env } from "cloudflare:test";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -92,7 +92,7 @@ describe("turnstile 管线: sendVerificationCode（turnstile 模式）", () => {
     return env.HODOR_DB.prepare("DELETE FROM settings").run();
   });
 
-  it("web_app 按钮消息（origin/verify?r=<nonce>）+ 栅栏落库：hash=SHA-256(nonce)、600s 到期、版本快照、answer NULL、msgId 回填", async () => {
+ it("web_app 按钮消息（origin/verify?r=<nonce>）+ 栅栏落库：hash=SHA-256(nonce)、600s 到期、版本快照、answer NULL、msgId 回填", async () => {
     await seedUnverified(8801);
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 4400 } } });
     const beforeGen = (await getVerificationSettings(env.HODOR_DB)).verifyGeneration;
@@ -119,11 +119,11 @@ describe("turnstile 管线: sendVerificationCode（turnstile 模式）", () => {
     expect(row!.verify_msg_id).toBe(4400); // CAS 回填
     expect(row!.verify_answer).toBeNull(); // 网页请求无整数答案
     expect(row!.verify_request_generation).toBe(beforeGen); // 配置版本快照
-    // 到期 ≈ 创建 + 600 秒（ISO 字典序比较，util 契约——晚于现在即有效）
+ // 到期 ≈ 创建 + 600 秒（ISO 字典序比较，util 契约——晚于现在即有效）
     expect(row!.verify_request_expires_at! > new Date().toISOString()).toBe(true);
   });
 
-  it("PUBLIC_BASE_URL 有效时优先（固定 canonical 地址），覆盖请求 origin", async () => {
+ it("PUBLIC_BASE_URL 有效时优先（固定 canonical 地址），覆盖请求 origin", async () => {
     await seedUnverified(8802);
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 4401 } } });
 
@@ -141,7 +141,7 @@ describe("turnstile 管线: sendVerificationCode（turnstile 模式）", () => {
     expect(url.startsWith("https://verify.canonical.example/verify?r=")).toBe(true);
   });
 
-  it("非法 PUBLIC_BASE_URL（http）→ 视同未配置：回退请求 origin，照常出题", async () => {
+ it("非法 PUBLIC_BASE_URL（http）→ 视同未配置：回退请求 origin，照常出题", async () => {
     await seedUnverified(8803);
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 4402 } } });
 
@@ -158,7 +158,7 @@ describe("turnstile 管线: sendVerificationCode（turnstile 模式）", () => {
     expect(url.inline_keyboard[0][0].web_app!.url!.startsWith(`${ORIGIN}/verify?r=`)).toBe(true);
   });
 
-  it("超限形态：限频前缀 + 同一 web_app 按钮（单 push 合并）", async () => {
+ it("超限形态：限频前缀 + 同一 web_app 按钮（单 push 合并）", async () => {
     await seedUnverified(8804);
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 4403 } } });
 
@@ -168,7 +168,7 @@ describe("turnstile 管线: sendVerificationCode（turnstile 模式）", () => {
     expect((body.text as string)).toContain("每分钟最多 7 条");
   });
 
-  it("验证关闭期间：零出站、零 pending（绝不发无法完成的 Mini App 请求）", async () => {
+ it("验证关闭期间：零出站、零 pending（绝不发无法完成的 Mini App 请求）", async () => {
     await applyVerificationConfigChange(env.HODOR_DB, { enabled: false });
     await seedUnverified(8805);
 
@@ -179,7 +179,7 @@ describe("turnstile 管线: sendVerificationCode（turnstile 模式）", () => {
     expect((await readRow(8805))!.verify_request_hash).toBeNull();
   });
 
-  it("凭据缺失（只配 Site Key）：零出站、零 pending（绝不降级弱模式）", async () => {
+ it("凭据缺失（只配 Site Key）：零出站、零 pending（绝不降级弱模式）", async () => {
     await seedUnverified(8806);
     const missingSecret = envWith({ TURNSTILE_SECRET_KEY: "" });
 
@@ -190,7 +190,7 @@ describe("turnstile 管线: sendVerificationCode（turnstile 模式）", () => {
     expect((await readRow(8806))!.verify_request_hash).toBeNull();
   });
 
-  it("发送 retryable → 抛出且栅栏清理（重推重出题）", async () => {
+ it("发送 retryable → 抛出且栅栏清理（重推重出题）", async () => {
     await seedUnverified(8807);
     stub.always("sendMessage", { status: 503, json: { ok: false, description: "upstream boom" } });
 
@@ -202,7 +202,7 @@ describe("turnstile 管线: sendVerificationCode（turnstile 模式）", () => {
     expect(row!.verify_msg_id).toBeNull();
   });
 
-  it("发送 permanent（bot 被屏蔽）→ 静默完成且栅栏清理（题未送达不留 pending）", async () => {
+ it("发送 permanent（bot 被屏蔽）→ 静默完成且栅栏清理（题未送达不留 pending）", async () => {
     await seedUnverified(8808);
     stub.always("sendMessage", {
       status: 403,
@@ -227,7 +227,7 @@ describe("turnstile 管线: math 模式统一栅栏回归（旧行为零变化 +
     return env.HODOR_DB.prepare("DELETE FROM settings").run();
   });
 
-  it("math 出题：题面与阶段 5 逐字一致（4 选项 + 题头），同时落 hash/generation 栅栏并回填 msgId", async () => {
+ it("math 出题：题面与 逐字一致（4 选项 + 题头），同时落 hash/generation 栅栏并回填 msgId", async () => {
     await seedUnverified(8811);
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 4500 } } });
     const beforeGen = (await getVerificationSettings(env.HODOR_DB)).verifyGeneration;
@@ -246,11 +246,11 @@ describe("turnstile 管线: math 模式统一栅栏回归（旧行为零变化 +
     expect(row!.verify_request_expires_at).toBeNull();
     expect(row!.verify_request_generation).toBe(beforeGen);
     expect(values).toContain(row!.verify_answer);
-    // 栅栏 hash 与消息无关（math 无 URL），但可由 SHA-256 唯一标识本轮挑战
+ // 栅栏 hash 与消息无关（math 无 URL），但可由 SHA-256 唯一标识本轮挑战
     expect(row!.verify_request_hash).not.toBe(await sha256Hex(""));
   });
 
-  it("关闭验证期间的超限出题照常（栅栏匹配实际 enabled=false 快照）", async () => {
+ it("关闭验证期间的超限出题照常（栅栏匹配实际 enabled=false 快照）", async () => {
     await applyVerificationConfigChange(env.HODOR_DB, { enabled: false });
     await seedUnverified(8812);
     stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 4501 } } });
@@ -284,12 +284,12 @@ describe("turnstile 管线: inbound 集成（关闭验证期间的超限路径�
     text,
   });
 
-  it("turnstile + 验证关闭：超限撤验证照常，但不发 Mini App 请求（零用户侧消息）", async () => {
+ it("turnstile + 验证关闭：超限撤验证照常，但不发 Mini App 请求（零用户侧消息）", async () => {
     await applyVerificationConfigChange(env.HODOR_DB, { mode: "turnstile", enabled: false });
     const rateEnv = envWith({ MAX_MESSAGES_PER_MINUTE: "2" });
     const limit = parseMaxMessagesPerMinute(rateEnv);
 
-    // 已验证用户（关闭期间直接过验证门）
+ // 已验证用户（关闭期间直接过验证门）
     await seedUnverified(8821);
     await env.HODOR_DB.prepare(
       "UPDATE users SET is_verified = 1, verified_at = ? WHERE bot_id = ? AND user_id = ?",
@@ -298,7 +298,7 @@ describe("turnstile 管线: inbound 集成（关闭验证期间的超限路径�
     stub.always("createForumTopic", { status: 200, json: { ok: true, result: { message_thread_id: 900 } } });
     stub.always("pinChatMessage", { status: 200, json: { ok: true, result: true } });
 
-    // 前 limit 条正常中继（sendMessage 去客服群）
+ // 前 limit 条正常中继（sendMessage 去客服群）
     for (let i = 1; i <= limit; i++) {
       await handleInbound(rateEnv, BOT_ID, privateMessage({ id: 8821, first_name: "R" }, `m${i}`, 870 + i), ORIGIN);
     }
@@ -306,7 +306,7 @@ describe("turnstile 管线: inbound 集成（关闭验证期间的超限路径�
       .callsOf("sendMessage")
       .filter((call) => (call.body as Record<string, unknown>).chat_id === 8821).length;
 
-    // 第 limit+1 条：超限 → 撤验证 + 降级，但 turnstile 不发 Mini App（无法完成）
+ // 第 limit+1 条：超限 → 撤验证 + 降级，但 turnstile 不发 Mini App（无法完成）
     await handleInbound(rateEnv, BOT_ID, privateMessage({ id: 8821, first_name: "R" }, "boom", 880), ORIGIN);
 
     const row = await readRow(8821);
@@ -317,12 +317,12 @@ describe("turnstile 管线: inbound 集成（关闭验证期间的超限路径�
     expect(userSends).toHaveLength(userSendsBefore); // 用户侧零新消息（无 Mini App 请求）
     expect((await readRow(8821))!.verify_request_hash).toBeNull();
 
-    // 下一条消息落回验证门——验证门关闭时整门跳过（不补发），is_verified 保持 0
+ // 下一条消息落回验证门——验证门关闭时整门跳过（不补发），is_verified 保持 0
     await handleInbound(rateEnv, BOT_ID, privateMessage({ id: 8821, first_name: "R" }, "again", 881), ORIGIN);
     expect((await readRow(8821))!.is_verified).toBe(0);
   });
 
-  it("math + 验证关闭：同一超限路径照常发合并消息（旧模式行为回归——栅栏替换后出题）", async () => {
+ it("math + 验证关闭：同一超限路径照常发合并消息（旧模式行为回归——栅栏替换后出题）", async () => {
     await applyVerificationConfigChange(env.HODOR_DB, { mode: "math", enabled: false });
     const rateEnv = envWith({ MAX_MESSAGES_PER_MINUTE: "2" });
 
@@ -342,7 +342,7 @@ describe("turnstile 管线: inbound 集成（关闭验证期间的超限路径�
     expect(row!.is_verified).toBe(0);
     expect(row!.verify_request_hash).not.toBeNull(); // math 超限照常出题（合并消息）
     expect(row!.verify_msg_id).not.toBeNull();
-    // 最后一条用户侧消息 = 限频合并消息（提示 + 新题）
+ // 最后一条用户侧消息 = 限频合并消息（提示 + 新题）
     const lastUserSend = stub
       .callsOf("sendMessage")
       .filter((call) => (call.body as Record<string, unknown>).chat_id === 8822)

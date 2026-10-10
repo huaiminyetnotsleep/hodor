@@ -1,7 +1,7 @@
 /**
  * 验证请求标识（Turnstile 任务）：nonce 生成 / 摘要与格式校验。
  *
- * 契约（design.md §3）：
+ * 契约：
  * - 原始标识 nonce = crypto.getRandomValues 生成的 32 随机字节，编码为
  *   64 个小写十六进制字符；URL（GET /verify?r=…）与提交体携带**原值**；
  * - D1 永远只存 SHA-256 摘要（users.verify_request_hash）——库泄漏不等于
@@ -13,7 +13,7 @@
  * 超时，expiresAt 传 null）；Turnstile 才携带 600 秒到期时间。
  */
 
-/** Turnstile 请求有效期：创建 + 600 秒（design.md §3 常量） */
+/** Turnstile 请求有效期：创建 + 600 秒 */
 export const VERIFY_REQUEST_TTL_MS = 600_000;
 
 /** nonce 字节数（→ 64 个十六进制字符） */

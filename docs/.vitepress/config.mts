@@ -19,68 +19,82 @@ export default defineConfig({
     // 导航栏 logo 会经 withBase 自动补上 /hodor/ 前缀
     logo: '/icon.png',
 
+    // 顶部导航只保留用户最常读的三页；架构 / 开发 / 规划等经侧边栏与页面互链到达
     nav: [
-      { text: '首页', link: '/' },
       { text: '功能介绍', link: '/guide/features' },
       { text: '部署流程', link: '/guide/deploy' },
-      { text: '原理与架构', link: '/guide/architecture' },
       { text: '运维手册', link: '/guide/ops' },
+    ],
+
+    // 全站共用一份侧边栏，按受众分四组：使用（普通用户）→ 参考（维护者）
+    // → 开发（贡献者）→ 规划（未实现）。三份关键文档展开二级小节便于直达；
+    // 锚点 id 以 VitePress 构建产物为准，页面改标题时需同步
+    sidebar: [
+      {
+        text: '使用',
+        items: [
+          {
+            text: '功能介绍',
+            link: '/guide/features',
+            items: [
+              { text: '核心概念', link: '/guide/features#核心概念' },
+              { text: '对话流程', link: '/guide/features#对话流程' },
+              { text: '消息能力', link: '/guide/features#消息能力' },
+              { text: '人机验证', link: '/guide/features#人机验证' },
+              { text: '频率限制', link: '/guide/features#频率限制' },
+              { text: '管理命令', link: '/guide/features#管理命令' },
+              { text: '拦截行为汇总', link: '/guide/features#拦截行为汇总' },
+            ],
+          },
+          {
+            text: '部署流程',
+            link: '/guide/deploy',
+            items: [
+              { text: '前置条件', link: '/guide/deploy#前置条件' },
+              { text: '环境变量', link: '/guide/deploy#环境变量-基础-9-项-权威清单' },
+              { text: '部署方式（三选一）', link: '/guide/deploy#部署方式-三选一' },
+              { text: '部署多个实例', link: '/guide/deploy#部署多个实例' },
+              { text: 'Turnstile 申请与配置（可选）', link: '/guide/deploy#turnstile' },
+              { text: '部署后收尾', link: '/guide/deploy#部署后收尾' },
+              { text: '常见问题', link: '/guide/deploy#常见问题' },
+            ],
+          },
+          {
+            text: '运维手册',
+            link: '/guide/ops',
+            items: [
+              { text: 'Webhook 绑定与解绑', link: '/guide/ops#webhook-绑定与解绑' },
+              { text: '更换 Bot 或客服群', link: '/guide/ops#switch-bot-or-group' },
+              { text: '验证模式与密钥变更', link: '/guide/ops#验证模式与密钥变更' },
+              { text: '健康自检与版本', link: '/guide/ops#健康自检与版本' },
+              { text: '常用 SQL', link: '/guide/ops#常用-sql' },
+              { text: '故障排查', link: '/guide/ops#故障排查' },
+            ],
+          },
+        ],
+      },
+      {
+        text: '参考（维护者）',
+        items: [
+          { text: '原理与架构', link: '/guide/architecture' },
+          { text: '数据表', link: '/guide/database' },
+        ],
+      },
       {
         text: '开发',
         items: [
           { text: '本地开发', link: '/guide/development' },
           { text: '发布与更新', link: '/guide/release' },
-          { text: '数据表', link: '/guide/database' },
         ],
       },
       {
         text: '规划（未实现）',
         items: [
-          { text: '全量列表', link: '/todo/' },
+          { text: '规划总览', link: '/todo/' },
           { text: 'P3 自托管', link: '/todo/p3' },
-          { text: 'P1 主线（已交付）', link: '/todo/p1' },
         ],
       },
     ],
-
-    sidebar: {
-      '/todo/': [
-        {
-          text: '规划（未实现）',
-          items: [
-            { text: '全量列表', link: '/todo/' },
-            { text: 'P3 自托管', link: '/todo/p3' },
-            { text: 'P1 主线（已交付）', link: '/todo/p1' },
-          ],
-        },
-      ],
-      '/guide/': [
-        {
-          text: '指南',
-          items: [
-            { text: '功能介绍', link: '/guide/features' },
-            { text: '部署流程', link: '/guide/deploy' },
-            { text: 'Turnstile 申请配置（可选）', link: '/guide/deploy#turnstile' },
-            { text: '原理与架构', link: '/guide/architecture' },
-            { text: '运维手册', link: '/guide/ops' },
-          ],
-        },
-        {
-          text: '开发',
-          items: [
-            { text: '本地开发', link: '/guide/development' },
-            { text: '发布与更新', link: '/guide/release' },
-            { text: '数据表', link: '/guide/database' },
-          ],
-        },
-        {
-          text: '规划',
-          items: [
-            { text: '规划总览（未实现）', link: '/todo/' },
-          ],
-        },
-      ],
-    },
 
     socialLinks: [
       { icon: 'github', link: 'https://github.com/huaiminyetnotsleep/hodor' },

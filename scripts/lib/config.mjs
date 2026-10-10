@@ -1,5 +1,5 @@
-// wrangler JSONC 配置的纯函数工具集 + postinstall 门控判定（T05/T06 提前交付
-// 与 --install-hook 门控注入，2026-09-30 范围变更）。
+// wrangler JSONC 配置的纯函数工具集 + postinstall 门控判定（部署置备、迁移
+// 与 --install-hook 门控注入）。
 //
 // 纯度约定（重要）：本模块不得引用 process、node:fs、node:child_process 等
 // 任何 Node 专有 API——test/deploy-config.test.ts 会在 workerd 沙箱（vitest

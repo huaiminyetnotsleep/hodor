@@ -27,7 +27,7 @@ beforeAll(async () => {
 });
 
 describe("迁移 0002：表重建保数据", () => {
-  it("旧 schema 的行全字段原样保留", async () => {
+ it("旧 schema 的行全字段原样保留", async () => {
     const { results } = await env.HODOR_DB.prepare(
       "SELECT bot_id, update_id, status, attempts, created_at FROM processed_updates" +
         " ORDER BY update_id",
@@ -56,14 +56,14 @@ describe("迁移 0002：表重建保数据", () => {
     ]);
   });
 
-  it("重建只影响 processed_updates：bots 行不受波及", async () => {
+ it("重建只影响 processed_updates：bots 行不受波及", async () => {
     const bot = await env.HODOR_DB.prepare(
       "SELECT bot_id, username, display_name FROM bots",
     ).first<{ bot_id: number; username: string; display_name: string }>();
     expect(bot).toEqual({ bot_id: 7, username: "seed_bot", display_name: "Seed" });
   });
 
-  it("新 CHECK：'processing' 可插入，非法值仍被拒", async () => {
+ it("新 CHECK：'processing' 可插入，非法值仍被拒", async () => {
     await env.HODOR_DB.prepare(
       "INSERT INTO processed_updates (bot_id, update_id, status) VALUES (42, 9100, 'processing')",
     ).run();
@@ -74,7 +74,7 @@ describe("迁移 0002：表重建保数据", () => {
     ).rejects.toThrow();
   });
 
-  it("复合主键在重建后依然生效", async () => {
+ it("复合主键在重建后依然生效", async () => {
     await expect(
       env.HODOR_DB.prepare(
         "INSERT INTO processed_updates (bot_id, update_id, status) VALUES (42, 9001, 'failed')",

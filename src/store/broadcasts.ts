@@ -1,5 +1,5 @@
 /**
- * broadcasts 表 store（全用户广播，2026-10-09 任务）：一份广播一行，
+ * broadcasts 表 store（全用户广播）：一份广播一行，
  * pipeline 不内联 SQL。行只存活于任务期间——终态行由 pipeline 在控制消息
  * 收尾后删除；本模块提供状态机的全部原子转移：
  *
@@ -12,7 +12,7 @@
  * 唯一索引约束并发：pending → sending 由「每 Bot 恰一份 sending」部分唯一索引
  * 裁决（第二个确认者撞 UNIQUE → 忙碌分支）。
  *
- * 资格语义（design §5.1，预计人数与冻结名单同语义）：topics 映射存在 +
+ * 资格语义（预计人数与冻结名单同语义）：topics 映射存在 +
  * users 行存在（INNER JOIN 天然排除孤儿映射）+ 未封禁；**不**按 topic status、
  * users.status（软归档）、验证态或 TTL 过滤。排序恒按 user_id 升序。
  */
@@ -49,13 +49,13 @@ export interface BroadcastRow {
   updated_at: string;
 }
 
-/** 收件人硬上限（design §5.2）：预览/确认超限一律拒绝启动，不截断 */
+/** 收件人硬上限：预览/确认超限一律拒绝启动，不截断 */
 export const BROADCAST_RECIPIENT_LIMIT = 500;
 
 /** 预览有效期（R9）：创建 preparing 行时写入 expires_at，过期后须重新发起 */
 export const BROADCAST_PREVIEW_TTL_MS = 5 * 60 * 1000;
 
-/** sending 陈旧判定（design §7.2）：超过该时长视为执行中断（崩溃残留） */
+/** sending 陈旧判定：超过该时长视为执行中断（崩溃残留） */
 export const BROADCAST_SENDING_STALE_MS = 10 * 60 * 1000;
 
 /** 预计收件人数（确认前 COUNT；结果只标「预计」，确认时另行冻结） */
@@ -97,7 +97,7 @@ export async function listEligibleRecipients(
 }
 
 /**
- * 惰性清理（design §7.1，每次新建或确认前调用）：超过预览有效期的
+ * 惰性清理（每次新建或确认前调用）：超过预览有效期的
  * preparing/pending 置 expired；超过陈旧窗口的 sending 置 failed
  * （视为执行中断，结果未知）。返回需完成 General 控制消息收尾的终态行，
  * 由 pipeline best-effort 编辑并删除；preparing 未有控制消息的孤儿行也会返回，
@@ -256,7 +256,7 @@ export async function setBroadcastPendingWithControlMsgId(
 export type ConfirmOutcome = "won" | "busy" | "lost";
 
 /**
- * 原子确认（design §7.2）：pending → sending 并冻结排序 JSON 名单。
+ * 原子确认：pending → sending 并冻结排序 JSON 名单。
  * WHERE 同时核对 id / 发起人 / pending / 未过期——任一不满足即 0 行（lost）；
  * 「每 Bot 恰一份 sending」部分唯一索引冲突 → busy（已有广播正在发送，
  * pending 保留至自然过期）。
@@ -338,7 +338,7 @@ export async function expireBroadcast(
 }
 
 /**
- * 完成写入（design §7.3）：一次 UPDATE 置 completed + 成功/失败总数。
+ * 完成写入：一次 UPDATE 置 completed + 成功/失败总数。
  * 仅 sending 可正常完成；任务被清库或陈旧清理改为其他状态后，执行器必须
  * 停止并显示「结果未知」，不能把已取消任务误报为完整成功。
  * 0 行 = 行已被清库删除或不再处于 sending，由调用方按中断收尾。
@@ -365,7 +365,7 @@ export async function completeBroadcast(
 }
 
 /**
- * /wipealldata 前置停止（design §八）：清库前将 preparing/pending 活跃行置
+ * /wipealldata 前置停止：清库前将 preparing/pending 活跃行置
  * cancelled、sending 置 failed（部分收件人可能已收到，结果未知）；发送循环会在
  * 下一位收件人前观察状态并停止，当前已进入 Telegram 的单条请求无法撤回。
  */

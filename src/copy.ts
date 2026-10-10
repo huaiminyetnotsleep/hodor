@@ -1,9 +1,8 @@
 /**
- * 用户 / 管理员可见文案的唯一集中点（T23 / T24 / T26 + 阶段 4 T27/T29/T34/T35
- * + 阶段 5 T31/T32/T36/T37）。
+ * 用户 / 管理员可见文案的唯一集中点。
  *
  * fork 可整体改写本模块（含多语言）——除本文件外，任何模块不得散落
- * 硬编码用户文案（PRD 约束）。文案定稿来源：docs/guide/features.md。
+ * 硬编码用户文案。文案定稿来源：docs/guide/features.md。
  * 带参数的文案一律用 format* 函数（fork 单点改写，调用方零文案）。
  */
 
@@ -19,7 +18,7 @@ export const DEFAULT_WELCOME_TEXT = `你好，欢迎使用 hodor 私聊机器人
 
 项目地址：https://github.com/huaiminyetnotsleep/hodor`;
 
-/** 置顶验证行的三态（T31 开关交付起布尔真值升为三态） */
+/** 置顶验证行的三态 */
 export type PinnedVerifyState = "verified" | "unverified" | "disabled";
 
 /** formatPinnedInfo 所需的用户字段子集（users 行展示列 + 建档时间 + 治理行） */
@@ -31,13 +30,13 @@ export interface PinnedInfoUser {
   /** users.first_seen_at（ISO-8601 UTC 文本） */
   firstSeenAt: string;
   /**
-   * 验证行三态（T31）：verified / unverified 按库内真值（users.is_verified），
+   * 验证行三态：verified / unverified 按库内真值（users.is_verified），
    * disabled = 验证开关关闭期间（恒「未启用」，覆盖真值——此时无从谈验证状态）
    */
   verify: PinnedVerifyState;
-  /** 高危标记（users.is_risk，T37）：true → 追加「高危：⚠️ 高危用户」行 */
+  /** 高危标记（users.is_risk）：true → 追加「高危：⚠️ 高危用户」行 */
   isRisk?: boolean;
-  /** 管理员备注（topics.note，T36）：非空 → 追加「备注：<text>」行 */
+  /** 管理员备注（topics.note）：非空 → 追加「备注：<text>」行 */
   note?: string | null;
 }
 
@@ -49,13 +48,13 @@ const VERIFY_STATUS_TEXT: Record<PinnedVerifyState, string> = {
 };
 
 /**
- * 置顶的用户信息（T24 + 阶段 4 验证行 + 阶段 5 高危 / 备注行）：
+ * 置顶的用户信息：
  * 昵称（含 @username 括注）/ 用户 ID / 首次聊天（截到分钟）/ 验证状态
  * （三态）/ 高危（仅 isRisk）/ 备注（仅非空）。
  *
  * - 昵称回退链：first+last_name → @username → ID_<id>；括注只在展示名来自
  *   姓名且存在 @username 时携带（否则会与回退名重复）
- * - 验证行三态（T31 开关交付起）：✅ 已验证 / ❌ 未验证 / 未启用
+ * - 验证行三态：✅ 已验证 / ❌ 未验证 / 未启用
  *   （开关关闭期间恒「未启用」；答对 / 超限降级 / TTL 过期时 editMessageText 同步）
  * - 高危行仅 isRisk=true 时出现（`高危：⚠️ 高危用户`）；备注行仅 note 非空
  *   时出现——两行都在验证行之后，行序固定
@@ -84,14 +83,14 @@ export function formatPinnedInfo(user: PinnedInfoUser): string {
 }
 
 /**
- * 无绑定 topic 提示（T26）：管理员在无映射行 / closed 的 topic 内发言时，
- * 发回该 topic 的提示（绝不发往任何用户私聊）。/ban /unban 无绑定时复用（T35）。
+ * 无绑定 topic 提示：管理员在无映射行 / closed 的 topic 内发言时，
+ * 发回该 topic 的提示（绝不发往任何用户私聊）。/ban /unban 无绑定时复用。
  */
 export const UNBOUND_TOPIC_NOTICE =
   "找不到对应用户：此话题没有有效绑定（可能从未建立或已被关闭），请勿在此继续回复。";
 
 /**
- * /start 命令判定（T23）：`/start` 本身、`/start@bot`、`/start payload` 均算；
+ * /start 命令判定：`/start` 本身、`/start@bot`、`/start payload` 均算；
  * `/startups` 这类前缀巧合不算。undefined / 非命令 → false。
  */
 export function isStartCommand(text: string | undefined): boolean {
@@ -110,7 +109,7 @@ export function isBroadcastCommand(text: string | undefined): boolean {
 }
 
 /**
- * General 全局命令判定（2026-10-10 命令拆分任务）：客服群 General（无
+ * General 全局命令判定：客服群 General（无
  * message_thread_id）放行、可进入 outbound 命令管线的命令——全局配置命令
  * /verifyon /verifyoff /verifymode /verifymode_math /verifymode_button
  * /verifymode_turnstile 与 /help。/cmd、/cmd@bot、/cmd 参数 均算；
@@ -136,45 +135,45 @@ export function isGeneralGlobalCommand(text: string | undefined): boolean {
 }
 
 /* ------------------------------------------------------------------ */
-/* 阶段 4：验证（T27）/ 限频（T29）/ 封禁（T35）/ 命令（T34）文案        */
+/* 验证 / 限频 / 封禁 / 命令提示文案                                       */
 /* ------------------------------------------------------------------ */
 
-/** 验证题题头（T27）：题面与超限合并消息共用，保证提示语义一致 */
+/** 验证题题头：题面与超限合并消息共用，保证提示语义一致 */
 export const VERIFY_QUESTION_HEADER = "为确认你是真人，请回答下面的算术题：";
 
-/** 新题消息正文（T27）：题头 + 算式（expression 如 "3 + 5 = ?"） */
+/** 新题消息正文：题头 + 算式（expression 如 "3 + 5 = ?"） */
 export function formatVerifyQuestion(expression: string): string {
   return `${VERIFY_QUESTION_HEADER}\n${expression}`;
 }
 
 /**
- * 答错重出的错误提示前缀（T27 + T32 模式化）：与 buildChallenge 产出的
+ * 答错重出的错误提示前缀：与 buildChallenge 产出的
  * 模式化题面拼接成重出正文（编辑到**同一题面消息**——无新推送，天然不占
  * 提示频控）。math 模式下拼接产物与下方 formatVerifyRetryQuestion 逐字一致。
  */
 export const VERIFY_RETRY_PREFIX = "回答错误，请再试一次。\n\n";
 
 /**
- * 答错重出正文（T27，math 模式定稿形态）：错误提示 + 新题（题头 + 算式）。
+ * 答错重出正文（math 模式）：错误提示 + 新题（题头 + 算式）。
  */
 export function formatVerifyRetryQuestion(expression: string): string {
   return `${VERIFY_RETRY_PREFIX}${formatVerifyQuestion(expression)}`;
 }
 
-/** 答错 toast（answerCallbackQuery 弹出，T27） */
+/** 答错 toast（answerCallbackQuery 弹出） */
 export const VERIFY_WRONG_TOAST = "回答错误，请重试。";
 
-/** 答对 toast（answerCallbackQuery 弹出，T27） */
+/** 答对 toast（answerCallbackQuery 弹出） */
 export const VERIFY_PASSED_TOAST = "验证通过！";
 
-/** 答对后题面消息的编辑文案（原位替换题面，T27） */
+/** 答对后题面消息的编辑文案（原位替换题面） */
 export const VERIFY_PASSED_TEXT = "✅ 验证通过，现在可以直接发送消息了。";
 
-/** 旧题 / 他人 / 重放回调 toast（T27 归属判定拦截时弹出） */
+/** 旧题 / 他人 / 重放回调 toast（归属判定拦截时弹出） */
 export const VERIFY_EXPIRED_NOTICE = "题目已失效，请发送任意消息获取新题目。";
 
 /**
- * 超限合并消息正文（T29）：限频提示（含 {limit} 数字）+ 新题，
+ * 超限合并消息正文：限频提示（含 {limit} 数字）+ 新题，
  * 单条 push 发出（提示 + 题面 + 按钮同消息，只占一次提示频控）。
  */
 export function formatRateLimitVerifyQuestion(limit: number, expression: string): string {
@@ -182,7 +181,7 @@ export function formatRateLimitVerifyQuestion(limit: number, expression: string)
 }
 
 /**
- * 超限合并消息正文——纯按钮模式变体（T29 + T32）：限频提示前缀与数学题
+ * 超限合并消息正文——纯按钮模式变体：限频提示前缀与数学题
  * 形态逐字一致（超限语义不随模式变化），题面换为纯按钮引导文案 + 单按钮
  * （按钮本体由 buildChallenge 组装，本函数只管文字）。
  */
@@ -190,13 +189,12 @@ export function formatRateLimitVerifyButton(limit: number): string {
   return `发送过快，每分钟最多 ${limit} 条消息，本条未送达。请重新完成验证：\n\n${formatVerifyButtonQuestion()}`;
 }
 
-/** 禁言提示（T35）：封禁门拦截用户消息时经提示频控发给用户 */
+/** 禁言提示：封禁门拦截用户消息时经提示频控发给用户 */
 export const BAN_NOTICE = "你已被禁言，消息无法送达客服。如有疑问请通过其他方式联系。";
 
 /**
- * /help 文案（T34 + T32 动态化）：只列**已交付**命令；验证段随当前开关与
- * 模式变化——只展示「可操作的那个」开关命令（开 → /verifyoff，关 →
- * /verifyon），未交付命令绝不提前展示。后续阶段新增命令时在此增行。
+ * /help 文案：验证段随当前开关与模式动态变化——只展示「可操作的那个」
+ * 开关命令（开 → /verifyoff，关 → /verifyon）。
  */
 export interface HelpSettings {
   verifyEnabled: boolean;
@@ -247,18 +245,18 @@ export function formatHelpText(settings: HelpSettings): string {
   return lines.join("\n");
 }
 
-/** 未知命令提示（T34）：回 topic 引导管理员查看 /help，绝不发用户 */
+/** 未知命令提示：回 topic 引导管理员查看 /help，绝不发用户 */
 export const UNKNOWN_COMMAND_NOTICE = "未知命令，发送 /help 查看可用命令。";
 
 /**
- * 非管理员命令提示（T34 真机验收增量，2026-09-30）：非管理员在客服群
+ * 非管理员命令提示：非管理员在客服群
  * topic 内发 `/` 命令时回发该 topic（原为静默——用户验收时要求可见反馈；
  * 非命令文本仍静默）。回 topic 不触达任何用户私聊。
  */
 export const NOT_ADMIN_COMMAND_NOTICE = "该命令仅客服管理员可用。";
 
 /**
- * 管理命令菜单（T34 真机验收增量，2026-09-30）：setwebhook 时经
+ * 管理命令菜单：setwebhook 时经
  * setMyCommands 注册进 Telegram 命令菜单（客服群输入框可直接点选，不用
  * 手敲）。scope 恒为客服群 chat——用户私聊菜单不受影响。command 一律
  * 小写无斜杠（Telegram BotCommand 规范）。菜单**恒全量注册**（不随开关
@@ -289,48 +287,48 @@ export const ADMIN_COMMAND_MENU: readonly { command: string; description: string
   { command: "wipealldata", description: "删除全部话题并清空数据（两步确认）" },
 ];
 
-/** /ban 确认（T35）：回 topic，携带目标用户 ID 便于管理员核对 */
+/** /ban 确认：回 topic，携带目标用户 ID 便于管理员核对 */
 export function formatBanConfirmed(userId: number): string {
   return `已禁言用户 ${userId}：其后续消息将被拦截。`;
 }
 
-/** /unban 确认（T35）：回 topic */
+/** /unban 确认：回 topic */
 export function formatUnbanConfirmed(userId: number): string {
   return `已解除用户 ${userId} 的禁言。`;
 }
 
 /* ------------------------------------------------------------------ */
-/* 阶段 5：备注（T36）/ 高危（T37）/ 验证开关与模式（T31/T32）文案        */
+/* 备注 / 高危 / 验证开关与模式文案                                        */
 /* ------------------------------------------------------------------ */
 
-/** /note 确认（T36）：回 topic，回显写入的备注便于管理员核对 */
+/** /note 确认：回 topic，回显写入的备注便于管理员核对 */
 export function formatNoteConfirmed(note: string): string {
   return `已添加备注：${note}`;
 }
 
-/** /unnote 确认（T36）：回 topic */
+/** /unnote 确认：回 topic */
 export function formatUnnoteConfirmed(): string {
   return "已清除备注。";
 }
 
-/** /note 缺参数的用法提示（T36）：绝不误写空备注 */
+/** /note 缺参数的用法提示：绝不误写空备注 */
 export const NOTE_USAGE_NOTICE = "用法：/note <内容>（备注将展示在置顶信息中）";
 
 /**
- * /risk 确认（T37）：回 topic，携带目标用户 ID + 提醒一次性行为说明
+ * /risk 确认：回 topic，携带目标用户 ID + 提醒一次性行为说明
  *（重新标记后下一条消息会再提醒一次）。
  */
 export function formatRiskConfirmed(userId: number): string {
   return `已标记用户 ${userId} 为高危用户：其来信将在话题内醒目提醒（24 小时内不重复）。`;
 }
 
-/** /unrisk 确认（T37）：回 topic */
+/** /unrisk 确认：回 topic */
 export function formatUnriskConfirmed(userId: number): string {
   return `已取消用户 ${userId} 的高危标记。`;
 }
 
 /**
- * 高危用户来信提醒（T37）：发到 topic 内的醒目提示（⚠️ 前后缀 + 展示名），
+ * 高危用户来信提醒：发到 topic 内的醒目提示（⚠️ 前后缀 + 展示名），
  * 24 小时窗口内仅一条；displayName 为用户昵称（置顶信息同款回退链产物）。
  * 中继 / 账本照常——提醒只是附着物，不影响主链。
  */
@@ -339,7 +337,7 @@ export function formatRiskTopicNotice(displayName: string): string {
 }
 
 /**
- * /verifyon 确认（T31）：含「已验证记录不受影响」说明——重开后已验证
+ * /verifyon 确认：含「已验证记录不受影响」说明——重开后已验证
  *（且未过期）用户照常通行，绝不误重验。
  */
 export function formatVerifyOnConfirmed(): string {
@@ -347,7 +345,7 @@ export function formatVerifyOnConfirmed(): string {
 }
 
 /**
- * /verifyoff 确认（T31）：含验证记录保留、重新开启后按记录与有效期判定
+ * /verifyoff 确认：含验证记录保留、重新开启后按记录与有效期判定
  * 的说明——关闭只是「整门跳过」，不动任何验证记录。
  */
 export function formatVerifyOffConfirmed(): string {
@@ -355,7 +353,7 @@ export function formatVerifyOffConfirmed(): string {
 }
 
 /**
- * /verifymode 确认（T32，Turnstile 任务起支持三模式）：携带切换后的新模式；
+ * /verifymode 确认：携带切换后的新模式；
  * 纯按钮附防护较弱说明（bot 可直接调 API 点击）；Turnstile 附入口说明。
  */
 export function formatVerifyModeConfirmed(mode: "math" | "button" | "turnstile"): string {
@@ -368,8 +366,7 @@ export function formatVerifyModeConfirmed(mode: "math" | "button" | "turnstile")
 
 /**
  * /verifymode 无参数查看（只读）：当前模式 + 切换命令。绝不写设置、不清 pending、
- * 不循环切换（2026-10-09 用户决策的兼容性变更；2026-10-10 命令拆分后以
- * 三个专用切换命令为准，参数形式降为兼容别名）。
+ * 不循环切换（以三个专用切换命令为准，参数形式降为兼容别名）。
  */
 export function formatVerifyModeCurrent(settings: HelpSettings): string {
   return [
@@ -383,7 +380,7 @@ export function formatVerifyModeCurrent(settings: HelpSettings): string {
 export const VERIFYMODE_USAGE_NOTICE =
   "未知模式。用法：/verifymode_math、/verifymode_button、/verifymode_turnstile 或别名 /verifymode math|button|turnstile（无参数仅查看当前模式，不改变设置）。";
 
-/** 验证配置命令在非 General Topic 执行（2026-10-10 命令拆分）：不执行、仅引导去 General */
+/** 验证配置命令在非 General Topic 执行：不执行、仅引导去 General */
 export const VERIFY_COMMANDS_GENERAL_ONLY_NOTICE =
   "验证配置命令请在客服群 General 中使用。";
 
@@ -393,18 +390,18 @@ export function formatVerifyModeMissingTurnstileConfig(missing: string[]): strin
 }
 
 /**
- * 纯按钮模式题面（T32）：单按钮 + 引导文案（与数学题共用「为确认你是
+ * 纯按钮模式题面：单按钮 + 引导文案（与数学题共用「为确认你是
  * 真人」句式，保持验证语义一致）。
  */
 export function formatVerifyButtonQuestion(): string {
   return "为确认你是真人，请点击下方按钮确认你不是机器人。";
 }
 
-/** 纯按钮模式的唯一按钮文案（T32）：点击即提交答案 0 */
+/** 纯按钮模式的唯一按钮文案：点击即提交答案 0 */
 export const VERIFY_BUTTON_LABEL = "我不是机器人";
 
 /* ------------------------------------------------------------------ */
-/* Turnstile 人机验证模式（2026-10-09 任务）文案                          */
+/* Turnstile 人机验证模式文案                                              */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -424,7 +421,7 @@ export function formatRateLimitVerifyTurnstile(limit: number): string {
 export const VERIFY_TURNSTILE_BUTTON_LABEL = "打开验证页面";
 
 /* ------------------------------------------------------------------ */
-/* 阶段 6：会话维护（T38 archive/deluser / T39 purgemsg / T40 wipe）文案  */
+/* 会话维护：archive / deluser / purgemsg / wipealldata 文案               */
 /* ------------------------------------------------------------------ */
 
 /** /archive 软归档的 pre-close 确认：必须在 topic 关闭前送达 */
@@ -444,7 +441,7 @@ export const ARCHIVE_SUCCESS_TEXT = "用户已软归档：验证与待答题已�
 export const ARCHIVE_CLOSE_FAILED_TEXT = "归档未执行：Telegram 未能关闭话题，用户数据与验证状态未变。请检查权限后重试。";
 
 /**
- * /purgemsg 确认（T39）：三态计数——不把未删除内容标为已清空（failed>0
+ * /purgemsg 确认：三态计数——不把未删除内容标为已清空（failed>0
  * 时明确「有内容未清空」）。gone = 已不存在（可能已被手工删，重推重跑
  * 的收敛类）；failed = 权限不足等其他 permanent。pinnedReset 标记信息卡
  * 是否成功重置（false → 注明下次消息自动补发，不虚报已重置）。
@@ -469,7 +466,7 @@ export function formatPurgeConfirmed(counts: {
 }
 
 /**
- * /wipealldata 第一步警告（T40）：明确不可恢复范围与保留项。60 秒内点击
+ * /wipealldata 第一步警告：明确不可恢复范围与保留项。60 秒内点击
  * 「确认清空」才执行；完成文案独立（编辑本消息）。
  */
 export const WIPE_WARNING_TEXT = [
@@ -485,10 +482,10 @@ export const WIPE_WARNING_TEXT = [
   "请在 60 秒内点击按钮确认或取消。",
 ].join("\n");
 
-/** /wipealldata 确认按钮文案（T40）：callback_data 由 wipe.ts 组装（w:yes:<epoch>） */
+/** /wipealldata 确认按钮文案：callback_data 由 wipe.ts 组装（w:yes:<epoch>） */
 export const WIPE_CONFIRM_LABEL = "⚠️ 确认清空（不可恢复）";
 
-/** /wipealldata 取消按钮文案（T40） */
+/** /wipealldata 取消按钮文案 */
 export const WIPE_CANCEL_LABEL = "取消";
 
 /** /wipealldata 确认执行后的完成文案（尝试编辑原警告消息；话题已被删时 edit 失败 warn 吞） */
@@ -503,7 +500,7 @@ export function formatWipeTopicsFailed(failed: number): string {
 /** /wipealldata 完成提示（话题已删，警告消息不在——toast 是主要反馈） */
 export const WIPE_TOAST_DONE = "全部话题与 Hodor 数据已删除；私聊历史保留。";
 
-/** wipe 回调 toast：非管理员（T40 再次鉴权失败） */
+/** wipe 回调 toast：非管理员（再次鉴权失败） */
 export const WIPE_TOAST_NOT_ADMIN = "该操作仅客服管理员可用。";
 
 /** wipe 回调 toast：超过 60 秒有效期 */
@@ -516,60 +513,60 @@ export const WIPE_TOAST_CANCELLED = "已取消，未清空任何数据。";
 export const WIPE_TOAST_RUNNING = "已确认，正在清空…";
 
 /* ------------------------------------------------------------------ */
-/* 全用户广播（2026-10-09 任务）：输入提示 / 控制消息状态 / 结束统计文案  */
+/* 全用户广播：输入提示 / 控制消息状态 / 结束统计文案                      */
 /* ------------------------------------------------------------------ */
 
 /**
- * getMe 成功但无显示名（first_name 空白）时的落款回退（PRD R6，2026-10-09
- * 用户变更：不再回退「客服公告」）。获取失败仍不出可确认预览、不用库存旧名。
+ * getMe 成功但无显示名（first_name 空白）时的落款回退。
+ * 获取失败仍不出可确认预览、不用库存旧名。
  */
 export const BROADCAST_FALLBACK_SIGNATURE = "Hodor";
 
 /**
- * /broadcast 用法提示（PRD R7/R8）：在 General 中回发；标题与正文均必填、
+ * /broadcast 用法提示：在 General 中回发；标题与正文均必填、
  * 超长拒绝后引导修改。
  */
 export const BROADCAST_USAGE_NOTICE =
   "用法：在客服群 General 中发送一条完整消息——\n/broadcast 公告标题\n\n正文（可含空行，按普通文字发送）\n\n标题与正文均必填，二者以第一个换行分隔。";
 
-/** Topic 内发起只提示去 General（design §3.1）：不创建广播、绝不中继给该用户 */
+/** Topic 内发起只提示去 General：不创建广播、绝不中继给该用户 */
 export const BROADCAST_TOPIC_REDIRECT =
   "广播请在客服群 General 中发起：到 General 发送 /broadcast + 标题与正文（首行命令，换行后为正文）。";
 
 /** 非管理员发起（General 回发；与既有命令提示同语义） */
 export const BROADCAST_NOT_ADMIN_NOTICE = "该命令仅客服管理员可用。";
 
-/** 预计收件人为 0：只提示，不提供可确认广播（PRD R8） */
+/** 预计收件人为 0：只提示，不提供可确认广播 */
 export const BROADCAST_EMPTY_RECIPIENTS_NOTICE =
   "当前没有符合资格的用户（需有话题绑定且未被禁言），未创建广播。";
 
-/** 预计人数超过 500 上限（design §5.2）：拒绝启动，不截断 */
+/** 预计人数超过 500 上限：拒绝启动，不截断 */
 export function formatBroadcastTooManyRecipients(limit: number): string {
   return `符合资格的用户超过 ${limit} 人上限，本次广播未创建。当前版本不支持分组收件人，请联系维护者评估扩容方案。`;
 }
 
-/** 最终可见文本超过 4096（PRD R8）：超长拒绝并提示修改，不截断、不拆分 */
+/** 最终可见文本超过 4096：超长拒绝并提示修改，不截断、不拆分 */
 export function formatBroadcastTooLong(limit: number): string {
   return `公告全文（含标题、落款与空行）超过 ${limit} 字符上限，请精简后重新发起。`;
 }
 
-/** getMe 失败：不生成可确认预览，不用库存旧名称（PRD R6） */
+/** getMe 失败：不生成可确认预览，不用库存旧名称 */
 export const BROADCAST_GETME_FAILED_NOTICE =
   "暂时无法获取 Bot 名称，本次广播未发起。请稍后重新发送 /broadcast。";
 
-/** 预览已发出但落库失败（design §7.1 补偿）：尽力回发提示后抛出交重推 */
+/** 预览已发出但落库失败（补偿）：尽力回发提示后抛出交重推 */
 export const BROADCAST_PREVIEW_CREATE_FAILED_NOTICE =
   "预览创建失败，本次广播未发送，请忽略上方消息。";
 
-/** 控制消息发送 permanent（design §7.1 补偿）：按钮无效，任务终止 */
+/** 控制消息发送 permanent（补偿）：按钮无效，任务终止 */
 export const BROADCAST_CONTROL_CREATE_FAILED_NOTICE =
   "控制消息创建失败，按钮无效：本次广播未发送，请重新发起 /broadcast。";
 
-/** 同 Bot 已有草稿/待确认（design §3.2 / R10）：同一时间只留一份草稿 */
+/** 同 Bot 已有草稿/待确认：同一时间只留一份草稿 */
 export const BROADCAST_DRAFT_EXISTS_NOTICE =
   "已有广播待确认或发送中草稿未过期，请先完成处理或等待其过期后再发起新广播。";
 
-/** 控制消息初始文案（design §3.3「待确认（未发送）」）：预计人数 + 有效期 */
+/** 控制消息初始文案（待确认）：预计人数 + 有效期 */
 export function formatBroadcastControlText(expectedCount: number, ttlMinutes: number): string {
   return [
     "📋 广播确认（未发送）",
@@ -582,7 +579,7 @@ export function formatBroadcastControlText(expectedCount: number, ttlMinutes: nu
 export const BROADCAST_CONFIRM_LABEL = "确认发送";
 export const BROADCAST_CANCEL_LABEL = "取消";
 
-/** 发送中（design §7.3）：移除按钮；编辑为 best-effort，失败不阻断主循环 */
+/** 发送中：移除按钮；编辑为 best-effort，失败不阻断主循环 */
 export const BROADCAST_SENDING_TEXT = "📤 正在发送…";
 
 /** 已取消（未发送） */
@@ -591,11 +588,11 @@ export const BROADCAST_CANCELLED_TEXT = "已取消（未发送）。";
 /** 已过期（未发送） */
 export const BROADCAST_EXPIRED_TEXT = "已过期（未发送）。";
 
-/** 确认时资格人数变为 0（design §7.2）：原子改 cancelled，不因人数变化复活 */
+/** 确认时资格人数变为 0：原子改 cancelled，不因人数变化复活 */
 export const BROADCAST_NO_RECIPIENTS_TEXT = "当前无可发送用户，本次广播已取消（未发送）。";
 
 /**
- * 完成统计（PRD R3）：成功仅表示 Telegram API 接收 + 系统记录成功，不代表
+ * 完成统计：成功仅表示 Telegram API 接收 + 系统记录成功，不代表
  * 已读；失败含 API 失败与发送前资格变化，不自动补发。
  */
 export function formatBroadcastDoneText(successCount: number, failureCount: number): string {
@@ -605,7 +602,7 @@ export function formatBroadcastDoneText(successCount: number, failureCount: numb
   ].join("\n");
 }
 
-/** 中断（design §7.4 诚实边界）：滞留行陈旧判定后统一文案，不承诺补发 */
+/** 中断（诚实边界）：滞留行陈旧判定后统一文案，不承诺补发 */
 export const BROADCAST_INTERRUPTED_TEXT = "⚠️ 广播中断，结果未知；未自动补发。";
 
 /* ----- 回调 toast（answerCallbackQuery；均 best-effort，失败不阻断） ----- */
@@ -622,7 +619,7 @@ export const BROADCAST_TOAST_BUSY = "已有广播正在发送，请稍后再试�
 /** 重复点击 / 已被并发方裁决 / 行已删除（孤立按钮） */
 export const BROADCAST_TOAST_ALREADY_HANDLED = "该广播已处理或不存在。";
 
-/** 重推重跑看到 sending 未陈旧：绝不并发第二份发送（design §7.4） */
+/** 重推重跑看到 sending 未陈旧：绝不并发第二份发送 */
 export const BROADCAST_TOAST_SENDING = "正在发送中，请稍候。";
 
 /** 取消成功 */

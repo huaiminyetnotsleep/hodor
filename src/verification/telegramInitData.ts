@@ -1,5 +1,5 @@
 /**
- * Telegram Mini App initData 校验（Turnstile 任务；design.md §5）。
+ * Telegram Mini App initData 校验。
  *
  * 唯一按官方 Bot Token HMAC 规则实现的模块：
  * https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
@@ -15,7 +15,7 @@
  * - HMAC 通过后才解析 user JSON（id 必须是正的安全整数），再检查 auth_date
  *   窗口：now - authDate ≤ 300 秒，且至多允许 30 秒未来时钟偏差。
  *
- * 输入边界（design §5「有界参数解析」）：总长 ≤ 8 KiB、字段数 ≤ 64、拒绝
+ * 输入边界（有界参数解析）：总长 ≤ 8 KiB、字段数 ≤ 64、拒绝
  * 重复键、缺字段、畸形百分号编码；任何失败都不发起网络请求。
  */
 

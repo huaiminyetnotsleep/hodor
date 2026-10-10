@@ -1,9 +1,9 @@
 /**
- * 广播公告组装纯函数（全用户广播，2026-10-09 任务）：/broadcast 输入解析、
+ * 广播公告组装纯函数：/broadcast 输入解析、
  * 安全 HTML 组装与最终可见文本长度校验。零 IO、零 Telegram / D1 依赖，
  * 行为完全由单测固化（test/broadcast-format.test.ts）。
  *
- * 格式契约（PRD R5 / design §四）：
+ * 格式契约：
  *
  *   <b>📣 {标题}</b>
  *
@@ -15,7 +15,7 @@
  *   标签解释（正文中的 `*`、`_`、`<` 按原文字面展示，AC4）。
  * - 普通中继继续纯文本（不开全局 parse_mode）；本模块只服务广播。
  * - 长度校验针对**最终可见纯文本**的 UTF-16 code unit 数（保守口径，
- *   design §四.3）：超限拒绝，不截断、不拆分。
+ *   上限校验）：超限拒绝，不截断、不拆分。
  */
 
 /** Telegram sendMessage 文本上限（after entities parsing，官方契约） */
@@ -37,7 +37,7 @@ export function escapeHtml(value: string): string {
 }
 
 /**
- * 解析 `/broadcast` 输入（PRD R7）：第一行命令后的内容为标题，其余为正文，
+ * 解析 `/broadcast` 输入：第一行命令后的内容为标题，其余为正文，
  * 二者均必填。
  *
  * - 命令 token（`/broadcast` 或 `/broadcast@botname`）后到首个换行前 trim

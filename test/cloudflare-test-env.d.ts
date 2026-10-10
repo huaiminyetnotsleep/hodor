@@ -1,6 +1,6 @@
 // 测试运行时专属绑定：vitest.config.ts 经 miniflare bindings 注入的迁移内容
 // （D1Migration 类型由 tsconfig types 指向的
-//  @cloudflare/vitest-pool-workers/types 的 cloudflare:test 模块声明提供）
+// @cloudflare/vitest-pool-workers/types 的 cloudflare:test 模块声明提供）
 declare global {
   namespace Cloudflare {
     interface Env {

@@ -51,7 +51,7 @@ export function parseMaxAttempts(env: Cloudflare.Env): number {
 }
 
 /**
- * 解析 MAX_MESSAGES_PER_MINUTE：入站限频的每用户每分钟上限（T29 固定窗口）。
+ * 解析 MAX_MESSAGES_PER_MINUTE：入站限频的每用户每分钟上限（固定窗口）。
  *
  * 缺失 / 非法 / 非正整数 → 20（docs/guide/deploy.md 缺省值；与 parseMaxAttempts
  * 同款「先解析、不轻信输入」模式，超限文案里的数字即来源于此）。
@@ -64,7 +64,7 @@ export function parseMaxMessagesPerMinute(env: Cloudflare.Env): number {
 }
 
 /**
- * 解析 VERIFY_TTL_HOURS：验证有效期（小时，T33）。
+ * 解析 VERIFY_TTL_HOURS：验证有效期（小时）。
  *
  * 缺失 / 非法 / 负数 / 非整数 → 0 = 永久有效（docs/guide/deploy.md 变量表
  * 缺省值；变量已在 env.d.ts / deploy.md 声明，本函数只补运行时解析——

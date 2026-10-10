@@ -1,7 +1,7 @@
 /**
- * 置顶信息组装 / 刷新共享助手（阶段 5 M2，design.md §二.7 / §二.9）：
+ * 置顶信息组装 / 刷新共享助手：
  *
- * 置顶文本的字段来源此前散落在 inbound ②/③/④、verify 通过链、（M2 起）
+ * 置顶文本的字段来源散落在 inbound ②/③/④、verify 通过链、
  * commands 刷新——note / isRisk / verify 三态接入后每组调用点都要拼一遍
  * 「快照 + topic 行 + settings」的字段集，重复且易漂移。本模块收口：
  *
@@ -11,12 +11,12 @@
  *   可选 overrides 强制覆盖个别字段（超限 / TTL 降级必须显示 ❌，即便
  *   settings 为其他态）。
  * - editPinnedBestEffort：命令（/note /unnote /risk /unrisk）内置顶刷新——
- *   best-effort（design §三「命令内置顶刷新」行：确认回复已反馈，置顶是
+ *   best-effort（确认回复已反馈，置顶是
  *   展示面，两种失败均 warn 吞，绝不放大用户消息重发面）。
  * - downgradePinnedToUnverified：inbound ③ 超限 / ② TTL 过期的置顶降级 ❌
- *   （同为 best-effort；强制 verify="unverified"）；T38 /archive 清验证后复用。
- * - pinUserCard（阶段 6 迁入）：4a 置顶流程唯一入口——inbound 首联与
- *   T39 /purgemsg 重置置顶共用同一「发信息卡 → pin → 落库」链。
+ *   （同为 best-effort；强制 verify="unverified"）；/archive 清验证后复用。
+ * - pinUserCard：4a 置顶流程唯一入口——inbound 首联与
+ *   /purgemsg 重置置顶共用同一「发信息卡 → pin → 落库」链。
  *
  * 系统消息语义（error-handling spec）：置顶编辑不入 messages 账本。
  */
@@ -71,7 +71,7 @@ export async function composePinnedText(
  * 跳过条件（零 API 调用）：无 topics 映射行 / pinned_msg_id 为 null（尚未
  * 置顶——下次 4a 自然带新值）/ compose 为 null（users 行缺失的竞态窗口）。
  * editMessageText 两种失败（retryable / permanent）均 console.warn 吞：
- * 置顶是 best-effort 展示面（design §三），调用方各自的确认 / 主链反馈
+ * 置顶是 best-effort 展示面，调用方各自的确认 / 主链反馈
  * 不受影响。
  */
 async function editPinned(
@@ -116,8 +116,8 @@ export async function editPinnedBestEffort(
 }
 
 /**
- * 置顶验证行降级 ❌（inbound ③ 超限撤验证后 / ② TTL 过期撤验证后 / T38
- * /archive 清验证后）：强制 verify="unverified"——降级时刻的置顶必须显示
+ * 置顶验证行降级 ❌（inbound ③ 超限撤验证后 / ② TTL 过期撤验证后
+ * 或 /archive 清验证后）：强制 verify="unverified"——降级时刻的置顶必须显示
  * ❌，即便 settings 已切到其他态（关闭态的「未启用」是门放行的展示，不是
  * 验证失败的展示）。best-effort 与 4b 刷新同款：两种失败均 warn 吞（降级
  * 失败不抛断主流程）。
@@ -131,7 +131,7 @@ export async function downgradePinnedToUnverified(
   await editPinned(env, client, botId, userId, { verify: "unverified" });
 }
 
-/** 4a 置顶流程的上下文（inbound 首联 / T39 /purgemsg 重置置顶共用） */
+/** 4a 置顶流程的上下文（inbound 首联 / /purgemsg 重置置顶共用） */
 export interface PinUserCardContext {
   botId: number;
   userId: number;
@@ -141,14 +141,14 @@ export interface PinUserCardContext {
 }
 
 /**
- * 4a：在 topic 内发用户信息消息并置顶、落库（T24「每 topic 恰一条」的唯一
- * 入口；T39 起从 inbound 迁入本模块——/purgemsg 重置置顶与首联置顶同一
- * 语义，行为零变化）。
+ * 4a：在 topic 内发用户信息消息并置顶、落库（「每 topic 恰一条」的唯一
+ * 入口；/purgemsg 重置置顶与首联置顶同一
+ * ）。
  *
  * 返回是否完成置顶并落库（/purgemsg 确认文案据此措辞，不虚报已重置）：
  * - 信息 send retryable → 抛（重推重走 4a：topic 已在、pinned_msg_id 仍 null，
  *   不重建 topic、不重发用户消息；极端窗口可能遗留一条未置顶的旧信息消息，
- *   接受并记录日志——design.md §四）
+ *   接受并记录日志）
  * - 信息 send permanent → warn 跳过，**不写** pinned_msg_id（后续消息可再尝试）→ false
  * - pin permanent → warn，信息消息已在，**仍写** pinned_msg_id（供 4b edit 刷新）→ true
  */

@@ -1,4 +1,4 @@
-// 版本模块的纯渲染/校验函数（T08 版本注入，2026-09-30 范围变更）。
+// 版本模块的纯渲染/校验函数（版本注入）。
 //
 // 纯度约定（与 config.mjs 相同）：本模块不得引用 process、node:fs、node:path 等
 // 任何 Node 专有 API——test/version-module.test.ts 会在 workerd 沙箱（vitest

@@ -1,5 +1,5 @@
 /**
- * 管理命令管线（T34/T35/T36/T37/T31/T32 + T38/T39/T40）：
+ * 管理命令管线：
  * outbound 在管理员校验后把 `/` 开头文本整条移交本管线——命令永不中继、永不
  * 写 messages 账本。非管理员命令的提示由 outbound 管线处理。
  *
@@ -9,7 +9,7 @@
  *   先删 TG topic，再批量清对应 users/topics/messages；结果用 callback toast。
  * - `/purgemsg`：绑定 scope，账本 + pinned 驱动的群内消息清理。
  * - `/wipealldata`：全局 scope，两步确认后先删全部群内话题再清数据库（执行在 pipeline/wipe.ts）。
- * - 验证配置组（/verifyon /verifyoff /verifymode 系列）：2026-10-10 起仅限客服群
+ * - 验证配置组（/verifyon /verifyoff /verifymode 系列）：仅限客服群
  *   General（thread 1）执行——运行时执行门 + 引导提示（Telegram 菜单无 Topic
  *   级作用域，误触在 Topic 内只能靠提示收敛）；/help 保持全局可用。
  * - 其余命令维持既有分流与三态失败语义；所有系统消息零 messages 账本。
@@ -118,7 +118,7 @@ async function replyInTopic(
   const sent = await client.sendMessage({
     chat_id: chatId,
     text,
-    // General 平台怪癖（2026-10-10 实测）：论坛群显式传 message_thread_id=1 会
+    // General 平台怪癖（实测）：论坛群显式传 message_thread_id=1 会
     // 400「message thread not found」；省略该字段消息才落到 General（广播与
     // replyInGeneral 的既有做法）。General 归一化路径传入 threadId=1，此处省略。
     ...(threadId !== GENERAL_THREAD_ID ? { message_thread_id: threadId } : {}),
@@ -193,7 +193,7 @@ export async function handleCommand(
 
   if (name === "/help") {
     // /help 不依赖绑定：无论哪个 topic 都能看（含无绑定 / closed topic）。
-    // 帮助接库内 settings 真值（T32 动态化）：验证段随开关 / 模式变化——
+    // 帮助接库内 settings 真值：验证段随开关 / 模式变化——
     // 开 → 只展示 /verifyoff，关 → /verifyon + 「当前验证已关闭」标注
     await replyInTopic(
       env,
@@ -206,7 +206,7 @@ export async function handleCommand(
 
   if (name === "/ban" || name === "/unban") {
     // 反查绑定：closed 行同样可操作（管理操作不依赖 open——区别于中继的
-    // 「closed 视同未绑定」）；无行 → 复用 T26 提示（绝不猜测目标用户）
+    // 「closed 视同未绑定」）；无行 → 复用无绑定提示（绝不猜测目标用户）
     const owner = await findUserIdByThread(env.HODOR_DB, botId, threadId);
     if (!owner) {
       await replyInTopic(env, chatId, threadId, UNBOUND_TOPIC_NOTICE);
@@ -226,7 +226,7 @@ export async function handleCommand(
     return;
   }
 
-  /* ------------- T36/T37 备注与高危组（需绑定，/ban 同姿态） ------------- */
+  /* ------------- 备注与高危组（需绑定，/ban 同姿态） ------------- */
   if (name === "/note" || name === "/unnote" || name === "/risk" || name === "/unrisk") {
     // /note 空参数：用法提示先于绑定判定（M2 契约——本命令的核心防御是
     // 「绝不误写空备注」，误触 /note 不该落到任何绑定语义）
@@ -235,7 +235,7 @@ export async function handleCommand(
       await replyInTopic(env, chatId, threadId, NOTE_USAGE_NOTICE);
       return;
     }
-    // 反查绑定：closed 行同样可操作（治理操作不依赖 open）；无行 → T26 提示
+    // 反查绑定：closed 行同样可操作（治理操作不依赖 open）；无行 → 无绑定提示
     const owner = await findUserIdByThread(env.HODOR_DB, botId, threadId);
     if (!owner) {
       await replyInTopic(env, chatId, threadId, UNBOUND_TOPIC_NOTICE);
@@ -273,7 +273,7 @@ export async function handleCommand(
     return;
   }
 
-  /* ------- T31/T32 验证配置组（2026-10-10 起仅限客服群 General 执行） ------- */
+  /* ------- 验证配置组（仅限客服群 General 执行） ------- */
   if (
     name === "/verifyon" ||
     name === "/verifyoff" ||
@@ -305,7 +305,7 @@ export async function handleCommand(
       return;
     }
     if (name === "/verifymode") {
-      // 无参数只查看（2026-10-09 兼容性变更：原「无参循环切换」废止）——不写
+      // 无参数只查看——不写
       // 设置、不清 pending。显式参数设置三模式（别名，与新命令共用同一设置
       // 逻辑）；非法参数拒绝且不改变任何状态。
       const args = parseCommandArgs(params.text);
@@ -321,7 +321,7 @@ export async function handleCommand(
       await setVerificationModeWithPrecheck(env, chatId, threadId, args);
       return;
     }
-    // 2026-10-10 命令拆分：/verifymode_math|button|turnstile 各管一种模式，
+    // 命令拆分：/verifymode_math|button|turnstile 各管一种模式，
     // 与 /verifymode <模式> 别名共用同一事务化设置逻辑（turnstile 凭据前置
     // 检查保留）；附加参数忽略（与 /verifyon 同姿态）
     const mode =
@@ -330,7 +330,7 @@ export async function handleCommand(
     return;
   }
 
-  /* ------------- T38 /archive（需绑定：软归档，保留历史并清验证） ------------- */
+  /* ------------- /archive（需绑定：软归档，保留历史并清验证） ------------- */
   if (name === "/archive") {
     const owner = await findUserIdByThread(env.HODOR_DB, botId, threadId);
     if (!owner) {
@@ -380,7 +380,7 @@ export async function handleCommand(
     return;
   }
 
-  /* ------------- T38 /deluser（物理删除，二次确认） ------------- */
+  /* ------------- /deluser（物理删除，二次确认） ------------- */
   if (name === "/deluser") {
     const owner = await findUserIdByThread(env.HODOR_DB, botId, threadId);
     if (!owner) {
@@ -405,7 +405,7 @@ export async function handleCommand(
     return;
   }
 
-  /* ------------- T39 /purgemsg（需绑定，/ban 同姿态） ------------- */
+  /* ------------- /purgemsg（需绑定，/ban 同姿态） ------------- */
   if (name === "/purgemsg") {
     const owner = await findUserIdByThread(env.HODOR_DB, botId, threadId);
     if (!owner) {
@@ -472,7 +472,7 @@ export async function handleCommand(
     return;
   }
 
-  /* ------------- 全用户广播（2026-10-09）：Topic 内只提示去 General ------------- */
+  /* ------------- 全用户广播：Topic 内只提示去 General ------------- */
   // General 的 /broadcast 由 classify 专用分类直接派发（不走本管线）；此处兜住
   // Topic 内的误发——只回复跳转提示，绝不创建任务、绝不把命令或正文中继给用户
   if (name === "/broadcast") {
@@ -480,7 +480,7 @@ export async function handleCommand(
     return;
   }
 
-  /* ------------- T40 /wipealldata（全局命令，/help 同姿态无需绑定） ------------- */
+  /* ------------- /wipealldata（全局命令，/help 同姿态无需绑定） ------------- */
   if (name === "/wipealldata") {
     // 第一步只发警告 + 确认键盘（60 秒窗口编入 callback_data，无服务端状态）；
     // 真正执行在确认回调（pipeline/wipe.ts，含再次鉴权与超时判定）

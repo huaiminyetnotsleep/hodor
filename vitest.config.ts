@@ -28,20 +28,19 @@ export default defineConfig(async () => {
         SUPPORT_CHAT_ID: "-1001234567890",
         ADMIN_IDS: "111111111,222222222",
         MAX_ATTEMPTS: "3",
-        // 阶段 3 起入站欢迎语读取该变量：钉死为空 → 各用例统一走默认文案
+        // 入站欢迎语读取该变量：钉死为空 → 各用例统一走默认文案
         // 兜底分支；自定义文案分支用构造 env 对象覆盖（env.test.ts 同模式）
         WELCOME_TEXT: "",
-        // 阶段 4 限频上限（T29）：钉死默认值 20——真机 E2E 前会把 .dev.vars /
+        // 限频上限：钉死默认值 20——真机 E2E 前会把 .dev.vars /
         // 远端临时调成 3，不钉死则该值经 .dev.vars 泄漏进 worker env，
-        // 让依赖缺省 20 的路径静默漂移（构造 env 覆盖的用例不受影响，
-        // trellis-check P2#4）
+        // 让依赖缺省 20 的路径静默漂移（构造 env 覆盖的用例不受影响）
         MAX_MESSAGES_PER_MINUTE: "20",
-        // 阶段 5 验证有效期（T33）：钉死默认值 0 = 永不重验——.dev.vars /
+        // 验证有效期：钉死默认值 0 = 永不重验——.dev.vars /
         // 远端真机 E2E 会临时调成 1，不钉死同样经 .dev.vars 泄漏进 worker
         // env，让无关用例的已验证用户凭空触发重验（TTL 边界用例用构造 env
         // 对象覆盖，env.test.ts 同模式）
         VERIFY_TTL_HOURS: "0",
-        // Turnstile 任务（2026-10-09）：三可选变量钉死为空 = 未配置——
+        // Turnstile 三可选变量：钉死为空 = 未配置——
         // turnstile 模式必需检查走构造 env 覆盖的破坏用例；空串避免本地
         // .dev.vars 临时配了真实凭据泄漏进测试 env
         TURNSTILE_SITE_KEY: "",

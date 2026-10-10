@@ -1,11 +1,11 @@
 /**
  * GET /health — 轻量存活探针（零变化，字节级契约）。
  * 零外部依赖（不查 env / D1 / Telegram），供 uptime 监控高频访问；
- * version 由构建时从 package.json 注入（src/generated/version.ts，T08）。
+ * version 由构建时从 package.json 注入（src/generated/version.ts）。
  *
- * GET /selfcheck — 完整自检（T07，阶段 7）：按 env → 八表 → webhook 固定
+ * GET /selfcheck — 完整自检：按 env → 八表 → webhook 固定
  * 顺序逐项检查，三项独立执行（env 失败不阻断后续）；全过 200 ok，任何
- * 失败 503 + failed 文案数组（文案表见任务 design.md §1，本层只做装配，
+ * 失败 503 + failed 文案数组（本层只做装配，
  * 检查逻辑全在 src/selfcheck.ts）。缺 TELEGRAM_BOT_TOKEN 时不建 client、
  * 不发起 Telegram 调用；getWebhookInfo 单次消费，两种失败分类（retryable /
  * permanent）均落 failed、不重试。端点公开只读（无鉴权，用户决策）：失败

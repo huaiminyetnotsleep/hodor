@@ -1,5 +1,5 @@
 /**
- * processed_updates 表 store —— 幂等认领状态机（design.md 逐字执行）。
+ * processed_updates 表 store —— 幂等认领状态机。
  *
  * Telegram webhook 是至少一次投递，同一 update 可能并发 / 重复推送：
  * - 先 SELECT 快速路径：既有行 processed / failed → 重放，duplicate 直接跳过
@@ -11,7 +11,7 @@
  * - 接管后 attempts ≥ maxAttempts → poison：调用方 markFailed + 200（毒丸跳过）
  *
  * 占位是 processing 而非 processed：处理成功才 markProcessed，
- * 绝不提前标记掩盖失败（p1.md 警示）。
+ * 绝不提前标记掩盖失败。
  */
 import { isoBefore, nowIso } from "./util";
 
@@ -49,10 +49,10 @@ export async function claimUpdate(
     return { decision: "duplicate" };
   }
 
-  // ② 原子 upsert 认领（design.md SQL 逐字）：
+  // ② 原子 upsert 认领：
   //    WHERE 保证只在「非在途」或「在途但已过期」时接管，否则零行返回
   //
-  //    部分成功窗口（design.md 明示的已知代价，p1.md 警示的行为固化）：
+  //    部分成功窗口（已知代价）：
   //    sendMessage 已送达但 markProcessed 前崩溃 → 行停在 processing →
   //    下次重推在 60s 过期接管后会**重发一次**。这是
   //    at-least-once 投递语义下「绝不提前标记」的必然代价——宁可重复送达，

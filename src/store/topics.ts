@@ -18,7 +18,7 @@ export interface TopicRow {
   /** 置顶的用户信息消息 ID；null = 尚未置顶（或上次置顶未落库）——置顶流程的唯一入口判定 */
   pinned_msg_id: number | null;
   /**
-   * 管理员备注（topics.note，T36）：置顶信息「备注」行的数据源；随 topic
+   * 管理员备注（topics.note）：置顶信息「备注」行的数据源；随 topic
    * 终身保留（存 topics 行而非 users——/archive 或原生 close 后重开仍在）
    */
   note: string | null;
@@ -39,7 +39,7 @@ export async function findTopicByUser(
 }
 
 /**
- * 写 / 清管理员备注（T36）：/note /unnote 命令的唯一写入口。
+ * 写 / 清管理员备注：/note /unnote 命令的唯一写入口。
  * note = null 即清空（/unnote）；UPDATE 0 行（无绑定）由调用方以
  * findUserIdByThread 先行反查保证——setter 不做存在性判断（与 setBanned
  * 同姿态）。备注为纯治理信息，永不影响中继 / 账本。
@@ -57,7 +57,7 @@ export async function setTopicNote(
 }
 
 /**
- * 记录置顶的用户信息消息 ID（T24）：置顶消息发出（无论 pin 调用本身是否
+ * 记录置顶的用户信息消息 ID：置顶消息发出（无论 pin 调用本身是否
  * 成功——信息消息已在，供后续昵称变更 edit 刷新）后落库。
  * 「每 topic 恰一条置顶」由此列驱动：非 null 即不再重发。
  */
@@ -105,7 +105,7 @@ export async function reopenTopic(
 }
 
 /**
- * 关闭映射行（T38 /archive 的 DB 真值先行步骤之一）：status='closed' +
+ * 关闭映射行（/archive 的 DB 真值先行步骤之一）：status='closed' +
  * closed_at。幂等 setter——重推 / 重复执行同值无害；行删除与否由 closeForumTopic
  * 结果决定，本函数不做存在性判断（与 setBanned 同姿态，调用方先反查绑定）。
  */
@@ -123,10 +123,10 @@ export async function closeTopic(
 }
 
 /**
- * 删除绑定行（阶段 6 自愈路径，design §五.2）：topic 被原生删除后绑定指向
+ * 删除绑定行（原生删除自愈路径）：topic 被原生删除后绑定指向
  * 已不存在的 thread——删行让下一条消息（或本条的重开路径）走新建 topic。
  * 唯一调用点带 topic-gone 判定（isTopicGoneError），可恢复的配置问题绝不
- * 误删。note 随行丢失、messages 历史行保留（thread_id 悬空无害）——PRD 已
+ * 误删。note 随行丢失、messages 历史行保留（thread_id 悬空无害）。
  * 接受代价。
  */
 export async function deleteTopicBinding(
@@ -141,7 +141,7 @@ export async function deleteTopicBinding(
 }
 
 /**
- * 清空置顶消息 ID（T39 /purgemsg 重置置顶第一步）：旧信息卡已删，
+ * 清空置顶消息 ID（/purgemsg 重置置顶第一步）：旧信息卡已删，
  * pinned_msg_id 置 NULL 使重发流程（pinUserCard）成为唯一置顶入口，
  * 「每 topic 恰一条置顶」的列驱动语义不变。
  */

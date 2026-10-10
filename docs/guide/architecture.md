@@ -67,10 +67,8 @@
 
 `TELEGRAM_BOT_TOKEN` 未配置时不发起 Telegram 调用，Webhook 项按「无法检查」报告，其余检查照常执行——完全未配置变量的全新实例也能用它定位缺失项。
 
-::: info 端点演进说明
-阶段 1 曾把完整自检规划在 `/health` 本体上，当时未区分「存活探针」与「就绪检查」。
-
-阶段 7 起拆分为两个端点：`/health` 是纯存活探针（零外部依赖，供 uptime 监控高频访问）；`/selfcheck` 供部署验证与排障——完整检查含一次 Telegram API 调用，不宜挂在探针上（外部故障会被放大为探针失败、消耗 API 配额）。
+::: info 端点说明
+`/health` 与 `/selfcheck` 拆分为两个端点：`/health` 是纯存活探针（零外部依赖，供 uptime 监控高频访问）；`/selfcheck` 供部署验证与排障——完整检查含一次 Telegram API 调用，不宜挂在探针上（外部故障会被放大为探针失败、消耗 API 配额）。
 :::
 
 ### 三种密钥的分工
@@ -232,7 +230,7 @@ src/
 
 | 决策 | 理由 |
 | --- | --- |
-| 媒体 file_id 直传，不落盘 | `sendPhoto`/`sendVideo` 等按 file_id 原样发送（T22 已交付：7 类媒体 + 文本）；零存储成本、零 R2 依赖，部署门槛最低。代价是 Telegram 服务端为唯一存储（可接受，不做本地留存） |
+| 媒体 file_id 直传，不落盘 | `sendPhoto`/`sendVideo` 等按 file_id 原样发送（7 类媒体 + 文本）；零存储成本、零 R2 依赖，部署门槛最低。代价是 Telegram 服务端为唯一存储（可接受，不做本地留存） |
 | token 永不进 URL | URL 会留在浏览器历史、CF 访问日志等处，泄漏即被接管 bot。管理端点用独立的 `ADMIN_SECRET` 鉴权，token 只从 env 读取 |
 | 一人一 topic，archive 后复用、deluser 后删除 | `/archive` 保留绑定 / 历史 / 备注并在回访时重开；`/deluser` 物理删除 topic + Hodor 数据；native close/reopen 服务事件同步 topic 状态 |
 | 业务表记录 bot_id | 标识当前实例的 bot 身份；多个实例各用独立 D1，不能仅凭此列推断可跨实例迁移 |

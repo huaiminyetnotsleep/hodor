@@ -1,12 +1,12 @@
 /**
- * GET /verify + POST /api/verify/turnstile（Turnstile 任务；design.md §4）。
+ * GET /verify + POST /api/verify/turnstile（Turnstile 验证页面与完成入口）。
  *
  * GET：安全静态页面（CSP nonce / no-store / Referrer-Policy / nosniff）。
  * r 必须符合 nonce 格式；页面绝不根据 r 输出用户资料，nonce 也不是身份。
  *
  * POST（唯一完成入口）：严格 JSON（≤ 16 KiB，读 body 计量而非仅信
  * Content-Length）；输入只收 requestId / initData / turnstileToken——客户端
- * 自报的 userId / botId 绝不当授权依据。固定顺序（design §8）：
+ * 自报的 userId / botId 绝不当授权依据。固定顺序：
  *   来源校验（Origin 可选匹配）→ bot/config 就绪 → initData HMAC 身份 →
  *   请求预检（归属 / 用户不符 / 封禁 / 已验证 / hash / 配置版本 / 过期）→
  *   15 秒原子认领提交窗口（不调上游）→ Siteverify（成功也核对 hostname /
@@ -105,7 +105,7 @@ export function handleVerifyPage(request: Request, env: Cloudflare.Env): Respons
       "x-content-type-options": "nosniff",
       "content-security-policy": page.csp,
       // 刻意不设 frame-ancestors 'none' / X-Frame-Options DENY：Telegram
-      // Mini App 需要嵌入本页（design §4）
+      // Mini App 需要嵌入本页
     }),
   });
 }

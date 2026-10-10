@@ -1,5 +1,5 @@
 /**
- * classifyUpdate 纯函数直测（T15 分流规则 + fail-closed 决策 + T27 callback 分流
+ * classifyUpdate 纯函数直测（分流规则 + fail-closed 决策 +  callback 分流
  * + General /broadcast 专用分类 + General 全局命令放行）：私聊 / 客服群带 thread /
  * 客服群无 thread（General：/broadcast 进广播路径、全局配置命令与 /help 放行
  * outbound，其余 ignore）/ 其他群 / 超级群非客服 /
@@ -44,11 +44,11 @@ function callbackUpdate(overrides: Record<string, unknown> = {}): Record<string,
 }
 
 describe("classify: 标准分流", () => {
-  it("私聊 → inbound", () => {
+ it("私聊 → inbound", () => {
     expect(classifyUpdate(update(message()), SUPPORT_CHAT_ID)).toBe("inbound");
   });
 
-  it("客服超级群 + message_thread_id → outbound", () => {
+ it("客服超级群 + message_thread_id → outbound", () => {
     const msg = message({
       from: { id: 111111111, first_name: "Admin" },
       chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
@@ -57,7 +57,7 @@ describe("classify: 标准分流", () => {
     expect(classifyUpdate(update(msg), SUPPORT_CHAT_ID)).toBe("outbound");
   });
 
-  it("客服群同链路但 message_thread_id 非数字 → ignore", () => {
+ it("客服群同链路但 message_thread_id 非数字 → ignore", () => {
     const msg = message({
       chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
       message_thread_id: "100",
@@ -65,12 +65,12 @@ describe("classify: 标准分流", () => {
     expect(classifyUpdate(update(msg), SUPPORT_CHAT_ID)).toBe("ignore");
   });
 
-  it("客服群无 thread（General / 非 topic 消息）→ ignore", () => {
+ it("客服群无 thread（General / 非 topic 消息）→ ignore", () => {
     const msg = message({ chat: { id: SUPPORT_CHAT_ID, type: "supergroup" } });
     expect(classifyUpdate(update(msg), SUPPORT_CHAT_ID)).toBe("ignore");
   });
 
-  it("客服群无 thread 且首 token 为 /broadcast → broadcast（全用户广播专用入口）", () => {
+ it("客服群无 thread 且首 token 为 /broadcast → broadcast（全用户广播专用入口）", () => {
     const supportGeneral = (text: string) =>
       message({
         from: { id: 111111111, first_name: "Admin" },
@@ -80,7 +80,7 @@ describe("classify: 标准分流", () => {
     expect(classifyUpdate(update(supportGeneral("/broadcast")), SUPPORT_CHAT_ID)).toBe("broadcast");
     expect(classifyUpdate(update(supportGeneral("/broadcast@hodor_bot 标题\n正文")), SUPPORT_CHAT_ID)).toBe("broadcast");
     expect(classifyUpdate(update(supportGeneral("/broadcast 标题")), SUPPORT_CHAT_ID)).toBe("broadcast");
-    // thread 字段若存在但非法，不能误降级为 General 广播
+ // thread 字段若存在但非法，不能误降级为 General 广播
     expect(
       classifyUpdate(
         update({ ...supportGeneral("/broadcast 标题"), message_thread_id: 0 }),
@@ -93,16 +93,16 @@ describe("classify: 标准分流", () => {
         SUPPORT_CHAT_ID,
       ),
     ).toBe("ignore");
-    // 前缀巧合 / 非命令 / 普通 General 消息仍 ignore
+ // 前缀巧合 / 非命令 / 普通 General 消息仍 ignore
     expect(classifyUpdate(update(supportGeneral("/broadcasts xx")), SUPPORT_CHAT_ID)).toBe("ignore");
     expect(classifyUpdate(update(supportGeneral("普通群聊")), SUPPORT_CHAT_ID)).toBe("ignore");
-    // text 缺失（非字符串）→ ignore
+ // text 缺失（非字符串）→ ignore
     const noText = message({
       from: { id: 111111111, first_name: "Admin" },
       chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
     });
     expect(classifyUpdate(update(noText), SUPPORT_CHAT_ID)).toBe("ignore");
-    // 带 thread 的 /broadcast 走 outbound（命令管线在 topic 内只提示去 General）
+ // 带 thread 的 /broadcast 走 outbound（命令管线在 topic 内只提示去 General）
     const inTopic = message({
       from: { id: 111111111, first_name: "Admin" },
       chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
@@ -112,7 +112,7 @@ describe("classify: 标准分流", () => {
     expect(classifyUpdate(update(inTopic), SUPPORT_CHAT_ID)).toBe("outbound");
   });
 
-  it("客服群 General 全局命令（2026-10-10 命令拆分）→ outbound（执行门在 commands 层）", () => {
+ it("客服群 General 全局命令→ outbound（执行门在 commands 层）", () => {
     const supportGeneral = (text: string, extra: Record<string, unknown> = {}) =>
       message({
         from: { id: 111111111, first_name: "Admin" },
@@ -120,7 +120,7 @@ describe("classify: 标准分流", () => {
         text,
         ...extra,
       });
-    // 放行集合七个命令，含 @bot 后缀形态
+ // 放行集合七个命令，含 @bot 后缀形态
     for (const text of [
       "/verifyon",
       "/verifyoff",
@@ -136,7 +136,7 @@ describe("classify: 标准分流", () => {
     }
   });
 
-  it("General 非放行命令 / 前缀巧合 / 普通文本仍 ignore（不扩大中继范围）", () => {
+ it("General 非放行命令 / 前缀巧合 / 普通文本仍 ignore（不扩大中继范围）", () => {
     const supportGeneral = (text: string) =>
       message({
         from: { id: 111111111, first_name: "Admin" },
@@ -158,7 +158,7 @@ describe("classify: 标准分流", () => {
     }
   });
 
-  it("General 放行命令带非法 thread 字段 → ignore（不误降级）；带合法 thread → 正常 outbound", () => {
+ it("General 放行命令带非法 thread 字段 → ignore（不误降级）；带合法 thread → 正常 outbound", () => {
     const supportGeneral = (text: string, extra: Record<string, unknown>) =>
       message({
         from: { id: 111111111, first_name: "Admin" },
@@ -180,7 +180,7 @@ describe("classify: 标准分流", () => {
     ).toBe("outbound");
   });
 
-  it("私聊中的 /broadcast 仍是 inbound（不会进入客服群广播分类）", () => {
+ it("私聊中的 /broadcast 仍是 inbound（不会进入客服群广播分类）", () => {
     const privateCommand = message({
       chat: { id: 7001, type: "private" },
       text: "/broadcast 标题\n正文",
@@ -188,7 +188,7 @@ describe("classify: 标准分流", () => {
     expect(classifyUpdate(update(privateCommand), SUPPORT_CHAT_ID)).toBe("inbound");
   });
 
-  it("其他群组 → ignore（含其他群的 /broadcast：广播绝不从外群发起）", () => {
+ it("其他群组 → ignore（含其他群的 /broadcast：广播绝不从外群发起）", () => {
     const msg = message({ chat: { id: -1009876543210, type: "supergroup" } });
     expect(classifyUpdate(update(msg), SUPPORT_CHAT_ID)).toBe("ignore");
     const foreignBroadcast = message({
@@ -198,23 +198,23 @@ describe("classify: 标准分流", () => {
     expect(classifyUpdate(update(foreignBroadcast), SUPPORT_CHAT_ID)).toBe("ignore");
   });
 
-  it("非客服的普通 group → ignore", () => {
+ it("非客服的普通 group → ignore", () => {
     const msg = message({ chat: { id: -777, type: "group" } });
     expect(classifyUpdate(update(msg), SUPPORT_CHAT_ID)).toBe("ignore");
   });
 });
 
-describe("classify: callback_query 分流（T27 验证题按钮）", () => {
-  it("私聊题面回调（id / from.id / message_id / chat.type 全合法）→ callback", () => {
+describe("classify: callback_query 分流（验证题按钮）", () => {
+ it("私聊题面回调（id / from.id / message_id / chat.type 全合法）→ callback", () => {
     expect(classifyUpdate(callbackUpdate(), SUPPORT_CHAT_ID)).toBe("callback");
   });
 
-  it("id 非字符串（缺失 / 数字）→ ignore（畸形 id 不进 answerCallbackQuery，形态防护在分流层收口）", () => {
+ it("id 非字符串（缺失 / 数字）→ ignore（畸形 id 不进 answerCallbackQuery，形态防护在分流层收口）", () => {
     expect(classifyUpdate(callbackUpdate({ id: undefined }), SUPPORT_CHAT_ID)).toBe("ignore");
     expect(classifyUpdate(callbackUpdate({ id: 12345 }), SUPPORT_CHAT_ID)).toBe("ignore");
   });
 
-  it("客服群内回调（chat.id = SUPPORT_CHAT_ID）→ group_callback（T40 wipe 确认键盘）", () => {
+ it("客服群内回调（chat.id = SUPPORT_CHAT_ID）→ group_callback（wipe 确认键盘）", () => {
     expect(
       classifyUpdate(
         callbackUpdate({ message: { message_id: 55, chat: { id: SUPPORT_CHAT_ID, type: "supergroup" } } }),
@@ -223,7 +223,7 @@ describe("classify: callback_query 分流（T27 验证题按钮）", () => {
     ).toBe("group_callback");
   });
 
-  it("其他群内回调（非客服群）→ ignore（不存在合法按钮形态）", () => {
+ it("其他群内回调（非客服群）→ ignore（不存在合法按钮形态）", () => {
     expect(
       classifyUpdate(
         callbackUpdate({ message: { message_id: 55, chat: { id: -1009876543210, type: "supergroup" } } }),
@@ -232,16 +232,16 @@ describe("classify: callback_query 分流（T27 验证题按钮）", () => {
     ).toBe("ignore");
   });
 
-  it("缺 message（极老客户端形态）→ ignore", () => {
+ it("缺 message（极老客户端形态）→ ignore", () => {
     expect(classifyUpdate(callbackUpdate({ message: undefined }), SUPPORT_CHAT_ID)).toBe("ignore");
   });
 
-  it("from 缺 id / 非对象 → ignore（归属判定无依据，零副作用）", () => {
+ it("from 缺 id / 非对象 → ignore（归属判定无依据，零副作用）", () => {
     expect(classifyUpdate(callbackUpdate({ from: {} }), SUPPORT_CHAT_ID)).toBe("ignore");
     expect(classifyUpdate(callbackUpdate({ from: "alice" }), SUPPORT_CHAT_ID)).toBe("ignore");
   });
 
-  it("message.message_id / chat.id 非数字 → ignore", () => {
+ it("message.message_id / chat.id 非数字 → ignore", () => {
     expect(
       classifyUpdate(callbackUpdate({ message: { message_id: "55", chat: { id: 7001, type: "private" } } }), SUPPORT_CHAT_ID),
     ).toBe("ignore");
@@ -250,37 +250,37 @@ describe("classify: callback_query 分流（T27 验证题按钮）", () => {
     ).toBe("ignore");
   });
 
-  it("data 形态不在分流职责内（v:<n> 判定在 verify 管线毒丸防护）——任意 data 都 callback", () => {
+ it("data 形态不在分流职责内（v:<n> 判定在 verify 管线毒丸防护）——任意 data 都 callback", () => {
     expect(classifyUpdate(callbackUpdate({ data: "junk" }), SUPPORT_CHAT_ID)).toBe("callback");
     expect(classifyUpdate(callbackUpdate({ data: undefined }), SUPPORT_CHAT_ID)).toBe("callback");
   });
 });
 
 describe("classify: 无 message / 畸形形态", () => {
-  it("edited_message（无 .message）→ ignore", () => {
+ it("edited_message（无 .message）→ ignore", () => {
     const edited = { update_id: 9002, edited_message: message() };
     expect(classifyUpdate(edited, SUPPORT_CHAT_ID)).toBe("ignore");
   });
 
-  it("callback_query 无 message 字段 → ignore", () => {
+ it("callback_query 无 message 字段 → ignore", () => {
     const cb = { update_id: 9003, callback_query: { id: "1", from: { id: 7001 } } };
     expect(classifyUpdate(cb, SUPPORT_CHAT_ID)).toBe("ignore");
   });
 
-  it("message.chat 缺 id / type / 非对象 → ignore", () => {
+ it("message.chat 缺 id / type / 非对象 → ignore", () => {
     expect(classifyUpdate(update(message({ chat: { type: "private" } })), SUPPORT_CHAT_ID)).toBe("ignore");
     expect(classifyUpdate(update(message({ chat: { id: 7001 } })), SUPPORT_CHAT_ID)).toBe("ignore");
     expect(classifyUpdate(update(message({ chat: null })), SUPPORT_CHAT_ID)).toBe("ignore");
   });
 
-  it("update 本体非对象 → ignore", () => {
+ it("update 本体非对象 → ignore", () => {
     expect(classifyUpdate("nope", SUPPORT_CHAT_ID)).toBe("ignore");
     expect(classifyUpdate(null, SUPPORT_CHAT_ID)).toBe("ignore");
   });
 });
 
 describe("classify: Telegram 原生 forum topic 状态事件", () => {
-  it("客服群带合法 thread 的 forum_topic_closed / reopened → topic_event", () => {
+ it("客服群带合法 thread 的 forum_topic_closed / reopened → topic_event", () => {
     const base = {
       chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
       message_thread_id: 123,
@@ -293,7 +293,7 @@ describe("classify: Telegram 原生 forum topic 状态事件", () => {
     ).toBe("topic_event");
   });
 
-  it("其他群、缺 thread、双事件或畸形事件 → ignore", () => {
+ it("其他群、缺 thread、双事件或畸形事件 → ignore", () => {
     expect(
       classifyUpdate(
         update(message({ chat: { id: -1009876543210, type: "supergroup" }, message_thread_id: 123, forum_topic_closed: {} })),
@@ -330,11 +330,11 @@ describe("classify: Telegram 原生 forum topic 状态事件", () => {
 });
 
 describe("classify: supportChatId === null（env 畸形）fail-closed", () => {
-  it("私聊 → ignore（宁可零副作用，不产生半吊子转发）", () => {
+ it("私聊 → ignore（宁可零副作用，不产生半吊子转发）", () => {
     expect(classifyUpdate(update(message()), null)).toBe("ignore");
   });
 
-  it("客服群带 thread → ignore", () => {
+ it("客服群带 thread → ignore", () => {
     const msg = message({
       chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
       message_thread_id: 100,
@@ -342,7 +342,7 @@ describe("classify: supportChatId === null（env 畸形）fail-closed", () => {
     expect(classifyUpdate(update(msg), null)).toBe("ignore");
   });
 
-  it("合法形态的私聊 callback → 同样 ignore（fail-closed 覆盖新分流）", () => {
+ it("合法形态的私聊 callback → 同样 ignore（fail-closed 覆盖新分流）", () => {
     expect(classifyUpdate(callbackUpdate(), null)).toBe("ignore");
   });
 });

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// scripts/deploy.mjs —— 单命令部署编排（T05/T06 提前交付，2026-09-30 范围变更）
+// scripts/deploy.mjs —— 单命令部署编排（单命令部署编排）
 //
 // 默认流程：注入版本模块 → 解析/创建 D1 数据库 → 应用远端迁移 → 部署 Worker。
 //
@@ -12,7 +12,7 @@
 //      数据库名就地注入仓库路径的 wrangler.jsonc——构建工作区是一次性克隆，
 //      注入不回传 git 仓库；Workers Builds 官方默认命令 `npx wrangler deploy`
 //      从 cwd 读配置、不带 --config，注入因此必需。
-//   2. 迁移失败 → 中止且不部署（T06 契约：不发布不兼容代码），修复后重跑即可。
+//   2. 迁移失败 → 中止且不部署（契约：不发布不兼容代码），修复后重跑即可。
 //      --install-hook 下即：迁移失败 → npm install 失败 → 构建中止 → 不部署。
 //   3. --install-hook 门控：非 Workers Builds 环境（无 WORKERS_CI=1；本地与
 //      GitHub Actions 等只有 CI=true）下零写入、零子进程、零网络，直接跳过
@@ -589,7 +589,7 @@ export function buildResolvedConfig(rawText, uuid, databaseName) {
 }
 
 /**
- * 生成 src/generated/version.ts（T08 版本注入）。
+ * 生成 src/generated/version.ts（版本注入）。
  *
  * 纯渲染/校验在 scripts/lib/version.mjs；本函数只做文件读写（与
  * scripts/gen-version.mjs 各自内联 fs，lib 保持无 node:* 导入以便 workerd
@@ -629,7 +629,7 @@ function generateVersionModule() {
 }
 
 /**
- * 对远端数据库应用迁移；任何非零退出都中止且不部署（T06 契约）。
+ * 对远端数据库应用迁移；任何非零退出都中止且不部署（契约）。
  * wrangler 输出走完整 inherit，用户能看到待应用/已应用的迁移清单。
  *
  * @param {string} databaseName
@@ -820,7 +820,7 @@ async function main() {
     return;
   }
 
-  // T08：迁移/部署前注入版本模块（wrangler 打包 src/index.ts 需要它存在；CF
+  // 迁移/部署前注入版本模块（wrangler 打包 src/index.ts 需要它存在；CF
   // Workers Builds 在干净检出上跑 npm run deploy，此时文件尚未生成，这里就是
   // 远端构建的注入时机）。--provision-only 不构建，已在上方提前返回。
   generateVersionModule();

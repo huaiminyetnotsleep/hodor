@@ -11,21 +11,21 @@ beforeAll(async () => {
 });
 
 describe("store: bots", () => {
-  it("空表 → getSingleBotId 返回 null", async () => {
+ it("空表 → getSingleBotId 返回 null", async () => {
     expect(await getSingleBotId(env.HODOR_DB)).toBeNull();
   });
 
-  it("upsertBot：新建后可读取", async () => {
+ it("upsertBot：新建后可读取", async () => {
     await upsertBot(env.HODOR_DB, { botId: 42, username: "hodor_bot", displayName: "hodor" });
     expect(await getSingleBotId(env.HODOR_DB)).toBe(42);
   });
 
-  it("upsertBot：再绑定刷新 username / display_name，created_at（首次绑定时间）保留", async () => {
+ it("upsertBot：再绑定刷新 username / display_name，created_at（首次绑定时间）保留", async () => {
     const first = await env.HODOR_DB.prepare(
       "SELECT username, display_name, created_at FROM bots WHERE bot_id = 42",
     ).first<{ username: string; display_name: string; created_at: string }>();
 
-    // 稍等毫秒级时钟推进，确保若实现误改 created_at，新值必然不同
+ // 稍等毫秒级时钟推进，确保若实现误改 created_at，新值必然不同
     await new Promise((resolve) => setTimeout(resolve, 5));
     await upsertBot(env.HODOR_DB, {
       botId: 42,

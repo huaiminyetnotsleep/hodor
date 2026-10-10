@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// scripts/gen-version.mjs —— 版本注入入口（T08 版本注入，2026-09-30 范围变更）
+// scripts/gen-version.mjs —— 版本注入入口（版本注入）
 //
 // 从仓库根 package.json 读取 version，生成 src/generated/version.ts：
 //   - 生成目录 src/generated/ 已 gitignore——版本唯一来源是 package.json；
