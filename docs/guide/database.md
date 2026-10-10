@@ -95,7 +95,7 @@ UNIQUE `(bot_id, user_id)` **和** UNIQUE `(bot_id, thread_id)` 双向唯一：
 | key（PK） | value | 说明 |
 | --- | --- | --- |
 | `verify_enabled` | `1` / `0` | `/verifyon` / `/verifyoff` |
-| `verify_mode` | `math` / `button` / `turnstile` | `/verifymode`（无参数只查看；显式指定模式设置） |
+| `verify_mode` | `math` / `button` / `turnstile` | `/verifymode_math|button|turnstile`（General 执行）或别名 `/verifymode <模式>`；`/verifymode` 无参数只查看 |
 | `verify_generation` | 非负整数（缺失按 `0` 解释） | 实例验证配置版本。模式 / 开关**真变化**时在同一事务内 +1 并清空全部 pending（含 `verify_request_hash` 等四列）；同模式 / 同值重复设置、无参查看与非法参数不推进版本、不清 pending。保留 `is_verified` / `verified_at`（不强制已验证用户重验） |
 
 存库而非环境变量的原因：命令切换需要即时生效，不改 env、不重新部署。

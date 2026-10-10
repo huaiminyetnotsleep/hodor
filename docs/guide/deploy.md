@@ -154,7 +154,7 @@ D1 数据库名自动随 Worker 名派生（Worker 名 `hodor-shop` → 数据�
 
 1. 一个 Cloudflare 账号（与部署 Worker 同一账号即可）
 2. 一个已完成部署收尾的 hodor 实例，并记下它的实际 HTTPS 地址（如 `https://hodor.example.workers.dev`，以浏览器地址栏为准，不要凭 Worker 名猜测）
-3. 管理员账号（稍后用 `/verifymode` 命令切换模式）
+3. 管理员账号（稍后在客服群 General 用 `/verifymode_turnstile` 命令切换模式）
 
 ### 创建 Widget 并获取密钥
 
@@ -199,20 +199,20 @@ D1 数据库名自动随 Worker 名派生（Worker 名 `hodor-shop` → 数据�
 ### 启用与验收
 
 1. 配置完成后访问 `/selfcheck`：确认无 Turnstile 相关失败项（只配一把 Key、误配官方测试密钥、`PUBLIC_BASE_URL` 非法都会被逐条点名）
-2. 管理员在客服群话题内发送 `/verifymode turnstile`：密钥未配齐时切换被拒绝并点名缺失变量；成功后回执确认切换完成。切换即时生效：作废全部旧验证题与未完成的网页请求，已验证用户不受影响
+2. 管理员在客服群 General 发送 `/verifymode_turnstile`（验证配置命令仅 General 生效，其他话题会收到引导提示）：密钥未配齐时切换被拒绝并点名缺失变量；成功后回执确认切换完成。切换即时生效：作废全部旧验证题与未完成的网页请求，已验证用户不受影响
 3. 用一个**未验证**的 Telegram 账号私聊 Bot → 收到验证消息 → 点「打开验证页面」→ 完成 Turnstile 挑战 → 页面显示验证通过 → 回聊天窗口重新发送一条消息 → 客服群出现该用户话题且消息中继
 
 ::: warning 端到端验收必须真机完成
 Telegram 内嵌浏览器对 Mini App 与第三方组件的支持以**实测为准**：请在你实际使用的客户端（Android / iOS / Desktop / Web）各完成一次上述验收。文档与自动化测试不能替代真机验证；某端异常时的表现与处理见[运维手册 · 故障排查](/guide/ops.md#故障排查)。
 :::
 
-回滚：管理员执行 `/verifymode math`（或 `button`）即切回原模式——未完成的网页请求作废、已验证状态保留，详见[运维手册 · 验证模式与密钥变更](/guide/ops.md#验证模式与密钥变更)。
+回滚：管理员在客服群 General 执行 `/verifymode math`（或 `button`）即切回原模式——未完成的网页请求作废、已验证状态保留，详见[运维手册 · 验证模式与密钥变更](/guide/ops.md#验证模式与密钥变更)。
 
 ### 入口与身份说明
 
 Turnstile 模式的入口是 Bot 私聊消息里的「打开验证页面」按钮（Telegram Mini App，见[官方说明](https://core.telegram.org/bots/webapps/)）。页面通过 Telegram 官方签名数据确认当前用户，提交后由服务端向 Cloudflare Siteverify 校验挑战结果并核对当前请求——仅持有链接或挑战结果不能完成他人的验证。
 
-申请 Turnstile 不依赖任何第三方验证服务（TGuard 仍是未实现的规划，见[路线图](/todo/index.md)）。
+申请 Turnstile 不依赖任何第三方验证服务。
 
 Turnstile 验证请求量与 Workers / D1 的套餐配额分别计量，实际成本取决于 Cloudflare 套餐与配额（当前额度见官方[套餐页](https://developers.cloudflare.com/turnstile/plans/)）。
 

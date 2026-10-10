@@ -147,7 +147,7 @@ npm run deploy
 
 ### 管理命令
 
-在客服群对应话题内发送，仅 `ADMIN_IDS` 中的管理员生效；`/broadcast` 为例外，须在客服群 General 发起。部署后自动注册进群命令菜单（输入框点 `/` 直接选择）。
+在客服群对应话题内发送，仅 `ADMIN_IDS` 中的管理员生效；`/broadcast` 须在客服群 General 发起，验证配置命令（`/verifymode` 系列、`/verifyon` `/verifyoff`）仅限客服群 General 执行（其他话题会收到引导提示）。部署后自动注册进群命令菜单（输入框点 `/` 直接选择）。
 
 | 命令 | 作用 |
 | --- | --- |
@@ -155,7 +155,8 @@ npm run deploy
 | `/ban` `/unban` | 封禁 / 解封本话题用户 |
 | `/note` `/unnote` | 添加 / 清除用户备注 |
 | `/risk` `/unrisk` | 标记 / 取消高危用户 |
-| `/verifyon` `/verifyoff` `/verifymode` | 开启 / 关闭人机验证；`/verifymode` 无参查看、显式设置验证模式（math / button / turnstile，即时生效，无需重部署） |
+| `/verifyon` `/verifyoff` | 开启 / 关闭人机验证（仅限客服群 General 执行） |
+| `/verifymode` `/verifymode_math` `/verifymode_button` `/verifymode_turnstile` | 查看验证模式；切换到数学题 / 纯按钮 / Turnstile 验证（即时生效，无需重部署；仅限客服群 General 执行） |
 | `/archive` | 软归档本话题用户（保留历史与备注，回访复用原话题） |
 | `/deluser` | 物理删除用户及本话题（需确认） |
 | `/purgemsg` | 清理本话题可追踪的群消息 |

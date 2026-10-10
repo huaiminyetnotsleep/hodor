@@ -11,14 +11,24 @@
  *   chat.id === SUPPORT_CHAT_ID → group_callback（客服群内按钮，T38/T40/T 广播确认）；
  *   其他群 / 畸形 → ignore
  * - 客服群 message 带 forum_topic_closed / forum_topic_reopened + 合法 thread → topic_event
- * - 客服群无 thread（General）且 text 首 token 为 /broadcast → broadcast（专用入口，
- *   General 其他消息继续 ignore——不扩大中继范围）
+ * - 客服群无 thread（General）且 text 首 token 为 /broadcast → broadcast（专用入口）；
+ *   全局命令（/verifyon /verifyoff /verifymode 系列 /help）→ outbound（webhook 层
+ *   把线程号归一化为 GENERAL_THREAD_ID = General，命令管线原地回复；其中验证
+ *   配置命令是否执行由 commands.ts 的 General 执行门裁决，分流层只负责放行）
+ *   General 其余消息继续 ignore——不扩大中继范围
  * - 无 message 且无 callback_query（edited_message / channel_post 等）→ ignore
  * - chat.type === 'private' → inbound（用户私聊）
  * - chat.id === SUPPORT_CHAT_ID 且带 message_thread_id → outbound（topic 内发言）
  * - 其他 chat → ignore
  */
-import { isBroadcastCommand } from "../copy";
+import { isBroadcastCommand, isGeneralGlobalCommand } from "../copy";
+
+/**
+ * General topic 的固定 thread 号（Telegram 约定）：General 发言不带
+ * message_thread_id 字段，webhook 层归一化为该值后进入 outbound 命令管线；
+ * commands.ts 的验证配置「仅 General 生效」执行门以此为判据。
+ */
+export const GENERAL_THREAD_ID = 1;
 
 export type UpdateClassification =
   | "inbound"
@@ -155,16 +165,25 @@ export function classifyUpdate(
       return validMessageId && validThread && hasClosedEvent !== hasReopenedEvent ? "topic_event" : "ignore";
     }
     if (validThread) return "outbound";
-    // General（无 thread 字段）：仅专用 /broadcast 命令进入广播路径；其余照旧 ignore。
-    // message_thread_id 存在但非法时属于畸形 update，不能误降级成 General。
-    // text 缺失 / 非字符串视同非命令。
+    // General（无 thread 字段）：/broadcast 进广播路径；全局命令放行为 outbound
+    //（不依赖绑定，验证配置命令的执行门在 commands.ts）；其余照旧 ignore——
+    // 不扩大中继范围。message_thread_id 存在但非法时属于畸形 update，不能误
+    // 降级成 General。text 缺失 / 非字符串视同非命令。
     const hasThreadField = Object.prototype.hasOwnProperty.call(message, "message_thread_id");
+    // General 命令放行的共同前提：无 thread 字段（字段存在但非法 = 畸形）
+    // + message_id 合法
+    const generalCommandEligible = !hasThreadField && validMessageId;
     if (
-      !hasThreadField &&
-      validMessageId &&
+      generalCommandEligible &&
       isBroadcastCommand(typeof message.text === "string" ? message.text : undefined)
     ) {
       return "broadcast";
+    }
+    if (
+      generalCommandEligible &&
+      isGeneralGlobalCommand(typeof message.text === "string" ? message.text : undefined)
+    ) {
+      return "outbound";
     }
     return "ignore";
   }

@@ -72,14 +72,14 @@ Turnstile 的申请与生产配置见[部署指南 · Turnstile 申请与配置]
 
 Turnstile 的 Secret、Widget hostname 或 `PUBLIC_BASE_URL` 变更不能只改面板值了事：在途的验证页面与旧配置不会瞬时全局生效。按以下顺序：
 
-1. 管理员执行 `/verifymode math`（或 `button`）切出 Turnstile 模式——同时作废全部未完成的网页请求
+1. 管理员在客服群 General 执行 `/verifymode math`（或 `button`）切出 Turnstile 模式——同时作废全部未完成的网页请求
 2. 在面板修改变量；hostname 变化时同步在 Turnstile 控制台调整 Widget
 3. 访问 `/selfcheck` 复查至无 Turnstile 相关失败项
-4. `/verifymode turnstile` 重新启用，并按部署指南的验收步骤在真机复验
+4. 在客服群 General 执行 `/verifymode_turnstile` 重新启用，并按部署指南的验收步骤在真机复验
 
 ### 回滚
 
-`/verifymode math`（或 `button`）即回退到原模式：未完成的网页请求与旧题目全部作废，**已验证状态保留**，已验证用户无需重验。
+在客服群 General 执行 `/verifymode math`（或 `button`）即回退到原模式：未完成的网页请求与旧题目全部作废，**已验证状态保留**，已验证用户无需重验。
 
 不要用直接回滚代码版本的方式「关闭」Turnstile——旧版本不认识新的验证状态字段；先切模式才是安全路径。
 
@@ -107,7 +107,7 @@ Turnstile 的 Secret、Widget hostname 或 `PUBLIC_BASE_URL` 变更不能只改�
 | --- | --- |
 | `必填变量未配置：TELEGRAM_BOT_TOKEN、…`、`SUPPORT_CHAT_ID 非法：…`、`密钥变量取值重复：…`、`MAX_ATTEMPTS 已配置但非法（正整数）…` 类 | 面板 Worker → 设置 → 变量和机密 补齐 / 修正对应变量后重试（选填值非法时运行时已回退默认值，failed 项属提示性质） |
 | `Turnstile 配置不完整：TURNSTILE_SITE_KEY 与 TURNSTILE_SECRET_KEY 必须成对配置（当前仅配置了 …）` | 两把 Key 成对补齐，或成对清空（不使用 Turnstile）；申请流程见[部署指南 · Turnstile 申请与配置](/guide/deploy.md#turnstile) |
-| `当前验证模式为 turnstile，但缺少必需配置：…` | 面板补齐缺失的 Key 后重试；或先用 `/verifymode math` / `button` 切回其他模式 |
+| `当前验证模式为 turnstile，但缺少必需配置：…` | 面板补齐缺失的 Key 后重试；或先在客服群 General 执行 `/verifymode math` / `button` 切回其他模式（验证配置命令仅 General 生效） |
 | `TURNSTILE_SITE_KEY / TURNSTILE_SECRET_KEY 是 Cloudflare 官方测试密钥：仅限本地测试…` | 换成在 Turnstile 控制台创建 Widget 获取的正式密钥（测试密钥放行一切，生产不可用） |
 | `PUBLIC_BASE_URL 已配置但非法：必须是 HTTPS origin…` | 修正为合法的 HTTPS origin（仅可含根路径），或直接清空该变量（按请求 origin 自动推导） |
 | `验证配置读取失败：无法从数据库读取验证模式（Turnstile 项跳过）` | D1 暂不可用：先看「数据库缺表」类条目与构建日志；该条不阻断其余检查 |
@@ -180,7 +180,7 @@ LIMIT 20;
 | bot 完全无响应 | ① 先确认 webhook 已绑定：访问 `/setwebhook/<ADMIN_SECRET>` 回显身份即已绑定（或看完整自检 `GET /selfcheck`：未绑定 / 指向错误会在 `failed` 中逐条点名）；② `npx wrangler tail hodor` 实时日志看请求是否到达、有无 401——secret 头不符说明 `TELEGRAM_WEBHOOK_SECRET` 与注册时不一致，重新 setwebhook；③ 日志无请求 = Telegram 侧未推送，检查 webhook 绑定 |
 | 消息进群但为空 / 报 sendMessage 400 | `wrangler tail` 看具体 API 报错文案；若为「message to copy not found」类，参考 T21 运行时说明（[TODO](/todo/p1.md)） |
 | 验证码收不到 | 用户是否已被 ban（封禁门不发出题）；日志中 sendMessage 是否报 403（用户已停用 / 拉黑 bot）；60 秒内重复消息受提示频控限制（每分钟最多 1 次提示） |
-| `/verifymode turnstile` 回复「无法切换…缺少必需配置」 | 面板 Worker → 变量和机密 补齐 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`（成对配置），`/selfcheck` 核对后重试；申请流程见[部署指南](/guide/deploy.md#turnstile) |
+| `/verifymode_turnstile` 回复「无法切换…缺少必需配置」 | 面板 Worker → 变量和机密 补齐 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY`（成对配置），`/selfcheck` 核对后在客服群 General 重试；申请流程见[部署指南](/guide/deploy.md#turnstile) |
 | 验证页面显示「请从 Bot 聊天窗口的…按钮打开本页」 | 链接在 Telegram 外打开（拿不到 Telegram 签名身份）或会话已失效：回到 Bot 私聊点「打开验证页面」按钮重开——这是唯一支持的入口 |
 | 验证页面显示「当前账号与验证请求不符」 | 打开链接的 Telegram 账号不是发起验证的账号：让原账号回 Bot 重新发起 |
 | 验证页面显示「身份信息已过期（页面打开超过 5 分钟）」 | 页面开着太久：关闭后从 Bot 按钮重新打开；仅刷新挑战组件无效 |

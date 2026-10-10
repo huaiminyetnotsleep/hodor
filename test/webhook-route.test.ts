@@ -32,15 +32,19 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { parseMaxAttempts } from "../src/env";
 import {
   DELUSER_TOAST_CANCELLED,
+  formatVerifyModeCurrent,
+  formatVerifyOffConfirmed,
+  NOT_ADMIN_COMMAND_NOTICE,
   VERIFY_EXPIRED_NOTICE,
   VERIFY_PASSED_TEXT,
   VERIFY_PASSED_TOAST,
+  VERIFY_COMMANDS_GENERAL_ONLY_NOTICE,
 } from "../src/copy";
 import { handleWebhook } from "../src/routes/webhook";
 import { upsertBot } from "../src/store/bots";
 import { saveDeleteConfirmation } from "../src/store/deleteConfirmations";
 import { ensureUser, setPendingVerification } from "../src/store/users";
-import { setVerificationEnabled } from "../src/store/settings";
+import { getVerificationSettings, setVerificationEnabled } from "../src/store/settings";
 import { insertTopic } from "../src/store/topics";
 import { stubTelegramFetch, type TelegramFetchStub } from "./helpers/telegramFetchStub";
 
@@ -1064,5 +1068,117 @@ describe("POST /webhook: group_callback 端到端（T40 wipe 确认，阶段 6�
     // 数据未动（重推收敛：重推时 callback id 已消费 → permanent warn 吞 → 继续清库）
     const users = await env.HODOR_DB.prepare("SELECT COUNT(*) AS n FROM users").first<{ n: number }>();
     expect(users!.n).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("POST /webhook: General 全局命令（2026-10-10 命令拆分）", () => {
+  let stub: TelegramFetchStub;
+  beforeEach(() => {
+    stub = stubTelegramFetch();
+    stub.always("sendMessage", { status: 200, json: { ok: true, result: { message_id: 1 } } });
+    return env.HODOR_DB.prepare("DELETE FROM settings").run();
+  });
+  afterEach(() => {
+    stub.restore();
+    return env.HODOR_DB.prepare("DELETE FROM settings").run();
+  });
+
+  /** 客服群 General 文本 update（不带 message_thread_id 字段） */
+  function generalUpdate(
+    updateId: number,
+    text: string,
+    fromId: number = ADMIN_ID,
+  ): Record<string, unknown> {
+    return {
+      update_id: updateId,
+      message: {
+        message_id: 500,
+        from: { id: fromId, first_name: "Admin" },
+        chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+        text,
+      },
+    };
+  }
+
+  it("管理员 /verifyoff 在 General → 执行成功，回复原地发到 General（省略 message_thread_id）", async () => {
+    const res = await postWebhook(generalUpdate(9200, "/verifyoff"));
+    expect(res.status).toBe(200);
+    expect(await readProcessed(9200)).toEqual({ status: "processed", attempts: 0 });
+    expect((await getVerificationSettings(env.HODOR_DB)).verifyEnabled).toBe(false);
+    expect(stub.countOf("sendMessage")).toBe(1);
+    // General 平台怪癖：显式传 message_thread_id=1 会 400「message thread not
+    // found」，省略该字段消息才落到 General（与广播/归档回复同口径）
+    expect(stub.callsOf("sendMessage")[0].body).toEqual({
+      chat_id: SUPPORT_CHAT_ID,
+      text: formatVerifyOffConfirmed(),
+    });
+  });
+
+  it("管理员 /verifymode 无参查看在 General → 回复出现在 General（省略 thread 字段）", async () => {
+    const res = await postWebhook(generalUpdate(9201, "/verifymode"));
+    expect(res.status).toBe(200);
+    expect(stub.countOf("sendMessage")).toBe(1);
+    const reply = stub.callsOf("sendMessage")[0].body as Record<string, unknown>;
+    expect(reply.message_thread_id).toBeUndefined();
+    expect(reply.text).toBe(formatVerifyModeCurrent(await getVerificationSettings(env.HODOR_DB)));
+  });
+
+  it("带合法 thread 的 /verifymode（Topic 内）→ 执行门拦截：引导提示发回原 thread，settings 零变更", async () => {
+    const res = await postWebhook({
+      update_id: 9202,
+      message: {
+        message_id: 501,
+        from: { id: ADMIN_ID, first_name: "Admin" },
+        chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+        text: "/verifymode",
+        message_thread_id: 555,
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(stub.countOf("sendMessage")).toBe(1);
+    expect(stub.callsOf("sendMessage")[0].body).toEqual({
+      chat_id: SUPPORT_CHAT_ID,
+      text: VERIFY_COMMANDS_GENERAL_ONLY_NOTICE,
+      message_thread_id: 555,
+    });
+    expect((await getVerificationSettings(env.HODOR_DB)).verifyEnabled).toBe(true);
+  });
+
+  it("非管理员在 General 发 /verifyoff → 仍被拒（「仅管理员」提示发回 General thread 1），零状态变更", async () => {
+    const res = await postWebhook(generalUpdate(9203, "/verifyoff", 999999999));
+    expect(res.status).toBe(200);
+    expect((await getVerificationSettings(env.HODOR_DB)).verifyEnabled).toBe(true);
+    expect(stub.callsOf("sendMessage")[0].body).toEqual({
+      chat_id: SUPPORT_CHAT_ID,
+      text: NOT_ADMIN_COMMAND_NOTICE,
+      message_thread_id: 1,
+    });
+  });
+
+  it("General 非放行命令（/ban）与普通文本 → ignore：200、零调用、照常 markProcessed", async () => {
+    const res1 = await postWebhook(generalUpdate(9204, "/ban"));
+    expect(res1.status).toBe(200);
+    const res2 = await postWebhook(generalUpdate(9205, "普通群聊"));
+    expect(res2.status).toBe(200);
+    expect(await readProcessed(9204)).toEqual({ status: "processed", attempts: 0 });
+    expect(await readProcessed(9205)).toEqual({ status: "processed", attempts: 0 });
+    expect(stub.countOf("sendMessage")).toBe(0);
+  });
+
+  it("带合法 thread 的命令不受归一化影响：/help 回复原 thread（help 全局可用）", async () => {
+    const res = await postWebhook({
+      update_id: 9206,
+      message: {
+        message_id: 502,
+        from: { id: ADMIN_ID, first_name: "Admin" },
+        chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+        text: "/help",
+        message_thread_id: 556,
+      },
+    });
+    expect(res.status).toBe(200);
+    const reply = stub.callsOf("sendMessage")[0].body as Record<string, unknown>;
+    expect(reply.message_thread_id).toBe(556);
+    expect(reply.text as string).toContain("可用命令：");
   });
 });

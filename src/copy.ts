@@ -109,6 +109,32 @@ export function isBroadcastCommand(text: string | undefined): boolean {
   return /^\/broadcast(@\S+)?(\s|$)/.test(text ?? "");
 }
 
+/**
+ * General 全局命令判定（2026-10-10 命令拆分任务）：客服群 General（无
+ * message_thread_id）放行、可进入 outbound 命令管线的命令——全局配置命令
+ * /verifyon /verifyoff /verifymode /verifymode_math /verifymode_button
+ * /verifymode_turnstile 与 /help。/cmd、/cmd@bot、/cmd 参数 均算；
+ * /verifymodes、/helpx 这类前缀巧合不算。绑定类命令（/ban /note 等）与
+ * 普通消息不放行——General 无绑定语义、不参与中继。
+ */
+const GENERAL_GLOBAL_COMMAND_NAMES: ReadonlySet<string> = new Set([
+  "verifyon",
+  "verifyoff",
+  "verifymode",
+  "verifymode_math",
+  "verifymode_button",
+  "verifymode_turnstile",
+  "help",
+]);
+
+export function isGeneralGlobalCommand(text: string | undefined): boolean {
+  const firstToken = text?.split(/\s+/)[0] ?? "";
+  if (!firstToken.startsWith("/")) return false;
+  const at = firstToken.indexOf("@");
+  const name = (at === -1 ? firstToken : firstToken.slice(0, at)).slice(1);
+  return GENERAL_GLOBAL_COMMAND_NAMES.has(name);
+}
+
 /* ------------------------------------------------------------------ */
 /* 阶段 4：验证（T27）/ 限频（T29）/ 封禁（T35）/ 命令（T34）文案        */
 /* ------------------------------------------------------------------ */
@@ -206,7 +232,11 @@ export function formatHelpText(settings: HelpSettings): string {
     lines.push("/verifyon - 开启人机验证", "当前验证已关闭。");
   }
   lines.push(
-    `/verifymode - 查看当前验证模式；用法：/verifymode math|button|turnstile（当前：${verifyModeLabel(settings.verifyMode)}）`,
+    `/verifymode - 查看当前验证模式（当前：${verifyModeLabel(settings.verifyMode)}）`,
+    "/verifymode_math - 切换到数学题验证",
+    "/verifymode_button - 切换到纯按钮验证",
+    "/verifymode_turnstile - 切换到 Turnstile 人机验证",
+    "验证配置命令仅在客服群 General 中生效；兼容别名 /verifymode math|button|turnstile。",
     "纯按钮模式防护较弱，bot 可直接调 API 点击，仅建议受信任场景使用。",
     "",
     "危险操作：",
@@ -233,8 +263,10 @@ export const NOT_ADMIN_COMMAND_NOTICE = "该命令仅客服管理员可用。";
  * 手敲）。scope 恒为客服群 chat——用户私聊菜单不受影响。command 一律
  * 小写无斜杠（Telegram BotCommand 规范）。菜单**恒全量注册**（不随开关
  * 动态变化——Telegram 菜单是客户端缓存，动态化弊大于利；帮助文本才是
- * 动态面），并与 formatHelpText 的「已交付命令」清单保持同步。已部署
- * 实例需重跑 setwebhook 刷新菜单。
+ * 动态面），并与 formatHelpText 的「已交付命令」清单保持同步。Telegram
+ * BotCommand scope 只到聊天级、无 Topic 级作用域——验证配置命令「仅在
+ * General 生效」由 commands.ts 的运行时执行门保证（其他 Topic 回引导提示），
+ * 菜单照常全量注册。已部署实例需重跑 setwebhook 刷新菜单。
  */
 export const ADMIN_COMMAND_MENU: readonly { command: string; description: string }[] = [
   { command: "help", description: "查看管理命令帮助" },
@@ -244,9 +276,12 @@ export const ADMIN_COMMAND_MENU: readonly { command: string; description: string
   { command: "unnote", description: "清除用户备注" },
   { command: "risk", description: "标记高危用户" },
   { command: "unrisk", description: "取消高危标记" },
-  { command: "verifyon", description: "开启人机验证" },
-  { command: "verifyoff", description: "临时关闭人机验证" },
-  { command: "verifymode", description: "查看/设置验证模式（math/button/turnstile）" },
+  { command: "verifyon", description: "开启人机验证（General 使用）" },
+  { command: "verifyoff", description: "临时关闭人机验证（General 使用）" },
+  { command: "verifymode", description: "查看验证模式" },
+  { command: "verifymode_math", description: "切到数学题验证" },
+  { command: "verifymode_button", description: "切到按钮验证" },
+  { command: "verifymode_turnstile", description: "切到 Turnstile 验证" },
   { command: "archive", description: "软归档本话题用户" },
   { command: "deluser", description: "物理删除用户及本话题（需确认）" },
   { command: "purgemsg", description: "清理本话题可追踪群消息" },
@@ -332,24 +367,29 @@ export function formatVerifyModeConfirmed(mode: "math" | "button" | "turnstile")
 }
 
 /**
- * /verifymode 无参数查看（只读）：当前模式 + 可选值。绝不写设置、不清 pending、
- * 不循环切换（2026-10-09 用户决策的兼容性变更）。
+ * /verifymode 无参数查看（只读）：当前模式 + 切换命令。绝不写设置、不清 pending、
+ * 不循环切换（2026-10-09 用户决策的兼容性变更；2026-10-10 命令拆分后以
+ * 三个专用切换命令为准，参数形式降为兼容别名）。
  */
 export function formatVerifyModeCurrent(settings: HelpSettings): string {
   return [
     `当前验证模式：${verifyModeLabel(settings.verifyMode)}`,
-    "可选值：math（数学题）、button（纯按钮）、turnstile（Turnstile 人机验证）。",
-    "用法：/verifymode <模式>；无参数仅查看，不改变任何设置。",
+    "切换命令：/verifymode_math（数学题）、/verifymode_button（纯按钮）、/verifymode_turnstile（Turnstile 人机验证）。",
+    "兼容别名：/verifymode math|button|turnstile；无参数仅查看，不改变任何设置。",
   ].join("\n");
 }
 
-/** /verifymode 非法参数：拒绝且不改变任何设置 / pending */
+/** /verifymode 非法参数：拒绝且不改变任何设置 / pending（以新命令为准，别名附注） */
 export const VERIFYMODE_USAGE_NOTICE =
-  "用法：/verifymode math|button|turnstile（无参数仅查看当前模式，不改变设置）。";
+  "未知模式。用法：/verifymode_math、/verifymode_button、/verifymode_turnstile 或别名 /verifymode math|button|turnstile（无参数仅查看当前模式，不改变设置）。";
+
+/** 验证配置命令在非 General Topic 执行（2026-10-10 命令拆分）：不执行、仅引导去 General */
+export const VERIFY_COMMANDS_GENERAL_ONLY_NOTICE =
+  "验证配置命令请在客服群 General 中使用。";
 
 /** /verifymode turnstile 但配置缺失：拒绝切换、不清 pending（点名缺哪些变量） */
 export function formatVerifyModeMissingTurnstileConfig(missing: string[]): string {
-  return `无法切换为 Turnstile 模式：缺少必需配置 ${missing.join("、")}。当前设置与待验证用户的题目均未改变；配置完成后请重新执行 /verifymode turnstile。`;
+  return `无法切换为 Turnstile 模式：缺少必需配置 ${missing.join("、")}。当前设置与待验证用户的题目均未改变；配置完成后请在客服群 General 重新执行 /verifymode_turnstile。`;
 }
 
 /**

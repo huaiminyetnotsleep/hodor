@@ -23,7 +23,12 @@
  * 绝不输出 token / 任何 secret。
  */
 import { parseMaxAttempts, parsePublicBaseUrl, parseSupportChatId, timingSafeEqualStrings } from "../env";
-import { classifyUpdate, type TelegramCallbackQueryRef, type TelegramMessageRef } from "../pipeline/classify";
+import {
+  classifyUpdate,
+  GENERAL_THREAD_ID,
+  type TelegramCallbackQueryRef,
+  type TelegramMessageRef,
+} from "../pipeline/classify";
 import { handleBroadcastCallback, handleBroadcastCommand } from "../pipeline/broadcast";
 import { handleInbound } from "../pipeline/inbound";
 import { handleOutbound } from "../pipeline/outbound";
@@ -159,7 +164,15 @@ export async function handleWebhook(
       } else if (kind === "inbound") {
         await handleInbound(env, botId, message, verifyOrigin);
       } else {
-        await handleOutbound(env, botId, message);
+        // General 全局命令（classify 只放行 /broadcast 之外的配置命令集）：
+        // General 发言不带 message_thread_id 字段 → 归一化为 GENERAL_THREAD_ID
+        // （General 固定 thread 号），命令回复原地发到 General；带合法 thread
+        // 的消息原样透传，绝不改写。
+        const outboundMessage =
+          message.message_thread_id === undefined
+            ? { ...message, message_thread_id: GENERAL_THREAD_ID }
+            : message;
+        await handleOutbound(env, botId, outboundMessage);
       }
     }
   } catch (error) {

@@ -110,7 +110,8 @@ update 到达
 ### 出站（群组 topic → 用户）
 
 ```
-update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
+update 来自 SUPPORT_CHAT_ID（topic 发言带 message_thread_id；General 全局命令
+ │ 无 thread 字段，webhook 层归一化线程号为 1）
  │ ① 幂等去重
  │ ② 发言者 ∈ ADMIN_IDS？
  │      否 + / 命令 → 「该命令仅客服管理员可用。」提示，结束
@@ -118,15 +119,17 @@ update 来自 SUPPORT_CHAT_ID 且带 message_thread_id
  │ ③ 内容抽取（支持集之外安全忽略）
  │ ④ 管理员 / 开头 → 命令管线（/help /ban /unban /note /unnote /risk /unrisk
  │      /broadcast（仅提示去 General）/archive /deluser /purgemsg /wipealldata
- │      /verifyon /verifyoff /verifymode；
- │      命令不中继不账本；归档/物理删除需绑定，其余按命令语义授权）
+ │      /verifyon /verifyoff /verifymode /verifymode_math /verifymode_button
+ │      /verifymode_turnstile；
+ │      命令不中继不账本；归档/物理删除需绑定；验证配置组仅 General（thread 1）
+ │      执行，其他 topic 回引导提示）
  │ ⑤ thread_id 反查 topics → user；native closed topic 不接受新群消息，原生 reopen 服务事件同步 DB
  │ ⑥ open topic 的管理员消息 per-type send 私聊送达 → 成功后写 messages 账本 → 返回 200
 ```
 
 ### 全员广播（General → 全体用户私聊）
 
-`/broadcast` 是 General 的专用入口（classify 独立分类；General 其他消息照旧忽略），数据流：
+`/broadcast` 是 General 的专用入口（classify 独立分类；General 同时放行全局配置命令 `/verifyon` `/verifyoff` `/verifymode` 系列 `/help`——归一化 thread 1 后走 outbound 命令管线；其余消息与未放行命令照旧忽略），数据流：
 
 ```
 General /broadcast 输入
@@ -150,7 +153,7 @@ General /broadcast 输入
 
 ## 验证状态机
 
-> 验证可运行时配置：`/verifyon` / `/verifyoff` 全局开关（settings 表持久化，关闭期间记录保留、TTL 不判定）；`/verifymode` 无参数只查看、显式参数设置 math / button / turnstile。模式 / 开关**真变化**在同一个 D1 batch（事务）内推进配置版本（`settings.verify_generation`）并清空全部 pending（含未完成的网页请求）；同值重复设置、无参查看与非法参数幂等不动。切为 turnstile 前置凭据检查，缺配置拒绝切换。
+> 验证可运行时配置：`/verifyon` / `/verifyoff` 全局开关（settings 表持久化，关闭期间记录保留、TTL 不判定）；`/verifymode_math` / `/verifymode_button` / `/verifymode_turnstile` 专用命令与别名 `/verifymode <模式>` 设置模式，`/verifymode` 无参数只查看。验证配置命令仅在客服群 General（thread 1）执行，其他 topic 回引导提示。模式 / 开关**真变化**在同一个 D1 batch（事务）内推进配置版本（`settings.verify_generation`）并清空全部 pending（含未完成的网页请求）；同值重复设置、无参查看与非法参数幂等不动。切为 turnstile 前置凭据检查，缺配置拒绝切换。
 >
 > 置顶信息验证行三态：✅ 已验证 / ❌ 未验证 / 未启用。
 
@@ -213,7 +216,7 @@ src/
     broadcast.ts        # 全用户广播：预览创建、确认回调、同请求内顺序发送循环
     broadcastFormat.ts  # 公告组装纯函数（/broadcast 解析、HTML 转义、长度校验）
     topicEvents.ts  # 原生话题 close/reopen 同步与删除自愈
-    classify.ts     # update 分类（分流到入站 / 出站 / 回调 / General 广播）
+    classify.ts     # update 分类（分流到入站 / 出站 / 回调 / General 广播与全局命令）
     errors.ts       # 错误分类（可重试 / 永久）
   copy.ts           # 用户可见文案唯一集中点（欢迎语 / 置顶 / 验证 / 命令 / 提示）
   store/            # users / topics / messages / settings / processedUpdates /

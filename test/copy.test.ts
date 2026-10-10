@@ -51,6 +51,7 @@ import {
   formatVerifyQuestion,
   formatVerifyRetryQuestion,
   isBroadcastCommand,
+  isGeneralGlobalCommand,
   isStartCommand,
   NOTE_USAGE_NOTICE,
   UNBOUND_TOPIC_NOTICE,
@@ -61,7 +62,11 @@ import {
   VERIFY_PASSED_TOAST,
   VERIFY_QUESTION_HEADER,
   VERIFY_RETRY_PREFIX,
+  VERIFYMODE_USAGE_NOTICE,
+  VERIFY_COMMANDS_GENERAL_ONLY_NOTICE,
   VERIFY_WRONG_TOAST,
+  formatVerifyModeCurrent,
+  formatVerifyModeMissingTurnstileConfig,
 } from "../src/copy";
 
 describe("copy: DEFAULT_WELCOME_TEXT 逐字定稿", () => {
@@ -312,6 +317,7 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
       const text = formatHelpText(settings);
       for (const command of [
         "/help", "/ban", "/unban", "/note", "/unnote", "/risk", "/unrisk", "/verifymode",
+        "/verifymode_math", "/verifymode_button", "/verifymode_turnstile",
         "/broadcast", "/archive", "/deluser", "/purgemsg", "/wipealldata",
       ]) {
         expect(text).toContain(command);
@@ -319,6 +325,7 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
       expect(text).toContain("不会中继");
       expect(text).toContain("纯按钮模式防护较弱"); // 弱防护说明恒展示
       expect(text).toContain("不可恢复"); // 危险操作段保留警示
+      expect(text).toContain("仅在客服群 General 中生效"); // 验证配置的 General 执行门说明
     }
   });
 
@@ -333,15 +340,28 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
     expect(off).not.toContain("/verifyoff");
   });
 
-  it("模式三态：/verifymode 行展示当前模式中文名（数学题 / 纯按钮 / Turnstile）+ 用法", () => {
+  it("模式三态：/verifymode 查看行随当前模式 + 三个专用切换命令行（2026-10-10 命令拆分）", () => {
     expect(formatHelpText({ verifyEnabled: true, verifyMode: "math" })).toContain(
-      "/verifymode - 查看当前验证模式；用法：/verifymode math|button|turnstile（当前：数学题）",
+      "/verifymode - 查看当前验证模式（当前：数学题）",
     );
     expect(formatHelpText({ verifyEnabled: false, verifyMode: "button" })).toContain(
-      "（当前：纯按钮）",
+      "/verifymode - 查看当前验证模式（当前：纯按钮）",
     );
     expect(formatHelpText({ verifyEnabled: true, verifyMode: "turnstile" })).toContain(
-      "（当前：Turnstile 人机验证）",
+      "/verifymode - 查看当前验证模式（当前：Turnstile 人机验证）",
+    );
+    expect(formatHelpText({ verifyEnabled: true, verifyMode: "math" })).toContain(
+      "/verifymode_math - 切换到数学题验证",
+    );
+    expect(formatHelpText({ verifyEnabled: true, verifyMode: "math" })).toContain(
+      "/verifymode_button - 切换到纯按钮验证",
+    );
+    expect(formatHelpText({ verifyEnabled: true, verifyMode: "math" })).toContain(
+      "/verifymode_turnstile - 切换到 Turnstile 人机验证",
+    );
+    // 兼容别名仍在帮助中注明
+    expect(formatHelpText({ verifyEnabled: true, verifyMode: "math" })).toContain(
+      "/verifymode math|button|turnstile",
     );
   });
 
@@ -350,17 +370,22 @@ describe("copy: formatHelpText 动态帮助（T32，开关 × 模式四态）", 
     const menuCommands = ADMIN_COMMAND_MENU.map((entry) => entry.command);
     expect(menuCommands).toEqual([
       "help", "ban", "unban", "note", "unnote", "risk", "unrisk",
-      "verifyon", "verifyoff", "verifymode",
+      "verifyon", "verifyoff", "verifymode", "verifymode_math", "verifymode_button", "verifymode_turnstile",
       "archive", "deluser", "purgemsg", "broadcast", "wipealldata",
     ]);
+    // verifymode 描述定稿为「查看验证模式」（2026-10-10 拆分：设置职责移交新命令）
+    expect(ADMIN_COMMAND_MENU.find((e) => e.command === "verifymode")!.description).toBe(
+      "查看验证模式",
+    );
 
     for (const settings of [
       { verifyEnabled: true, verifyMode: "math" as const },
       { verifyEnabled: true, verifyMode: "button" as const },
+      { verifyEnabled: true, verifyMode: "turnstile" as const },
       { verifyEnabled: false, verifyMode: "math" as const },
       { verifyEnabled: false, verifyMode: "button" as const },
     ]) {
-      const listed = [...formatHelpText(settings).matchAll(/^\/([a-z]+)/gm)].map((m) => m[1]);
+      const listed = [...formatHelpText(settings).matchAll(/^\/([a-z_]+)/gm)].map((m) => m[1]);
       const hiddenToggle = settings.verifyEnabled ? "verifyon" : "verifyoff";
       expect([...listed].sort()).toEqual([...menuCommands.filter((c) => c !== hiddenToggle)].sort());
     }
@@ -406,6 +431,58 @@ describe("copy: 阶段 5 新文案定稿（T36/T37/T31/T32）", () => {
     const buttonText = formatVerifyModeConfirmed("button");
     expect(buttonText).toContain("纯按钮");
     expect(buttonText).toContain("防护较弱");
+  });
+
+  it("命令拆分文案（2026-10-10）：General 引导提示定稿 + 查看 / 用法提示以新命令为准、别名附注", () => {
+    expect(VERIFY_COMMANDS_GENERAL_ONLY_NOTICE).toBe("验证配置命令请在客服群 General 中使用。");
+
+    const current = formatVerifyModeCurrent({ verifyEnabled: true, verifyMode: "math" });
+    expect(current).toContain("当前验证模式：数学题");
+    expect(current).toContain("/verifymode_math（数学题）");
+    expect(current).toContain("/verifymode_button（纯按钮）");
+    expect(current).toContain("/verifymode_turnstile（Turnstile 人机验证）");
+    expect(current).toContain("/verifymode math|button|turnstile"); // 兼容别名保留
+    expect(current).toContain("不改变任何设置");
+
+    expect(VERIFYMODE_USAGE_NOTICE).toContain("/verifymode_math");
+    expect(VERIFYMODE_USAGE_NOTICE).toContain("/verifymode_turnstile");
+    expect(VERIFYMODE_USAGE_NOTICE).toContain("无参数仅查看");
+
+    const missing = formatVerifyModeMissingTurnstileConfig(["TURNSTILE_SITE_KEY"]);
+    expect(missing).toContain("TURNSTILE_SITE_KEY");
+    expect(missing).toContain("/verifymode_turnstile");
+    expect(missing).toContain("客服群 General");
+  });
+
+  it("isGeneralGlobalCommand 矩阵（General 放行集合）：命令形态 ✓ / 前缀巧合与绑定类命令 ✗", () => {
+    for (const text of [
+      "/verifyon",
+      "/verifyoff",
+      "/verifymode",
+      "/verifymode_math",
+      "/verifymode_button",
+      "/verifymode_turnstile",
+      "/help",
+      "/verifymode@hodor_bot",
+      "/verifymode_math@hodor_bot 参数",
+      "/help 现在就要",
+    ]) {
+      expect(isGeneralGlobalCommand(text)).toBe(true);
+    }
+    for (const text of [
+      "/verifymodes",
+      "/verifymode_butto",
+      "/helpx",
+      "/ban",
+      "/note 内容",
+      "/broadcast",
+      "普通文本",
+      "",
+      undefined,
+      "/HELP",
+    ]) {
+      expect(isGeneralGlobalCommand(text)).toBe(false);
+    }
   });
 
   it("纯按钮题面与按钮文案定稿", () => {
