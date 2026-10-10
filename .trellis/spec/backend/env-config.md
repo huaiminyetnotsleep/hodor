@@ -1,7 +1,8 @@
 # 环境与配置契约
 
 > hodor 如何接线环境绑定与机密。S1(2026-09-28)确立;变量表已对齐 docs/guide/deploy.md
-> 的 9 变量契约(2026-09-30 增补 WELCOME_TEXT)。
+> 的 9 变量契约(2026-09-30 增补 WELCOME_TEXT;2026-10-09 增补 Turnstile 三选填——
+> 基础 9 项不变)。
 
 ---
 
@@ -31,6 +32,9 @@ declare global {
       VERIFY_TTL_HOURS?: string;         // 可选 Var,默认 0(永久)
       MAX_ATTEMPTS?: string;             // 可选 Var,默认 3
       WELCOME_TEXT?: string;             // 可选 Var,缺省用内置默认欢迎语(src/copy.ts)
+      TURNSTILE_SITE_KEY?: string;       // 可选 Var,Turnstile 公开 Site Key(可公开)
+      TURNSTILE_SECRET_KEY?: string;     // 可选 Secret,仅服务端 Siteverify,绝不进页面/日志
+      PUBLIC_BASE_URL?: string;          // 可选 Var,验证页面固定 HTTPS origin;缺省按请求 origin 推导
     }
   }
 }
@@ -54,6 +58,9 @@ declare global {
 | `VERIFY_TTL_HOURS` | string | `.dev.vars` | 控制台「变量和机密」 | 可选;缺失/非法 → `0`(永久) |
 | `MAX_ATTEMPTS` | string | `.dev.vars` | 控制台「变量和机密」 | 可选;缺失/非法 → `3` |
 | `WELCOME_TEXT` | string | `.dev.vars` | 控制台「变量和机密」 | 可选;缺失/空白 → 内置默认欢迎语(`src/copy.ts` `DEFAULT_WELCOME_TEXT`);字面 `\n` 解释为换行(真实换行原样保留) |
+| `TURNSTILE_SITE_KEY` | string | `.dev.vars` | 控制台「变量和机密」 | 可选;公开标识,可随验证页面输出;与 `TURNSTILE_SECRET_KEY` 必须成对配置,仅 `verify_mode=turnstile` 必需 |
+| `TURNSTILE_SECRET_KEY` | string | `.dev.vars` | 控制台「变量和机密」 | 可选 Secret;仅服务端 Siteverify 使用,绝不进页面/日志/诊断 |
+| `PUBLIC_BASE_URL` | string | `.dev.vars` | 控制台「变量和机密」 | 可选;仅接受 HTTPS origin(可含根路径,不含凭据/查询/片段);非法/缺失 → 运行时视同未配置并回退请求 origin,`/selfcheck` 严格点名 |
 
 `.dev.vars.example` 是带注释的本地模板(每个变量:一条注释 + 一行**注释掉的**赋值 + 一个空行)。
 模板条目默认全部注释是**有意设计**(2026-10-09 用户决策),一职两用:(a) Deploy 按钮 / Workers
@@ -74,6 +81,10 @@ declare global {
   不轻信输入)。`VERIFY_TTL_HOURS` 为负 → `0`。
 - `WELCOME_TEXT` 缺失 / trim 后为空 → 使用内置默认欢迎语(`src/copy.ts`),空串不当
   自定义文案;有效值中字面 `\n` 解释为换行,真实换行原样保留。
+- `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` 必须成对:只配一个时 `/verifymode turnstile`
+  拒绝切换(点名缺失)、`/selfcheck` 报配置不完整;生产配置官方测试密钥 → `/selfcheck` 报错。
+  `PUBLIC_BASE_URL` 非法在运行时视同未配置(容错解析,`parsePublicBaseUrl` 返回 null),
+  `/selfcheck` 严格点名——同一输入两套语义的分工见 [observability](./observability.md)。
 - 本地存在 `.dev.vars` 时重新生成类型,会把其中的键泄漏进提交的 `worker-configuration.d.ts`,
   变成必填的 `Cloudflare.Env` 绑定(2026-09-30 实测:一份过期的 `.dev.vars` 把已删除的
   `ALLOW_UNKNOWN_USERS` 泄漏了进来)。执行 `wrangler types` 前先把 `.dev.vars` 移开;
@@ -106,8 +117,8 @@ declare global {
 ```
 
 ```
-# 远程:控制台 Worker → Settings → 变量和机密 —— 全部 8 个值,配置一次,持久保留
-# 本地:.dev.vars(git 忽略)—— 同样这 8 个键,供 wrangler dev 使用
+# 远程:控制台 Worker → Settings → 变量和机密 —— 基础 9 项配置一次,持久保留(Turnstile 三选填按需)
+# 本地:.dev.vars(git 忽略)—— 同样这些键,供 wrangler dev 使用
 ```
 
 **原因**:有 `keep_vars: true` 时,控制台变量(Text 或 Secret)在每次部署后都保留;

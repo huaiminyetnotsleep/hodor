@@ -16,6 +16,7 @@
 | [发布流程与合并约定](./release-flow.md) | Release Please 输入契约：squash-only、Conventional PR 标题、禁止 Conventional merge commit | 已填写(2026-10-09) |
 | [部署管线](./deployment.md) | D1 名 = Worker 名派生契约、置备/迁移/注入不变量与 fail-open 告警 | 已填写(2026-10-09) |
 | [观测端点](./observability.md) | `/health` 存活探针与 `/selfcheck` 完整自检的双端点契约、严格校验与容错解析分工 | 已填写(S7) |
+| [用户验证](./verification.md) | Turnstile 模式、initData HMAC 官方规则、挑战栅栏 CAS 裁决与测试密钥检测 | 已填写(2026-10-09) |
 | [文档与开源呈现](./docs.md) | README/docs 职责唯一化、交付状态表述、开源 README 样式与同步契约 | 已填写(S8) |
 
 新约定确立后,在此追加新的规范文件(每个主题一个文件,并从本表链接)。
