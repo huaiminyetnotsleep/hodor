@@ -1,7 +1,8 @@
 /**
  * classifyUpdate 纯函数直测（T15 分流规则 + fail-closed 决策 + T27 callback 分流
- * + General /broadcast 专用分类）：私聊 / 客服群带 thread / 客服群无 thread
- * （General：仅 /broadcast 进入广播路径，其余 ignore）/ 其他群 / 超级群非客服 /
+ * + General /broadcast 专用分类 + General 全局命令放行）：私聊 / 客服群带 thread /
+ * 客服群无 thread（General：/broadcast 进广播路径、全局配置命令与 /help 放行
+ * outbound，其余 ignore）/ 其他群 / 超级群非客服 /
  * 私聊 callback_query（验证题按钮）→ callback、群内 / 畸形 callback → ignore、
  * 无 message 且无 callback_query（edited_message）/ 畸形形态 /
  * supportChatId === null → 全部 ignore（部署配置坏了零副作用）。
@@ -109,6 +110,74 @@ describe("classify: 标准分流", () => {
       message_thread_id: 100,
     });
     expect(classifyUpdate(update(inTopic), SUPPORT_CHAT_ID)).toBe("outbound");
+  });
+
+  it("客服群 General 全局命令（2026-10-10 命令拆分）→ outbound（执行门在 commands 层）", () => {
+    const supportGeneral = (text: string, extra: Record<string, unknown> = {}) =>
+      message({
+        from: { id: 111111111, first_name: "Admin" },
+        chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+        text,
+        ...extra,
+      });
+    // 放行集合七个命令，含 @bot 后缀形态
+    for (const text of [
+      "/verifyon",
+      "/verifyoff",
+      "/verifymode",
+      "/verifymode_math",
+      "/verifymode_button",
+      "/verifymode_turnstile",
+      "/help",
+      "/verifymode@hodor_bot",
+      "/verifymode_turnstile@hodor_bot",
+    ]) {
+      expect(classifyUpdate(update(supportGeneral(text)), SUPPORT_CHAT_ID)).toBe("outbound");
+    }
+  });
+
+  it("General 非放行命令 / 前缀巧合 / 普通文本仍 ignore（不扩大中继范围）", () => {
+    const supportGeneral = (text: string) =>
+      message({
+        from: { id: 111111111, first_name: "Admin" },
+        chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+        text,
+      });
+    for (const text of [
+      "/ban",
+      "/note 仅咨询",
+      "/archive",
+      "/broadcasts",
+      "/verifymodes",
+      "/helpx",
+      "/verifymode_butto",
+      "/HELP",
+      "普通群聊",
+    ]) {
+      expect(classifyUpdate(update(supportGeneral(text)), SUPPORT_CHAT_ID)).toBe("ignore");
+    }
+  });
+
+  it("General 放行命令带非法 thread 字段 → ignore（不误降级）；带合法 thread → 正常 outbound", () => {
+    const supportGeneral = (text: string, extra: Record<string, unknown>) =>
+      message({
+        from: { id: 111111111, first_name: "Admin" },
+        chat: { id: SUPPORT_CHAT_ID, type: "supergroup" },
+        text,
+        ...extra,
+      });
+    expect(
+      classifyUpdate(update(supportGeneral("/help", { message_thread_id: 0 })), SUPPORT_CHAT_ID),
+    ).toBe("ignore");
+    expect(
+      classifyUpdate(
+        update(supportGeneral("/verifymode_math", { message_thread_id: "100" })),
+        SUPPORT_CHAT_ID,
+      ),
+    ).toBe("ignore");
+    expect(
+      classifyUpdate(update(supportGeneral("/help", { message_thread_id: 100 })), SUPPORT_CHAT_ID),
+    ).toBe("outbound");
   });
 
   it("私聊中的 /broadcast 仍是 inbound（不会进入客服群广播分类）", () => {

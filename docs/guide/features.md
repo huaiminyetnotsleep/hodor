@@ -42,7 +42,7 @@ hodor 把「用户私聊 bot」与「超级群组的话题（topic）」一一�
 
 - 只有 `ADMIN_IDS` 中的管理员在 topic 里的发言会被中继给用户，其他群成员发言静默忽略
 - 在 topic 里**直接说话即可**，无需回复某条特定消息
-- 以 `/` 开头的消息优先按管理命令处理（见下方命令表）；全部 15 个命令已注册到客服群的命令菜单（输入框点 `/` 可直接选择，客户端会自动附加 `@bot名` 后缀，均按去后缀解析）。菜单恒全量注册、不随验证开关变化（帮助文本才是动态面）；已部署实例更新版本后需重跑一次 setwebhook 刷新菜单
+- 以 `/` 开头的消息优先按管理命令处理（见下方命令表）；全部 18 个命令已注册到客服群的命令菜单（输入框点 `/` 可直接选择，客户端会自动附加 `@bot名` 后缀，均按去后缀解析）。菜单恒全量注册、不随验证开关变化（帮助文本才是动态面）；已部署实例更新版本后需重跑一次 setwebhook 刷新菜单
 - 非管理员发送 `/` 命令 → 收到「该命令仅客服管理员可用。」提示；非管理员普通文本仍静默忽略
 
 ::: tip 查看模式建议
@@ -94,7 +94,8 @@ Telegram 超级群组有两种查看方式，客服场景**建议使用话题模
 | 纯按钮 | 点击单个按钮即通过；bot 可直接调 API「点击」，仅作便利选项 | 低 |
 | Turnstile（可选） | 私聊内点「打开验证页面」按钮，在 Telegram 打开的网页中完成 Cloudflare Turnstile 人机验证；需自行申请配置（见[部署指南](/guide/deploy.md#turnstile)） | 高 |
 
-- `/verifymode` 无参数只**查看**当前模式，不改变任何设置；`/verifymode math|button|turnstile` 显式设置模式；非法参数直接拒绝
+- `/verifymode` 无参数只**查看**当前模式，不改变任何设置；`/verifymode_math` / `/verifymode_button` / `/verifymode_turnstile` 各自切换到对应模式（兼容别名 `/verifymode math|button|turnstile` 保留）；非法参数直接拒绝
+- 验证配置命令（`/verifyon`、`/verifyoff` 与 `/verifymode` 系列）**仅在客服群 General 中生效**：在其他话题发送会收到引导提示，不会改动任何设置；含新命令的版本上线后需重跑一次 `setwebhook` 刷新 Telegram 客户端的命令菜单
 - 切换为 Turnstile 时若两把密钥未配齐，切换被拒绝并点名缺失项，当前题目与待验证用户不受影响
 - 同一模式重复设置是幂等的，不会作废进行中的验证
 - 答题错误（数学题 / 纯按钮）：编辑原消息提示错误，并自动重新出一题
@@ -137,7 +138,7 @@ Telegram 超级群组有两种查看方式，客服场景**建议使用话题模
 
 ## 管理命令
 
-普通管理命令在对应 topic 内执行，仅 `ADMIN_IDS` 生效；`/deluser`、`/archive` 与 `/purgemsg` 需要话题当前可写。
+普通管理命令在对应 topic 内执行，仅 `ADMIN_IDS` 生效；`/deluser`、`/archive` 与 `/purgemsg` 需要话题当前可写。`/help` 无需绑定、任意话题可用；验证配置命令（`/verifyon`、`/verifyoff` 与 `/verifymode` 系列）仅限客服群 General 执行，在其他话题会收到引导提示且不产生任何改动。
 
 Telegram 原生关闭的话题不能接收新消息，管理员需先在客户端重开再执行这些命令；`/archive` 完成后的结果反馈会发到客服群 General。
 
@@ -155,8 +156,11 @@ Telegram 原生关闭的话题不能接收新消息，管理员需先在客户�
 | `/wipealldata` | 一键清空 Hodor 数据库并删除群内话题 | **危险操作**；全局命令，任意可写 topic 内可执行；确认后**先删除客服群内全部话题（General 除外）及其中消息**，全部成功后清空 users/topics/messages 记录（settings、幂等台账、bot 身份保留）；两步确认；不删除双方私聊历史 |
 | `/note <内容>` | 添加备注 | 标注该用户 / 对话的用途（如「仅咨询退款」）；写入并更新置顶信息 |
 | `/unnote` | 清除备注 | 更新置顶信息 |
-| `/verifyon` `/verifyoff` | 开 / 关人机验证 | 两个命令按当前状态展示对应的那个 |
-| `/verifymode` | 查看 / 设置验证模式 | 无参数仅查看；`/verifymode math` / `button` / `turnstile` 显式设置（切 Turnstile 需先配好密钥） |
+| `/verifyon` `/verifyoff` | 开 / 关人机验证 | 两个命令按当前状态展示对应的那个；仅限客服群 General 执行 |
+| `/verifymode` | 查看验证模式 | 无参数仅查看当前模式；兼容别名 `/verifymode math|button|turnstile` 保留；仅限客服群 General 执行 |
+| `/verifymode_math` | 切换到数学题验证 | 与别名 `/verifymode math` 等效；仅限客服群 General 执行 |
+| `/verifymode_button` | 切换到纯按钮验证 | 防护较弱，确认文案会再次提示；与别名 `/verifymode button` 等效 |
+| `/verifymode_turnstile` | 切换到 Turnstile 验证 | 需先配好两把密钥，缺失时拒绝切换；仅限客服群 General 执行 |
 
 ### /wipealldata 的两步确认
 

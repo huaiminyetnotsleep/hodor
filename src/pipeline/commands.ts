@@ -9,6 +9,9 @@
  *   先删 TG topic，再批量清对应 users/topics/messages；结果用 callback toast。
  * - `/purgemsg`：绑定 scope，账本 + pinned 驱动的群内消息清理。
  * - `/wipealldata`：全局 scope，两步确认后先删全部群内话题再清数据库（执行在 pipeline/wipe.ts）。
+ * - 验证配置组（/verifyon /verifyoff /verifymode 系列）：2026-10-10 起仅限客服群
+ *   General（thread 1）执行——运行时执行门 + 引导提示（Telegram 菜单无 Topic
+ *   级作用域，误触在 Topic 内只能靠提示收敛）；/help 保持全局可用。
  * - 其余命令维持既有分流与三态失败语义；所有系统消息零 messages 账本。
  */
 import {
@@ -35,8 +38,10 @@ import {
   UNBOUND_TOPIC_NOTICE,
   UNKNOWN_COMMAND_NOTICE,
   VERIFYMODE_USAGE_NOTICE,
+  VERIFY_COMMANDS_GENERAL_ONLY_NOTICE,
   WIPE_WARNING_TEXT,
 } from "../copy";
+import { GENERAL_THREAD_ID } from "./classify";
 import {
   composePinnedText,
   downgradePinnedToUnverified,
@@ -144,6 +149,32 @@ async function replyInGeneral(
 }
 
 /**
+ * 事务化切换验证模式（/verifymode <模式> 别名与 /verifymode_math|button|turnstile
+ * 专用命令的唯一共用写路径）：切 turnstile 前置凭据检查（缺失拒绝并点名缺哪些
+ * 变量，绝不误切、绝不清当前有效挑战）；设置走事务化 setVerificationMode
+ * （一个 db.batch：真变化才推进 verify_generation + 清全部 pending；同模式幂等）；
+ * 最后回确认。调用方保证已在 General（thread 1）。
+ */
+async function setVerificationModeWithPrecheck(
+  env: Cloudflare.Env,
+  chatId: number,
+  threadId: number,
+  mode: "math" | "button" | "turnstile",
+): Promise<void> {
+  if (mode === "turnstile") {
+    const missing: string[] = [];
+    if (!env.TURNSTILE_SITE_KEY?.trim()) missing.push("TURNSTILE_SITE_KEY");
+    if (!env.TURNSTILE_SECRET_KEY?.trim()) missing.push("TURNSTILE_SECRET_KEY");
+    if (missing.length > 0) {
+      await replyInTopic(env, chatId, threadId, formatVerifyModeMissingTurnstileConfig(missing));
+      return;
+    }
+  }
+  await setVerificationMode(env.HODOR_DB, mode);
+  await replyInTopic(env, chatId, threadId, formatVerifyModeConfirmed(mode));
+}
+
+/**
  * 处理一条管理员命令（outbound 管理员校验 + thread 校验后移交）。
  * 完成（resolve）= 按成功处理；抛出（reject）= retryable，交 webhook 500 重推。
  * 无论命中哪条分支，本函数返回后该 update 即告终结——outbound 不再走
@@ -239,55 +270,60 @@ export async function handleCommand(
     return;
   }
 
-  /* ------------- T31/T32 验证配置组（全局命令，/help 同姿态无需绑定） ------------- */
-  if (name === "/verifyon" || name === "/verifyoff") {
-    // 幂等 setter（DB 真值先行）：重复执行同值无害——确认回复失败重推只会
-    // 重发回复并重复执行同一赋值；关闭 = 整门跳过但**不动任何验证记录**
-    //（is_verified / verified_at 原样保留，重开后按记录与 TTL 判定）
-    const enable = name === "/verifyon";
-    await setVerificationEnabled(env.HODOR_DB, enable);
-    await replyInTopic(
-      env,
-      chatId,
-      threadId,
-      enable ? formatVerifyOnConfirmed() : formatVerifyOffConfirmed(),
-    );
-    return;
-  }
-
-  if (name === "/verifymode") {
-    // 无参数只查看（2026-10-09 兼容性变更：原「无参循环切换」废止）——不写
-    // 设置、不清 pending。显式参数设置三模式；非法参数拒绝且不改变任何状态。
-    // 设置走事务化 setVerificationMode（一个 db.batch：真变化才推进
-    // verify_generation + 清全部 pending；同模式幂等——重复执行同值无害）。
-    // 切 turnstile 前置凭据检查：缺失拒绝（点名缺哪些变量），绝不误切、
-    // 绝不清当前有效挑战。
-    const args = parseCommandArgs(params.text);
-    const current = await getVerificationSettings(env.HODOR_DB);
-    if (args === "") {
-      await replyInTopic(env, chatId, threadId, formatVerifyModeCurrent(current));
+  /* ------- T31/T32 验证配置组（2026-10-10 起仅限客服群 General 执行） ------- */
+  if (
+    name === "/verifyon" ||
+    name === "/verifyoff" ||
+    name === "/verifymode" ||
+    name === "/verifymode_math" ||
+    name === "/verifymode_button" ||
+    name === "/verifymode_turnstile"
+  ) {
+    // 运行时执行门：验证配置只在客服群 General（thread 1）生效。Telegram 命令
+    // 菜单是聊天级注册、无 Topic 级作用域（平台限制），Topic 内误触一律回引导
+    // 提示——不写 settings、不清 pending、零验证副作用（/broadcast 的「仅
+    // General」同款模式）。
+    if (threadId !== GENERAL_THREAD_ID) {
+      await replyInTopic(env, chatId, threadId, VERIFY_COMMANDS_GENERAL_ONLY_NOTICE);
       return;
     }
-    if (args !== "math" && args !== "button" && args !== "turnstile") {
-      await replyInTopic(env, chatId, threadId, VERIFYMODE_USAGE_NOTICE);
+    if (name === "/verifyon" || name === "/verifyoff") {
+      // 幂等 setter（DB 真值先行）：重复执行同值无害——确认回复失败重推只会
+      // 重发回复并重复执行同一赋值；关闭 = 整门跳过但**不动任何验证记录**
+      //（is_verified / verified_at 原样保留，重开后按记录与 TTL 判定）
+      const enable = name === "/verifyon";
+      await setVerificationEnabled(env.HODOR_DB, enable);
+      await replyInTopic(
+        env,
+        chatId,
+        threadId,
+        enable ? formatVerifyOnConfirmed() : formatVerifyOffConfirmed(),
+      );
       return;
     }
-    if (args === "turnstile") {
-      const missing: string[] = [];
-      if (!env.TURNSTILE_SITE_KEY?.trim()) missing.push("TURNSTILE_SITE_KEY");
-      if (!env.TURNSTILE_SECRET_KEY?.trim()) missing.push("TURNSTILE_SECRET_KEY");
-      if (missing.length > 0) {
-        await replyInTopic(
-          env,
-          chatId,
-          threadId,
-          formatVerifyModeMissingTurnstileConfig(missing),
-        );
+    if (name === "/verifymode") {
+      // 无参数只查看（2026-10-09 兼容性变更：原「无参循环切换」废止）——不写
+      // 设置、不清 pending。显式参数设置三模式（别名，与新命令共用同一设置
+      // 逻辑）；非法参数拒绝且不改变任何状态。
+      const args = parseCommandArgs(params.text);
+      if (args === "") {
+        const current = await getVerificationSettings(env.HODOR_DB);
+        await replyInTopic(env, chatId, threadId, formatVerifyModeCurrent(current));
         return;
       }
+      if (args !== "math" && args !== "button" && args !== "turnstile") {
+        await replyInTopic(env, chatId, threadId, VERIFYMODE_USAGE_NOTICE);
+        return;
+      }
+      await setVerificationModeWithPrecheck(env, chatId, threadId, args);
+      return;
     }
-    await setVerificationMode(env.HODOR_DB, args);
-    await replyInTopic(env, chatId, threadId, formatVerifyModeConfirmed(args));
+    // 2026-10-10 命令拆分：/verifymode_math|button|turnstile 各管一种模式，
+    // 与 /verifymode <模式> 别名共用同一事务化设置逻辑（turnstile 凭据前置
+    // 检查保留）；附加参数忽略（与 /verifyon 同姿态）
+    const mode =
+      name === "/verifymode_math" ? "math" : name === "/verifymode_button" ? "button" : "turnstile";
+    await setVerificationModeWithPrecheck(env, chatId, threadId, mode);
     return;
   }
 
