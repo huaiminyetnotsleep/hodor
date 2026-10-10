@@ -93,6 +93,30 @@ export function parseWelcomeText(env: Cloudflare.Env): string | null {
 }
 
 /**
+ * 解析 PUBLIC_BASE_URL：验证页面的固定公网地址（选填，Turnstile 任务新增）。
+ *
+ * 只接受 HTTPS origin（可含根路径或不带路径）：拒绝 http、凭据
+ * （user:pass@）、查询串与片段；其余任何解析失败 → null = 视同未配置，
+ * 调用方回退 webhook 请求 origin，同时 /selfcheck 的严格校验会对非法值
+ * 点名诊断（两套语义分工，见 observability spec）。返回 URL 仅用其 origin。
+ */
+export function parsePublicBaseUrl(env: Cloudflare.Env): URL | null {
+  const raw = env.PUBLIC_BASE_URL?.trim();
+  if (!raw) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:") return null;
+  if (url.username !== "" || url.password !== "") return null;
+  if (url.search !== "" || url.hash !== "") return null;
+  if (url.pathname !== "/" && url.pathname !== "") return null;
+  return url;
+}
+
+/**
  * 常量时间字符串比较（用于 ADMIN_SECRET 路径段 / TELEGRAM_WEBHOOK_SECRET 头校验）。
  *
  * 先对两边各做 SHA-256（定长 32 字节摘要——比较时长与输入长度无关，不泄漏长度），

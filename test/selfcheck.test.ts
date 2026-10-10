@@ -268,3 +268,112 @@ describe("Webhook 绑定检查（构造 env 直调 + 桩）", () => {
     ]);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Turnstile 配置检查（2026-10-09 任务）：成对 / 模式必需 / 测试密钥 / 公网地址 */
+/* ------------------------------------------------------------------ */
+
+import { checkTurnstileConfig, checkVerificationConfig } from "../src/selfcheck";
+import { applyVerificationConfigChange, getVerificationSettings } from "../src/store/settings";
+
+describe("selfcheck: checkTurnstileConfig（纯函数，构造 env 直测）", () => {
+  /** 构造 env（只关心 Turnstile 任务新增的三个变量） */
+  function turnstileEnv(overrides: Record<string, string | undefined>): Cloudflare.Env {
+    return {
+      TURNSTILE_SITE_KEY: undefined,
+      TURNSTILE_SECRET_KEY: undefined,
+      PUBLIC_BASE_URL: undefined,
+      ...overrides,
+    } as unknown as Cloudflare.Env;
+  }
+
+  it("旧模式 + 两 key 均未配置 → 通过（可选功能不要求凭据）", () => {
+    expect(checkTurnstileConfig(turnstileEnv({}), "math")).toEqual([]);
+    expect(checkTurnstileConfig(turnstileEnv({}), "button")).toEqual([]);
+  });
+
+  it("只配一个 key → 成对错误点名缺失侧（无论当前模式）", () => {
+    const onlySite = checkTurnstileConfig(turnstileEnv({ TURNSTILE_SITE_KEY: "sk" }), "math");
+    expect(onlySite).toHaveLength(1);
+    expect(onlySite[0]).toContain("TURNSTILE_SECRET_KEY");
+    expect(onlySite[0]).toContain("成对配置");
+
+    const onlySecret = checkTurnstileConfig(turnstileEnv({ TURNSTILE_SECRET_KEY: "sec" }), "button");
+    expect(onlySecret).toHaveLength(1);
+    expect(onlySecret[0]).toContain("TURNSTILE_SITE_KEY");
+  });
+
+  it("mode=turnstile 缺配置 → 点名缺失变量；配齐后通过", () => {
+    const missing = checkTurnstileConfig(turnstileEnv({}), "turnstile");
+    expect(missing).toHaveLength(1);
+    expect(missing[0]).toContain("TURNSTILE_SITE_KEY、TURNSTILE_SECRET_KEY");
+
+    const ok = checkTurnstileConfig(
+      turnstileEnv({ TURNSTILE_SITE_KEY: "sk", TURNSTILE_SECRET_KEY: "sec" }),
+      "turnstile",
+    );
+    expect(ok).toEqual([]);
+  });
+
+  it("官方测试密钥 → 明确错误（点变量名，绝不回显完整值）", () => {
+    const failed = checkTurnstileConfig(
+      turnstileEnv({
+        TURNSTILE_SITE_KEY: "1x00000000000000000000AA",
+        TURNSTILE_SECRET_KEY: "1x0000000000000000000000000000000AA",
+      }),
+      "turnstile",
+    );
+    expect(failed.some((line) => line.includes("TURNSTILE_SITE_KEY 是 Cloudflare 官方测试密钥"))).toBe(true);
+    expect(failed.some((line) => line.includes("TURNSTILE_SECRET_KEY 是 Cloudflare 官方测试密钥"))).toBe(true);
+    for (const line of failed) {
+      expect(line.startsWith("TURNSTILE_")).toBe(true);
+    }
+  });
+
+  it("官方测试密钥 invisible 变体（Site Key BB 系）同样点名（官方 testing 文档全变体覆盖）", () => {
+    for (const siteKey of ["1x00000000000000000000BB", "2x00000000000000000000BB"]) {
+      // Secret 配非测试值：成对检查通过，失败项只剩测试密钥一条
+      const failed = checkTurnstileConfig(
+        turnstileEnv({ TURNSTILE_SITE_KEY: siteKey, TURNSTILE_SECRET_KEY: "prod-secret" }),
+        "math",
+      );
+      expect(failed).toHaveLength(1);
+      expect(failed[0]).toContain("TURNSTILE_SITE_KEY 是 Cloudflare 官方测试密钥");
+      expect(failed[0]).not.toContain(siteKey); // 不回显完整值
+    }
+  });
+
+  it("非法 PUBLIC_BASE_URL → 诊断（合法值通过）", () => {
+    const failed = checkTurnstileConfig(
+      turnstileEnv({ PUBLIC_BASE_URL: "http://insecure.example.com" }),
+      "math",
+    );
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toContain("PUBLIC_BASE_URL 已配置但非法");
+    expect(
+      checkTurnstileConfig(turnstileEnv({ PUBLIC_BASE_URL: "https://ok.example.com" }), "math"),
+    ).toEqual([]);
+  });
+});
+
+describe("selfcheck: checkVerificationConfig（读 settings 快照）", () => {
+  it("mode=turnstile（库内真值）+ env 缺配置 → failed 点名；切回 math 后同 env 通过", async () => {
+    const bareEnv = {
+      HODOR_DB: env.HODOR_DB,
+      TELEGRAM_BOT_TOKEN: "test-bot-token",
+      TELEGRAM_WEBHOOK_SECRET: "test-webhook-secret",
+      ADMIN_SECRET: "test-admin-secret",
+      SUPPORT_CHAT_ID: "-1001234567890",
+      ADMIN_IDS: "111111111,222222222",
+    } as unknown as Cloudflare.Env;
+
+    await applyVerificationConfigChange(env.HODOR_DB, { mode: "turnstile" });
+    expect((await getVerificationSettings(env.HODOR_DB)).verifyMode).toBe("turnstile");
+    expect(await checkVerificationConfig(bareEnv, env.HODOR_DB)).toEqual([
+      "当前验证模式为 turnstile，但缺少必需配置：TURNSTILE_SITE_KEY、TURNSTILE_SECRET_KEY（请先配置或切回 math/button）",
+    ]);
+
+    await applyVerificationConfigChange(env.HODOR_DB, { mode: "math" });
+    expect(await checkVerificationConfig(bareEnv, env.HODOR_DB)).toEqual([]);
+  });
+});

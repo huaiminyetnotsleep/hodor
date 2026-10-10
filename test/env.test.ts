@@ -9,6 +9,7 @@ import {
   parseAdminIds,
   parseMaxAttempts,
   parseMaxMessagesPerMinute,
+  parsePublicBaseUrl,
   parseSupportChatId,
   parseVerifyTtlHours,
   parseWelcomeText,
@@ -163,6 +164,39 @@ describe("parseVerifyTtlHours（T33 验证有效期）", () => {
     expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "-0.5" }))).toBe(0);
     expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "2.5" }))).toBe(0);
     expect(parseVerifyTtlHours(envWith({ VERIFY_TTL_HOURS: "abc" }))).toBe(0);
+  });
+});
+
+describe("parsePublicBaseUrl（Turnstile 任务：验证页面固定公网地址）", () => {
+  it("合法 HTTPS origin（含根路径或不带路径）→ URL（仅 origin 被消费）", () => {
+    const plain = parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "https://hodor.example.workers.dev" }));
+    expect(plain?.origin).toBe("https://hodor.example.workers.dev");
+    const rooted = parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "https://verify.example.com/" }));
+    expect(rooted?.origin).toBe("https://verify.example.com");
+  });
+
+  it("缺失 / 空串 / 纯空白 → null（视同未配置，回退请求 origin）", () => {
+    expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: undefined }))).toBeNull();
+    expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "" }))).toBeNull();
+    expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "   " }))).toBeNull();
+  });
+
+  it("非 HTTPS（http / 其他协议）→ null", () => {
+    expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "http://hodor.example.com" }))).toBeNull();
+    expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "ftp://hodor.example.com" }))).toBeNull();
+    expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "//hodor.example.com" }))).toBeNull();
+  });
+
+  it("凭据 / 查询 / 片段 / 深路径 → null（origin 之外一律拒绝）", () => {
+    expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "https://user:pass@hodor.example.com" }))).toBeNull();
+    expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "https://hodor.example.com/?x=1" }))).toBeNull();
+    expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "https://hodor.example.com/#frag" }))).toBeNull();
+    expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "https://hodor.example.com/verify" }))).toBeNull();
+  });
+
+  it("非 URL 垃圾输入 → null（解析失败按未配置 + 诊断路径处理）", () => {
+    expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "not a url" }))).toBeNull();
+    expect(parsePublicBaseUrl(envWith({ PUBLIC_BASE_URL: "hodor.example.com" }))).toBeNull();
   });
 });
 

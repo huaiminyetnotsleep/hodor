@@ -23,6 +23,8 @@ handleSelfCheck(request: Request, env: Cloudflare.Env): Promise<Response>
 
 // src/selfcheck.ts —— 纯检查函数，不发请求不写库（checkWebhook 消费调用结果）
 checkEnv(env: Cloudflare.Env): string[]                   // 失败文案数组，空 = 通过
+checkTurnstileConfig(env: Cloudflare.Env, verifyMode: VerifyMode): string[]          // 纯本地计算
+checkVerificationConfig(env: Cloudflare.Env, db: D1Database): Promise<string[]>      // 读 settings 快照后委托
 checkTables(db: D1Database): Promise<string[]>
 checkWebhook(result: TelegramResult<WebhookInfo> | null, expectedUrl: string): string[]
 ```
@@ -32,7 +34,7 @@ checkWebhook(result: TelegramResult<WebhookInfo> | null, expectedUrl: string): s
 | 端点 | 行为 | 响应 |
 |------|------|------|
 | `GET /health` | 零外部依赖（不查 D1、不调 Telegram） | 恒 200 `{"status":"ok","version":"…"}`（**字节级不变**，uptime 监控依赖） |
-| `GET /selfcheck` | env → 八表 → webhook 顺序，三项独立、env 失败不阻断 | 全过 200 `{"status":"ok","version":"…"}`；有失败 503 `{"status":"error","version":"…","failed":[…]}` |
+| `GET /selfcheck` | env → 验证配置（Turnstile）→ 八表 → webhook 顺序，各项独立、env 失败不阻断 | 全过 200 `{"status":"ok","version":"…"}`；有失败 503 `{"status":"error","version":"…","failed":[…]}` |
 
 - 两者均无鉴权（用户决策）；**任何输出不回显密钥值**——只允许变量名、表名、非密钥原值（webhook URL、Telegram 错误原文）、client 已消毒概要。
 - 缺 `TELEGRAM_BOT_TOKEN` 时不得发起 Telegram 调用（不建 client）。
@@ -44,6 +46,11 @@ checkWebhook(result: TelegramResult<WebhookInfo> | null, expectedUrl: string): s
 |------|------|
 | 必填变量缺失 / 非法 | 对应中文 failed 文案（点名变量 / 位置） |
 | 三 Secret 两两相同 | 各自一条「密钥变量取值重复」 |
+| Turnstile 两 key 只配一个 | 「Turnstile 配置不完整：…必须成对配置（当前仅配置了 …）」（无论当前模式） |
+| `verify_mode=turnstile` 而密钥不齐 | 「当前验证模式为 turnstile，但缺少必需配置：…（请先配置或切回 math/button）」 |
+| 配置官方测试密钥 | 「…是 Cloudflare 官方测试密钥：仅限本地测试，不得用于生产…」 |
+| `PUBLIC_BASE_URL` 非法 | 「PUBLIC_BASE_URL 已配置但非法：…运行时将视同未配置并回退请求 origin」 |
+| settings 读取失败（D1 不可用） | 「验证配置读取失败：…（Turnstile 项跳过）」，单条报告、不阻断其余检查 |
 | `HODOR_DB` 查询抛错 | 「数据库不可用：HODOR_DB 绑定查询失败」 |
 | `getWebhookInfo` ok:false | 「Webhook 状态未知…（已消毒概要）」，自检层单次消费不再调用 |
 

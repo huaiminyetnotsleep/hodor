@@ -14,7 +14,8 @@
  * 安全不变量：任何文案只含变量名、表名、非密钥原值（webhook URL、
  * Telegram 投递错误原文）与 client 已消毒的错误概要，绝不回显密钥值。
  */
-import { parseSupportChatId } from "./env";
+import { parsePublicBaseUrl, parseSupportChatId } from "./env";
+import { getVerificationSettings } from "./store/settings";
 import type { TelegramResult, WebhookInfo } from "./telegram/types";
 
 /** 当前 schema 的全部业务表（0001 六表 + 0004 delete_confirmations + 0005 broadcasts），与 migrations 目录同评审 */
@@ -131,6 +132,95 @@ export function checkEnv(env: Cloudflare.Env): string[] {
   }
 
   return failed;
+}
+
+/* ------------------------------------------------------------------ */
+/* Turnstile（2026-10-09 任务）：成对配置 / 模式必需 / 测试密钥 / 公网地址 */
+/* ------------------------------------------------------------------ */
+
+/** Cloudflare 官方测试密钥（troubleshooting/testing 文档；生产配置即错误）。
+ *  Site Key 含 visible（AA/AB/FF）与 invisible（BB）全部变体 */
+const TURNSTILE_TEST_SITE_KEYS = [
+  "1x00000000000000000000AA",
+  "2x00000000000000000000AB",
+  "3x00000000000000000000FF",
+  "1x00000000000000000000BB",
+  "2x00000000000000000000BB",
+] as const;
+const TURNSTILE_TEST_SECRET_KEYS = [
+  "1x0000000000000000000000000000000AA",
+  "2x0000000000000000000000000000000AA",
+  "3x0000000000000000000000000000000AA",
+] as const;
+
+/**
+ * Turnstile 配置检查（纯本地计算，mode 由调用方从 settings 快照传入）。
+ *
+ * - 成对检查：两 key 只配一个 → 点名配置错误（无论当前模式——残缺配置
+ *   会在切模式时踩坑）；
+ * - 模式必需：verify_mode = turnstile 而两 key 未配齐 → 点名缺失；
+ * - 测试密钥：生产配置官方测试值 → 明确错误（测试密钥放行一切，安全无意义）。
+ * 文案只含变量名，绝不回显任何配置值。
+ */
+export function checkTurnstileConfig(
+  env: Cloudflare.Env,
+  verifyMode: "math" | "button" | "turnstile",
+): string[] {
+  const failed: string[] = [];
+  const siteKey = env.TURNSTILE_SITE_KEY;
+  const secretKey = env.TURNSTILE_SECRET_KEY;
+  const siteConfigured = isConfigured(siteKey);
+  const secretConfigured = isConfigured(secretKey);
+
+  if (siteConfigured !== secretConfigured) {
+    const onlyOne = siteConfigured ? "TURNSTILE_SITE_KEY" : "TURNSTILE_SECRET_KEY";
+    failed.push(
+      `Turnstile 配置不完整：TURNSTILE_SITE_KEY 与 TURNSTILE_SECRET_KEY 必须成对配置（当前仅配置了 ${onlyOne}）`,
+    );
+  }
+  if (verifyMode === "turnstile" && (!siteConfigured || !secretConfigured)) {
+    const missing = [
+      ...(siteConfigured ? [] : ["TURNSTILE_SITE_KEY"]),
+      ...(secretConfigured ? [] : ["TURNSTILE_SECRET_KEY"]),
+    ];
+    failed.push(
+      `当前验证模式为 turnstile，但缺少必需配置：${missing.join("、")}（请先配置或切回 math/button）`,
+    );
+  }
+  if (siteConfigured && (TURNSTILE_TEST_SITE_KEYS as readonly string[]).includes(siteKey)) {
+    failed.push(
+      "TURNSTILE_SITE_KEY 是 Cloudflare 官方测试密钥：仅限本地测试，不得用于生产（请在 Turnstile 控制台创建 Widget 获取正式 Site Key）",
+    );
+  }
+  if (secretConfigured && (TURNSTILE_TEST_SECRET_KEYS as readonly string[]).includes(secretKey)) {
+    failed.push(
+      "TURNSTILE_SECRET_KEY 是 Cloudflare 官方测试密钥：仅限本地测试，不得用于生产（请在 Turnstile 控制台创建 Widget 获取正式 Secret Key）",
+    );
+  }
+  if (isConfigured(env.PUBLIC_BASE_URL) && parsePublicBaseUrl(env) === null) {
+    failed.push(
+      "PUBLIC_BASE_URL 已配置但非法：必须是 HTTPS origin（仅可含根路径，不含凭据 / 查询 / 片段）；运行时将视同未配置并回退请求 origin",
+    );
+  }
+  return failed;
+}
+
+/**
+ * 验证配置检查（读取 settings 快照 + checkTurnstileConfig）。
+ * settings 读取失败（D1 不可用）→ 单条「不可用」，不阻断后续检查项；
+ * 检查逻辑全部在 checkTurnstileConfig（纯函数，单独可测）。
+ */
+export async function checkVerificationConfig(
+  env: Cloudflare.Env,
+  db: D1Database,
+): Promise<string[]> {
+  let mode: "math" | "button" | "turnstile";
+  try {
+    mode = (await getVerificationSettings(db)).verifyMode;
+  } catch {
+    return ["验证配置读取失败：无法从数据库读取验证模式（Turnstile 项跳过）"];
+  }
+  return checkTurnstileConfig(env, mode);
 }
 
 /**

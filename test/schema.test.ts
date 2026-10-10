@@ -94,6 +94,42 @@ describe("schema: processed_updates status 三值 CHECK（迁移 0002）", () =>
   });
 });
 
+describe("schema: users 挑战栅栏四列（迁移 0006）", () => {
+  it("verify_request_hash / expires_at / generation / submit_not_before 均存在且可空", async () => {
+    await env.HODOR_DB.prepare(
+      "INSERT INTO users (bot_id, user_id) VALUES (2, 100)",
+    ).run();
+    // 默认全 NULL（可空列，无 NOT NULL 约束）
+    const row = await env.HODOR_DB.prepare(
+      `SELECT verify_request_hash, verify_request_expires_at, verify_request_generation, verify_submit_not_before
+       FROM users WHERE bot_id = 2 AND user_id = 100`,
+    ).first<{
+      verify_request_hash: string | null;
+      verify_request_expires_at: string | null;
+      verify_request_generation: number | null;
+      verify_submit_not_before: string | null;
+    }>();
+    expect(row).toEqual({
+      verify_request_hash: null,
+      verify_request_expires_at: null,
+      verify_request_generation: null,
+      verify_submit_not_before: null,
+    });
+    // 各列可写入并读回
+    await env.HODOR_DB.prepare(
+      `UPDATE users SET verify_request_hash = ?, verify_request_expires_at = ?,
+         verify_request_generation = ?, verify_submit_not_before = ?
+       WHERE bot_id = 2 AND user_id = 100`,
+    )
+      .bind("a".repeat(64), "2026-10-09T00:10:00.000Z", 3, "2026-10-09T00:00:15.000Z")
+      .run();
+    const updated = await env.HODOR_DB.prepare(
+      "SELECT verify_request_hash, verify_request_generation FROM users WHERE bot_id = 2 AND user_id = 100",
+    ).first<{ verify_request_hash: string; verify_request_generation: number }>();
+    expect(updated).toEqual({ verify_request_hash: "a".repeat(64), verify_request_generation: 3 });
+  });
+});
+
 describe("schema: settings 读写冒烟", () => {
   it("INSERT → UPDATE → SELECT 往返取到更新后的值", async () => {
     await env.HODOR_DB.prepare(

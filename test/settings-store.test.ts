@@ -24,10 +24,11 @@ const readSetting = (key: string) =>
     .then((row) => row?.value ?? null);
 
 describe("store: getVerificationSettings 默认值", () => {
-  it("两键均无行 → 默认 { verifyEnabled: true, verifyMode: 'math' }（阶段 4 行为）", async () => {
+  it("三键均无行 → 默认 { verifyEnabled: true, verifyMode: 'math', verifyGeneration: 0 }（存量部署零感知）", async () => {
     expect(await getVerificationSettings(env.HODOR_DB)).toEqual({
       verifyEnabled: true,
       verifyMode: "math",
+      verifyGeneration: 0,
     });
   });
 
@@ -38,11 +39,22 @@ describe("store: getVerificationSettings 默认值", () => {
     expect((await getVerificationSettings(env.HODOR_DB)).verifyEnabled).toBe(true);
   });
 
-  it("verify_mode 值非法（非 'math'/'button'）→ 该键回默认 math", async () => {
+  it("verify_mode 值非法（非 'math'/'button'/'turnstile'）→ 该键回默认 math", async () => {
     await env.HODOR_DB.prepare(
       "INSERT INTO settings (key, value) VALUES ('verify_mode', 'TGuard')",
     ).run();
     expect((await getVerificationSettings(env.HODOR_DB)).verifyMode).toBe("math");
+  });
+
+  it("verify_generation 值非法（非非负整数）→ 回默认 0；合法值原样透传（快照 CAS 用）", async () => {
+    await env.HODOR_DB.prepare(
+      "INSERT INTO settings (key, value) VALUES ('verify_generation', 'abc')",
+    ).run();
+    expect((await getVerificationSettings(env.HODOR_DB)).verifyGeneration).toBe(0);
+    await env.HODOR_DB.prepare(
+      "UPDATE settings SET value = '7' WHERE key = 'verify_generation'",
+    ).run();
+    expect((await getVerificationSettings(env.HODOR_DB)).verifyGeneration).toBe(7);
   });
 
   it("两键各自独立回默认（一键合法不掩盖另一键非法）", async () => {
@@ -54,6 +66,19 @@ describe("store: getVerificationSettings 默认值", () => {
     expect(await getVerificationSettings(env.HODOR_DB)).toEqual({
       verifyEnabled: true, // 非法回默认
       verifyMode: "button", // 合法保留
+      verifyGeneration: 0, // 无行回默认
+    });
+  });
+
+  it("turnstile 是合法模式值；快照三键同一条 SELECT 读取（原子快照契约）", async () => {
+    await env.HODOR_DB.prepare("DELETE FROM settings").run();
+    await env.HODOR_DB.prepare(
+      "INSERT INTO settings (key, value) VALUES ('verify_mode', 'turnstile'), ('verify_enabled', '1'), ('verify_generation', '3')",
+    ).run();
+    expect(await getVerificationSettings(env.HODOR_DB)).toEqual({
+      verifyEnabled: true,
+      verifyMode: "turnstile",
+      verifyGeneration: 3,
     });
   });
 });

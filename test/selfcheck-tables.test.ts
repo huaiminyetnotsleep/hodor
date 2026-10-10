@@ -28,13 +28,14 @@ afterEach(() => {
 });
 
 describe("/selfcheck 数据库检查", () => {
-  it("未应用迁移 → 503，failed 按期望表顺序逐张点名缺表", async () => {
+  it("未应用迁移 → 503，failed 先报验证配置读取失败、再按期望表顺序逐张点名缺表", async () => {
     const res = await SELF.fetch("https://example.com/selfcheck");
     expect(res.status).toBe(503);
     expect(JSON.parse(await res.text())).toEqual({
       status: "error",
       version: VERSION,
       failed: [
+        "验证配置读取失败：无法从数据库读取验证模式（Turnstile 项跳过）",
         "数据库缺表：users（迁移可能未执行，请在构建日志确认 migrations 步骤）",
         "数据库缺表：topics（迁移可能未执行，请在构建日志确认 migrations 步骤）",
         "数据库缺表：messages（迁移可能未执行，请在构建日志确认 migrations 步骤）",
@@ -74,7 +75,12 @@ describe("/selfcheck 数据库检查", () => {
     expect(JSON.parse(await res.text())).toEqual({
       status: "error",
       version: VERSION,
-      failed: ["数据库不可用：HODOR_DB 绑定查询失败"],
+      failed: [
+        // 验证配置项（settings 读取）与表项独立失败、互不阻断（固定顺序：
+        // 验证配置在前、表在后）
+        "验证配置读取失败：无法从数据库读取验证模式（Turnstile 项跳过）",
+        "数据库不可用：HODOR_DB 绑定查询失败",
+      ],
     });
   });
 });

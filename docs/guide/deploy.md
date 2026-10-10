@@ -21,7 +21,7 @@
 | `SUPPORT_CHAT_ID` | 客服超级群组的 chat_id（`-100` 开头负数） | bot 进群后往群里随便发一条消息，浏览器打开 `https://api.telegram.org/bot<BOT_TOKEN>/getUpdates`，记下返回中的 `chat.id`；也可邀请 [@sc_ui_bot](https://t.me/sc_ui_bot)、[@getidsbot](https://t.me/getidsbot) 等工具 bot 进群后发 `/id` |
 | `ADMIN_IDS` | 管理员的 Telegram 用户 ID（逗号分隔，可多个） | 同上 getUpdates 返回中你那条消息的 `from.id`；或在 Telegram 内向 [@getidsbot](https://t.me/getidsbot) 等工具 bot 发任意消息直接读出自己的 user ID |
 
-## 环境变量（共 9 个，权威清单）
+## 环境变量（基础 9 项，权威清单）
 
 | 变量 | 类型 | 必填 | 默认 | 说明 |
 | --- | --- | --- | --- | --- |
@@ -44,6 +44,8 @@
 仓库已开启 `keep_vars`，面板配置的变量跨部署保留（Secret 本就不因部署删除）；变量值一律不进仓库。
 
 本地调试可选 `cp .dev.vars.example .dev.vars` 后填值（git 忽略，与面板互不影响）。
+
+以上是**基础 9 项**：默认部署（数学题 / 纯按钮验证）只需这些。可选的 Turnstile 人机验证模式另需 2–3 个变量，申请与配置见下方[可选：Turnstile 申请与配置](#turnstile)。
 
 ## 部署方式（三选一）
 
@@ -99,7 +101,7 @@ curl https://hodor.<你的子域>.workers.dev/health
 
 ## 部署多个实例
 
-同一份 fork 可以部署出多个完全隔离的机器人实例：每个实例 = 一个 Worker + 一个独立 D1 + 一个 Bot + 一个客服群，各自配置自己的 9 个变量，数据互不可见。全程浏览器操作，不改任何仓库文件。
+同一份 fork 可以部署出多个完全隔离的机器人实例：每个实例 = 一个 Worker + 一个独立 D1 + 一个 Bot + 一个客服群，各自配置自己的基础 9 项变量（启用 Turnstile 的实例再追加对应可选项），数据互不可见。全程浏览器操作，不改任何仓库文件。
 
 D1 数据库名自动随 Worker 名派生（Worker 名 `hodor-shop` → 数据库 `hodor-shop`），建库、绑定、迁移全部自动完成；首个实例（Worker 名 `hodor`）与本地 `npm run deploy` 的行为不受影响。
 
@@ -123,7 +125,7 @@ D1 数据库名自动随 Worker 名派生（Worker 名 `hodor-shop` → 数据�
 1. 在 Cloudflare 面板 → Workers & Pages → Create → Workers → **Import a repository**，再次选中**同一个 fork**
 2. 项目名称起一个**不同的名字**（如 `hodor-shop`，即该实例的 Worker 名）
 3. 其余向导项与首实例完全一致：构建命令留空、部署命令保持默认 `npx wrangler deploy`、关闭预览构建
-4. 部署完成后，进入**该 Worker** 的 设置 → 变量和机密，配置它自己的 9 个变量（见上方「环境变量」）
+4. 部署完成后，进入**该 Worker** 的 设置 → 变量和机密，配置它自己的基础 9 项变量（见上方「环境变量」；启用 Turnstile 的实例再按需追加对应可选项）
 5. 访问 `https://<新实例地址>/setwebhook/<你的 ADMIN_SECRET>`，为该实例的 bot 绑定 webhook
 
 ### 构建日志核验（决策树）
@@ -141,6 +143,78 @@ D1 数据库名自动随 Worker 名派生（Worker 名 `hodor-shop` → 数据�
 ::: tip
 每次 push 会对每个实例各触发一次构建，构建配额随实例数线性消耗；免费套餐下并发构建会排队，属正常现象。多实例的更新传播与回滚边界见[发布与更新](/guide/release.md)。
 :::
+
+## 可选：Turnstile 申请与配置 {#turnstile}
+
+默认的数学题 / 纯按钮验证开箱即用，**不需要**本节的任何申请与配置。只有准备把验证模式切换为 Turnstile 人机验证时才按本节操作。
+
+本节是申请与生产配置的唯一权威流程；行为说明见[功能介绍](/guide/features.md#人机验证)，排障 / 换密钥 / 回滚见[运维手册](/guide/ops.md#验证模式与密钥变更)。
+
+### 准备
+
+1. 一个 Cloudflare 账号（与部署 Worker 同一账号即可）
+2. 一个已完成部署收尾的 hodor 实例，并记下它的实际 HTTPS 地址（如 `https://hodor.example.workers.dev`，以浏览器地址栏为准，不要凭 Worker 名猜测）
+3. 管理员账号（稍后用 `/verifymode` 命令切换模式）
+
+### 创建 Widget 并获取密钥
+
+1. 登录 Cloudflare 面板 → **Turnstile** → **Add widget**
+2. Widget 名称按实例填写（如 `hodor`、`hodor-shop`），多实例时便于对应
+3. **Hostname** 填 Worker 的实际主机名，格式有硬性限制：不含协议（`https://`）、不含路径、不含端口、**不支持通配符**，例如 `hodor.example.workers.dev`
+4. 授权父域会同时覆盖其子域；建议按实际访问的具体主机逐个添加，绑定自定义域名后把新域名也加进来
+5. **Widget 类型**选 **Managed**（由 Cloudflare 按风险决定是否要求交互，适合本场景）；**不启用 Pre-clearance**——hodor 通过自己的验证状态放行消息，不依赖站点级放行 Cookie
+6. 创建后在 Widget 详情页取得两把密钥：**Site Key**（公开标识，可出现在网页中）与 **Secret Key**（服务端机密，只在服务端校验时使用，绝不进页面 / 日志 / 仓库）
+
+官方参考：[Widget 管理](https://developers.cloudflare.com/turnstile/get-started/widget-management/dashboard/)、[Hostname 管理](https://developers.cloudflare.com/turnstile/additional-configuration/hostname-management/)、[Widget 类型](https://developers.cloudflare.com/turnstile/reference/widget-types/)、[服务端校验（Siteverify）](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)。
+
+### 配置到目标 Worker
+
+打开**目标实例** Worker 的 设置 → 变量和机密，新增：
+
+| 变量 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `TURNSTILE_SITE_KEY` | 文本 | ✅ | 上一步的 Site Key（公开值，随验证页面输出） |
+| `TURNSTILE_SECRET_KEY` | 机密 | ✅ | 上一步的 Secret Key（仅服务端 Siteverify 使用） |
+| `PUBLIC_BASE_URL` | 文本 | — | 固定公网地址；一般**留空** |
+
+`PUBLIC_BASE_URL` 的默认行为已覆盖绝大多数部署：验证页面地址按收到 webhook 请求的 origin 自动推导。
+
+仅当需要固定公网地址等特殊部署时才配置：值必须是 HTTPS origin（可含根路径，不含凭据 / 查询 / 片段）。配置非法时运行时视同未配置并回退请求 origin，`/selfcheck` 会点名诊断。
+
+::: warning 三个变量来源互不相通
+- **生产值**只配在 Cloudflare 面板的「变量和机密」（仓库已开启 `keep_vars`，面板变量跨部署保留；Secret 本就不因部署删除）
+- **Workers Builds 构建与 GitHub Secrets 不需要这些变量**：构建阶段用不到，不要加进仓库 Secrets
+- **本地 `.dev.vars`** 只影响 `wrangler dev`，已被 git 忽略，绝不提交
+:::
+
+多实例部署时，每个实例各自创建 Widget（hostname 填各自域名）、配置各自的密钥，互不共用。
+
+### 本地测试密钥
+
+本地开发可用 Cloudflare 官方测试密钥对（始终通过）：Site Key `1x00000000000000000000AA` + Secret Key `1x0000000000000000000000000000000AA`。官方还提供始终失败等组合，见[测试文档](https://developers.cloudflare.com/turnstile/troubleshooting/testing/)。
+
+- 测试密钥**仅限本地**：生产实例配置测试密钥会被 `/selfcheck` 直接报错（它放行一切，安全上无意义）；测试与生产密钥不要混用
+- 普通 `wrangler dev`（`127.0.0.1`）走不通完整链路：Mini App 按钮打不开本地地址，Telegram 签名身份数据也只在真实 Bot 会话中产生——端到端联调需要测试 Bot + HTTPS 部署，见[本地开发](/guide/development.md#验证本地联调)
+
+### 启用与验收
+
+1. 配置完成后访问 `/selfcheck`：确认无 Turnstile 相关失败项（只配一把 Key、误配官方测试密钥、`PUBLIC_BASE_URL` 非法都会被逐条点名）
+2. 管理员在客服群话题内发送 `/verifymode turnstile`：密钥未配齐时切换被拒绝并点名缺失变量；成功后回执确认切换完成。切换即时生效：作废全部旧验证题与未完成的网页请求，已验证用户不受影响
+3. 用一个**未验证**的 Telegram 账号私聊 Bot → 收到验证消息 → 点「打开验证页面」→ 完成 Turnstile 挑战 → 页面显示验证通过 → 回聊天窗口重新发送一条消息 → 客服群出现该用户话题且消息中继
+
+::: warning 端到端验收必须真机完成
+Telegram 内嵌浏览器对 Mini App 与第三方组件的支持以**实测为准**：请在你实际使用的客户端（Android / iOS / Desktop / Web）各完成一次上述验收。文档与自动化测试不能替代真机验证；某端异常时的表现与处理见[运维手册 · 故障排查](/guide/ops.md#故障排查)。
+:::
+
+回滚：管理员执行 `/verifymode math`（或 `button`）即切回原模式——未完成的网页请求作废、已验证状态保留，详见[运维手册 · 验证模式与密钥变更](/guide/ops.md#验证模式与密钥变更)。
+
+### 入口与身份说明
+
+Turnstile 模式的入口是 Bot 私聊消息里的「打开验证页面」按钮（Telegram Mini App，见[官方说明](https://core.telegram.org/bots/webapps/)）。页面通过 Telegram 官方签名数据确认当前用户，提交后由服务端向 Cloudflare Siteverify 校验挑战结果并核对当前请求——仅持有链接或挑战结果不能完成他人的验证。
+
+申请 Turnstile 不依赖任何第三方验证服务（TGuard 仍是未实现的规划，见[路线图](/todo/index.md)）。
+
+Turnstile 验证请求量与 Workers / D1 的套餐配额分别计量，实际成本取决于 Cloudflare 套餐与配额（当前额度见官方[套餐页](https://developers.cloudflare.com/turnstile/plans/)）。
 
 ## 部署后收尾
 

@@ -124,6 +124,8 @@ describe("store: ensureUser 三态返回 + 治理快照", () => {
       verifiedAt: null,
       verifyAnswer: null,
       verifyMsgId: null,
+      verifyRequestHash: null, // Turnstile 任务快照新字段：挑战栅栏，新档默认无
+      verifyRequestGeneration: null,
       firstName: "新名",
       lastName: "",
       username: "new_hd",

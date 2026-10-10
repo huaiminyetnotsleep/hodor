@@ -140,11 +140,16 @@ async function maybeSendWelcome(
  * 处理一条私聊 message：建档 → 三门（封禁 / 验证 / 限频）→ 阶段 3 链
  * （topic+置顶 → 欢迎语 → 中继 → 账本）。
  * 完成（resolve）= 按成功处理；抛出（reject）= retryable，交 webhook 500 重推。
+ *
+ * requestOrigin（Turnstile 任务）：webhook 请求的可信 origin，供 Turnstile
+ * 模式出题拼 Mini App 页面地址（PUBLIC_BASE_URL 有效时优先，见
+ * resolveVerifyOrigin）；缺省（旧调用方 / 测试）仅影响 turnstile 出题。
  */
 export async function handleInbound(
   env: Cloudflare.Env,
   botId: number,
   message: TelegramMessageRef,
+  requestOrigin?: string,
 ): Promise<void> {
   // 防御：classify 已对 supportChatId===null fail-closed，正常到不了这里；
   // 真到了说明部署配置坏了——按 retryable 处理让 5xx 暴露问题
@@ -214,7 +219,7 @@ export async function handleInbound(
       // 有 pending）一律 slot 门控重出**新题**——赢才出（重发节流，T30），输静默；
       // 题面随 settings.verifyMode 模式化（T32，sendVerificationCode 内读取）
       if (userState.isNew || (await claimNoticeSlot(env.HODOR_DB, botId, from.id))) {
-        await sendVerificationCode(env, botId, from.id, { type: "question" });
+        await sendVerificationCode(env, botId, from.id, { type: "question" }, requestOrigin);
       }
       // 丢弃：不建 topic、不置顶、不中继、不写账本（/start 亦如此）；被丢弃的
       // 消息不积压补发——通过验证后的新消息才进入正常管线
@@ -233,7 +238,7 @@ export async function handleInbound(
     // 合并消息（提示含 limit 数字 + 新题 + 按钮，单 push）——slot 赢得才发，
     // 输则静默（持续刷消息不产生持续回复；重验入口由 60s 后的下一条消息提供）
     if (await claimNoticeSlot(env.HODOR_DB, botId, from.id)) {
-      await sendVerificationCode(env, botId, from.id, { type: "overflow", limit });
+      await sendVerificationCode(env, botId, from.id, { type: "overflow", limit }, requestOrigin);
     }
     return;
   }

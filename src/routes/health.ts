@@ -12,7 +12,7 @@
  * 文案只含变量名 / 表名 / 非密钥原值，绝不回显密钥值。
  */
 import { VERSION } from "../generated/version";
-import { checkEnv, checkTables, checkWebhook, isConfigured } from "../selfcheck";
+import { checkEnv, checkTables, checkVerificationConfig, checkWebhook, isConfigured } from "../selfcheck";
 import { createTelegramClient } from "../telegram/client";
 import type { TelegramResult, WebhookInfo } from "../telegram/types";
 
@@ -21,8 +21,12 @@ export function handleHealth(): Response {
 }
 
 export async function handleSelfCheck(request: Request, env: Cloudflare.Env): Promise<Response> {
-  // 固定顺序 env → 表 → webhook（failed 数组按此顺序汇总，三项互不阻断）
-  const failed: string[] = [...checkEnv(env), ...(await checkTables(env.HODOR_DB))];
+  // 固定顺序 env → 验证配置 → 表 → webhook（failed 数组按此顺序汇总，各项互不阻断）
+  const failed: string[] = [
+    ...checkEnv(env),
+    ...(await checkVerificationConfig(env, env.HODOR_DB)),
+    ...(await checkTables(env.HODOR_DB)),
+  ];
 
   // webhook 期望地址 = 本 Worker 的 /webhook（与 handleSetWebhook 的拼法一致）
   const expectedUrl = new URL(request.url).origin + "/webhook";

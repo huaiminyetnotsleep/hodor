@@ -14,7 +14,7 @@ cp .dev.vars.example .dev.vars # .dev.vars 已被 git 忽略，不会进入提�
 ::: tip
 测试所需的变量已由 `vitest.config.ts` 显式注入（不依赖本地 `.dev.vars`，不同机器结果一致）。
 
-`.dev.vars` 供 `wrangler dev` 手动运行使用——模板条目默认全部注释，复制后逐条取消注释并填值（必填 5 条必须启用，选填按需），真机联调时再填入真实 token。
+`.dev.vars` 供 `wrangler dev` 手动运行使用——模板条目默认全部注释，复制后逐条取消注释并填值（必填 5 条必须启用，选填按需；Turnstile 三项仅在本地联调验证模式时启用，见[验证本地联调](#验证本地联调)），真机联调时再填入真实 token。
 :::
 
 文档站（本站）的依赖独立装在 `docs/` 下，首次运行会自动安装：
@@ -110,14 +110,31 @@ npx wrangler d1 execute hodor --local --command "SELECT * FROM settings"
 只有 `--remote` 操作（如 `npm run db:migrate:remote`）才需要真实 id，见[部署流程](./deploy.md)。
 :::
 
-当前已交付（完整 v1）：
+当前已交付（完整 v1 + Turnstile 人机验证）：
 
 - `POST /webhook`（文本 + 7 类媒体双向中继、人机验证、限频、全套管理命令）
 - `GET /health`（存活探针）
 - `GET /selfcheck`（完整自检）
 - `/setwebhook/<ADMIN_SECRET>` 与 `/deletewebhook/<ADMIN_SECRET>`（绑定 / 解绑 + 命令菜单注册）
+- `GET /verify?r=<nonce>`（Turnstile 验证页面，Telegram Mini App 嵌入）
+- `POST /api/verify/turnstile`（网页验证完成入口：initData 身份 + Siteverify + D1 条件裁决）
 
 本地 `wrangler dev` 无法接收 Telegram 推送（公网不可达），真机联调需部署后绑定 webhook，见[部署流程](./deploy.md)。
+
+## 人机验证（Turnstile）本地联调 {#验证本地联调}
+
+在 `.dev.vars` 中取消注释并填入 Cloudflare 官方**测试密钥对**（始终通过）：
+
+```bash
+TURNSTILE_SITE_KEY=1x00000000000000000000AA
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+```
+
+其他测试组合（始终失败等）见[官方测试文档](https://developers.cloudflare.com/turnstile/troubleshooting/testing/)。
+
+- **凭据隔离**：测试密钥只进本地 `.dev.vars`（git 忽略）；生产实例配置官方测试密钥会被 `/selfcheck` 直接报错。反过来，真实生产密钥不要留在 `.dev.vars`，更不能提交
+- **完整身份链路需要 HTTPS + 测试 Bot**：`wrangler dev` 的 `127.0.0.1` 地址打不开 Mini App 按钮，Telegram 签名身份数据（initData）也只在真实 Bot 会话中产生。要端到端走通，需把分支部署到 HTTPS 地址（workers.dev 或自定义域）并用测试 Bot 验收
+- **本地浏览器不能替代真机**：普通浏览器打开 `/verify?r=…` 只会看到「请从 Bot 打开」提示（缺 initData，按设计不放行）；Telegram 各端内嵌 WebView 的兼容性以真机实测为准，自动化测试与桌面浏览器通过不代表全部客户端可用
 
 ## 命令速查
 

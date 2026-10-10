@@ -62,6 +62,7 @@ export default defineConfig({
           items: [
             { text: '功能介绍', link: '/guide/features' },
             { text: '部署流程', link: '/guide/deploy' },
+            { text: 'Turnstile 申请配置（可选）', link: '/guide/deploy#turnstile' },
             { text: '原理与架构', link: '/guide/architecture' },
             { text: '运维手册', link: '/guide/ops' },
           ],

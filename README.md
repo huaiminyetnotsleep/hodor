@@ -40,7 +40,7 @@
 | 双向私聊直达 | 用户像加好友一样私聊 Bot 即可发起咨询；管理员在群话题里回一句，用户即刻收到——无需引用消息、无需切换工具 |
 | 一人一话题，永不串线 | 每个用户独占一个群组话题，多个客户同时咨询互不干扰；映射长期复用，回访自动接上原话题 |
 | 七类媒体原样转达 | 图片 / 视频 / 语音 / 音乐 / 文件 / 贴纸 / 动图按 Telegram `file_id` 直传——不下载、不落盘，速度与保真兼得 |
-| 人机验证挡机器人 | 默认数学题 + 按钮验证，可切纯按钮模式；未验证消息直接丢弃不积压，有效期与开关可配 |
+| 人机验证挡机器人 | 默认数学题 / 按钮验证，可选 Cloudflare Turnstile 模式（私聊内打开网页完成人机验证）；未验证消息直接丢弃不积压，有效期与开关可配 |
 | 频率限制防滥用 | 每用户每分钟转发上限（默认 20 条），超限自动触发重验；提示类回复另有频控，防止反向轰炸管理员 |
 | 15 条管理命令 | 封禁 / 备注 / 风险标记 / 验证控制 / 会话归档·删除·清空 / 全员公告，部署后自动注册进客服群命令菜单，触手可及 |
 | 全员公告一键触达 | `/broadcast` 一条公告经预览确认送达全部历史用户私聊（含归档用户，排除封禁）；General 留存全文与完成统计，可回溯 |
@@ -116,7 +116,7 @@ npm run deploy
 
 部署后统一收尾：
 
-1. 配置 9 个环境变量（`/selfcheck` 会逐条点名缺失项）
+1. 配置基础 9 项环境变量（`/selfcheck` 会逐条点名缺失项）
 2. 绑定 webhook
 3. 复检全绿
 4. 试聊验收
@@ -128,6 +128,8 @@ npm run deploy
 ### Cloudflare 环境变量
 
 配置入口：Cloudflare 面板 → Worker → 设置 → **变量和机密**。三个 Secret 请使用互不相同的长随机串；仓库已开启 `keep_vars`，面板配置跨部署保留，变量值一律不进仓库。
+
+下表为**基础 9 项**（默认部署只需这些）；可选的 Turnstile 人机验证模式另需 `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` 与可选 `PUBLIC_BASE_URL`，申请与配置见[部署指南 · Turnstile 申请与配置](docs/guide/deploy.md#turnstile)。
 
 | 变量 | 类型 | 必填 | 默认 | 说明 |
 | --- | --- | --- | --- | --- |
@@ -153,7 +155,7 @@ npm run deploy
 | `/ban` `/unban` | 封禁 / 解封本话题用户 |
 | `/note` `/unnote` | 添加 / 清除用户备注 |
 | `/risk` `/unrisk` | 标记 / 取消高危用户 |
-| `/verifyon` `/verifyoff` `/verifymode` | 开启 / 关闭人机验证、切换验证模式（即时生效，无需重部署） |
+| `/verifyon` `/verifyoff` `/verifymode` | 开启 / 关闭人机验证；`/verifymode` 无参查看、显式设置验证模式（math / button / turnstile，即时生效，无需重部署） |
 | `/archive` | 软归档本话题用户（保留历史与备注，回访复用原话题） |
 | `/deluser` | 物理删除用户及本话题（需确认） |
 | `/purgemsg` | 清理本话题可追踪的群消息 |
@@ -178,7 +180,7 @@ npm run docs:dev          # 本地预览文档站
 | 页面 | 内容 |
 | --- | --- |
 | [功能介绍](docs/guide/features.md) | 消息类型、验证与频控、命令表、会话生命周期 |
-| [部署指南](docs/guide/deploy.md) | 前置条件、ID 获取、环境变量权威清单、三条部署路径、部署后验收 |
+| [部署指南](docs/guide/deploy.md) | 前置条件、ID 获取、环境变量权威清单、三条部署路径、部署后验收、[Turnstile 申请与配置（可选）](docs/guide/deploy.md#turnstile) |
 | [运维手册](docs/guide/ops.md) | Webhook 与 Token 管理、`/health` 与 `/selfcheck`、故障排查、SQL 入口 |
 | [原理与架构](docs/guide/architecture.md) | 模块边界、消息流水线、设计决策（维护者参考） |
 | [数据表](docs/guide/database.md) | Schema 与语义（维护者参考） |
