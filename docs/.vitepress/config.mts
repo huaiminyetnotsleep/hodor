@@ -28,6 +28,8 @@ export default defineConfig({
 
     // 全站共用一份侧边栏，按受众分四组：使用（普通用户）→ 参考（维护者）
     // → 开发（贡献者）→ 规划（未实现）。三份关键文档展开二级小节便于直达；
+    // 一级分组固定展开；三份关键文档的二级小节默认收起（collapsed: true，
+    // 可点击展开，当前所在页面的小节列表也会自动展开）；
     // 锚点 id 以 VitePress 构建产物为准，页面改标题时需同步
     sidebar: [
       {
@@ -36,6 +38,7 @@ export default defineConfig({
           {
             text: '功能介绍',
             link: '/guide/features',
+            collapsed: true,
             items: [
               { text: '核心概念', link: '/guide/features#核心概念' },
               { text: '对话流程', link: '/guide/features#对话流程' },
@@ -49,6 +52,7 @@ export default defineConfig({
           {
             text: '部署流程',
             link: '/guide/deploy',
+            collapsed: true,
             items: [
               { text: '前置条件', link: '/guide/deploy#前置条件' },
               { text: '环境变量', link: '/guide/deploy#环境变量-基础-9-项-权威清单' },
@@ -62,6 +66,7 @@ export default defineConfig({
           {
             text: '运维手册',
             link: '/guide/ops',
+            collapsed: true,
             items: [
               { text: 'Webhook 绑定与解绑', link: '/guide/ops#webhook-绑定与解绑' },
               { text: '更换 Bot 或客服群', link: '/guide/ops#switch-bot-or-group' },
