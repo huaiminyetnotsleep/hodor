@@ -330,6 +330,19 @@ describe("selfcheck: checkTurnstileConfig（纯函数，构造 env 直测）", (
     }
   });
 
+  it("官方测试密钥 invisible 变体（Site Key BB 系）同样点名（官方 testing 文档全变体覆盖）", () => {
+    for (const siteKey of ["1x00000000000000000000BB", "2x00000000000000000000BB"]) {
+      // Secret 配非测试值：成对检查通过，失败项只剩测试密钥一条
+      const failed = checkTurnstileConfig(
+        turnstileEnv({ TURNSTILE_SITE_KEY: siteKey, TURNSTILE_SECRET_KEY: "prod-secret" }),
+        "math",
+      );
+      expect(failed).toHaveLength(1);
+      expect(failed[0]).toContain("TURNSTILE_SITE_KEY 是 Cloudflare 官方测试密钥");
+      expect(failed[0]).not.toContain(siteKey); // 不回显完整值
+    }
+  });
+
   it("非法 PUBLIC_BASE_URL → 诊断（合法值通过）", () => {
     const failed = checkTurnstileConfig(
       turnstileEnv({ PUBLIC_BASE_URL: "http://insecure.example.com" }),

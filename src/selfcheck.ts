@@ -138,11 +138,14 @@ export function checkEnv(env: Cloudflare.Env): string[] {
 /* Turnstile（2026-10-09 任务）：成对配置 / 模式必需 / 测试密钥 / 公网地址 */
 /* ------------------------------------------------------------------ */
 
-/** Cloudflare 官方测试密钥（troubleshooting/testing 文档；生产配置即错误） */
+/** Cloudflare 官方测试密钥（troubleshooting/testing 文档；生产配置即错误）。
+ *  Site Key 含 visible（AA/AB/FF）与 invisible（BB）全部变体 */
 const TURNSTILE_TEST_SITE_KEYS = [
   "1x00000000000000000000AA",
   "2x00000000000000000000AB",
   "3x00000000000000000000FF",
+  "1x00000000000000000000BB",
+  "2x00000000000000000000BB",
 ] as const;
 const TURNSTILE_TEST_SECRET_KEYS = [
   "1x0000000000000000000000000000000AA",
