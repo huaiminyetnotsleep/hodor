@@ -212,7 +212,7 @@ Telegram 内嵌浏览器对 Mini App 与第三方组件的支持以**实测为�
 
 Turnstile 模式的入口是 Bot 私聊消息里的「打开验证页面」按钮（Telegram Mini App，见[官方说明](https://core.telegram.org/bots/webapps/)）。页面通过 Telegram 官方签名数据确认当前用户，提交后由服务端向 Cloudflare Siteverify 校验挑战结果并核对当前请求——仅持有链接或挑战结果不能完成他人的验证。
 
-申请 Turnstile 不依赖任何第三方验证服务（TGuard 仍是未实现的规划，见[路线图](/todo/index.md)）。
+申请 Turnstile 不依赖任何第三方验证服务。
 
 Turnstile 验证请求量与 Workers / D1 的套餐配额分别计量，实际成本取决于 Cloudflare 套餐与配额（当前额度见官方[套餐页](https://developers.cloudflare.com/turnstile/plans/)）。
 
