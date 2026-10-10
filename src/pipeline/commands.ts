@@ -118,7 +118,10 @@ async function replyInTopic(
   const sent = await client.sendMessage({
     chat_id: chatId,
     text,
-    message_thread_id: threadId,
+    // General 平台怪癖（2026-10-10 实测）：论坛群显式传 message_thread_id=1 会
+    // 400「message thread not found」；省略该字段消息才落到 General（广播与
+    // replyInGeneral 的既有做法）。General 归一化路径传入 threadId=1，此处省略。
+    ...(threadId !== GENERAL_THREAD_ID ? { message_thread_id: threadId } : {}),
     ...(replyMarkup !== undefined ? { reply_markup: replyMarkup } : {}),
   });
   if (!sent.ok) {

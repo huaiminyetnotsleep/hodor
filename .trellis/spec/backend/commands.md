@@ -26,6 +26,10 @@
   （`/verifyon` `/verifyoff` `/verifymode` `/verifymode_math` `/verifymode_button`
   `/verifymode_turnstile` `/help`）为 outbound；webhook 派发处把**确无字段**的
   outbound 归一化为 thread 1。字段存在但非法（0/字符串）仍按畸形 ignore。
+- **向 General 发消息必须省略 `message_thread_id`**（2026-10-10 生产实测）：
+  论坛群显式传 `message_thread_id=1` 会 400「message thread not found」，省略才落
+  General——广播与归档回复的既有做法；`replyInTopic` 对 threadId=1 一律省略该字段。
+  归一化只用于路由判定，不透传到 sendMessage。
 - **命令菜单是聊天级作用域**：`BotCommandScope` 无 Topic 维度，`setMyCommands`
   无法按 Topic 隐藏命令——「仅 General 生效」靠 `handleCommand` 内运行时执行门
   （`threadId === GENERAL_THREAD_ID`，非门内只回引导提示、零副作用）实现，

@@ -735,10 +735,10 @@ describe("commands: 验证配置组 /verifyon /verifyoff /verifymode 系列（�
     return env.HODOR_DB.prepare("DELETE FROM settings").run();
   });
 
-  /** General（thread 1）回复：验证配置命令的唯一合法去向 */
+  /** General 回复：验证配置命令的唯一合法去向（省略 message_thread_id 才落 General） */
   function generalReplies(s: TelegramFetchStub): StubbedCall[] {
     return s.callsOf("sendMessage").filter(
-      (call) => (call.body as Record<string, unknown>).message_thread_id === 1,
+      (call) => (call.body as Record<string, unknown>).message_thread_id === undefined,
     );
   }
 
@@ -959,7 +959,7 @@ describe("commands: /verifymode_math|button|turnstile 专用切换命令（2026-
 
   function generalReplies(s: TelegramFetchStub): StubbedCall[] {
     return s.callsOf("sendMessage").filter(
-      (call) => (call.body as Record<string, unknown>).message_thread_id === 1,
+      (call) => (call.body as Record<string, unknown>).message_thread_id === undefined,
     );
   }
 

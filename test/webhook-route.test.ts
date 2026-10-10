@@ -1100,25 +1100,26 @@ describe("POST /webhook: General 全局命令（2026-10-10 命令拆分）", () 
     };
   }
 
-  it("管理员 /verifyoff 在 General → 执行成功，回复原地发到 General（线程号归一化为 1）", async () => {
+  it("管理员 /verifyoff 在 General → 执行成功，回复原地发到 General（省略 message_thread_id）", async () => {
     const res = await postWebhook(generalUpdate(9200, "/verifyoff"));
     expect(res.status).toBe(200);
     expect(await readProcessed(9200)).toEqual({ status: "processed", attempts: 0 });
     expect((await getVerificationSettings(env.HODOR_DB)).verifyEnabled).toBe(false);
     expect(stub.countOf("sendMessage")).toBe(1);
+    // General 平台怪癖：显式传 message_thread_id=1 会 400「message thread not
+    // found」，省略该字段消息才落到 General（与广播/归档回复同口径）
     expect(stub.callsOf("sendMessage")[0].body).toEqual({
       chat_id: SUPPORT_CHAT_ID,
       text: formatVerifyOffConfirmed(),
-      message_thread_id: 1,
     });
   });
 
-  it("管理员 /verifymode 无参查看在 General → 回复出现在 General（thread 1）", async () => {
+  it("管理员 /verifymode 无参查看在 General → 回复出现在 General（省略 thread 字段）", async () => {
     const res = await postWebhook(generalUpdate(9201, "/verifymode"));
     expect(res.status).toBe(200);
     expect(stub.countOf("sendMessage")).toBe(1);
     const reply = stub.callsOf("sendMessage")[0].body as Record<string, unknown>;
-    expect(reply.message_thread_id).toBe(1);
+    expect(reply.message_thread_id).toBeUndefined();
     expect(reply.text).toBe(formatVerifyModeCurrent(await getVerificationSettings(env.HODOR_DB)));
   });
 
